@@ -33,7 +33,7 @@ CFG.Seller = CFG.Seller or {
     MinPetCountKeep = 0,
     SkipFavorited = true,
     SkipLocked = true,
-    ListingFilterPath = "Nomo/listing_filter.json",
+    ListingFilterPath = "Nomo/listing_filters.json",
 }
 
 CFG.Listings = CFG.Listings or {
@@ -433,7 +433,7 @@ local function saveJson(path, data)
 end
 
 local function getFilterPath()
-    return CFG.Seller.ListingFilterPath or "Nomo/listing_filter.json"
+    return CFG.Seller.ListingFilterPath or "Nomo/listing_filters.json"
 end
 
 --//====================================================--
