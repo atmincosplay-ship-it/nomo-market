@@ -3987,14 +3987,14 @@ end)
 
 local sPet = sniperCtrl:AddSearchDropdown("Pet", getPetList(), "Red Fox")
 local sMax = sniperCtrl:AddInput("Max Price", "6")
-local sWeightMode = sniperCtrl:AddDropdown("Weight Mode", {"Base", "Visual"}, CFG.Sniper.WeightMode or "Base", function(v)
+State.SniperWeightModeInput = sniperCtrl:AddDropdown("Weight Mode", {"Base", "Visual"}, CFG.Sniper.WeightMode or "Base", function(v)
     CFG.Sniper.WeightMode = normalizeSniperWeightMode(v)
     log("SniperWeightMode", CFG.Sniper.WeightMode)
 end)
-local sMinKg = sniperCtrl:AddInput("Min KG", "0", function(v)
+State.SniperMinKgInput = sniperCtrl:AddInput("Min KG", "0", function(v)
     CFG.Sniper.MinWeight = toNumber(v) or 0
 end)
-local sMaxKg = sniperCtrl:AddInput("Max KG", "", function(v)
+State.SniperMaxKgInput = sniperCtrl:AddInput("Max KG", "", function(v)
     CFG.Sniper.MaxWeight = toNumber(v)
 end)
 local sBuyCooldown = sniperCtrl:AddInput("Buy Cooldown", tostring(CFG.Sniper.BuyCooldown or 8), function(v)
@@ -4006,10 +4006,10 @@ end)
 local sPerPet = sniperCtrl:AddInput("Per Pet", tostring(CFG.Sniper.MaxMatchesPerPet or 5), function(v)
     CFG.Sniper.MaxMatchesPerPet = toInt(v) or CFG.Sniper.MaxMatchesPerPet or 5
 end)
-local sConfigPath = sniperCtrl:AddInput("Config Path", getSniperFilterPath(), function(v)
+State.SniperConfigPathInput = sniperCtrl:AddInput("Config Path", getSniperFilterPath(), function(v)
     CFG.Sniper.FilterPath = tostring(v or "")
 end)
-local sWatchlistId = sniperCtrl:AddInput("Watchlist ID", tostring(CFG.Sniper.WatchlistId or "1"), function(v)
+State.SniperWatchlistIdInput = sniperCtrl:AddInput("Watchlist ID", tostring(CFG.Sniper.WatchlistId or "1"), function(v)
     CFG.Sniper.WatchlistId = tostring(v or "1")
 end)
 
@@ -4017,9 +4017,9 @@ local sniperLog = sniperResultSec:AddLog(315)
 
 local function applySniperLimits()
     CFG.Sniper.BuyCooldown = toNumber(sBuyCooldown:Get()) or CFG.Sniper.BuyCooldown or 8
-    CFG.Sniper.WeightMode = normalizeSniperWeightMode(sWeightMode:Get())
-    CFG.Sniper.MinWeight = toNumber(sMinKg:Get()) or 0
-    CFG.Sniper.MaxWeight = toNumber(sMaxKg:Get())
+    CFG.Sniper.WeightMode = normalizeSniperWeightMode(State.SniperWeightModeInput:Get())
+    CFG.Sniper.MinWeight = toNumber(State.SniperMinKgInput:Get()) or 0
+    CFG.Sniper.MaxWeight = toNumber(State.SniperMaxKgInput:Get())
     CFG.Sniper.MaxMatchesShown = toInt(sShow:Get()) or CFG.Sniper.MaxMatchesShown or 20
     CFG.Sniper.MaxMatchesPerPet = toInt(sPerPet:Get()) or CFG.Sniper.MaxMatchesPerPet or 5
 end
@@ -4073,8 +4073,8 @@ sniperCtrl:AddButton("Add Watch", function()
 end)
 
 sniperCtrl:AddButton("Import Config Watchlist", function()
-    CFG.Sniper.FilterPath = tostring(sConfigPath:Get() or getSniperFilterPath())
-    CFG.Sniper.WatchlistId = tostring(sWatchlistId:Get() or "1")
+    CFG.Sniper.FilterPath = tostring(State.SniperConfigPathInput:Get() or getSniperFilterPath())
+    CFG.Sniper.WatchlistId = tostring(State.SniperWatchlistIdInput:Get() or "1")
     importSniperWatchlist(CFG.Sniper.FilterPath)
     refreshSniperLog()
 end, "outline")
