@@ -3658,6 +3658,156 @@ local mutationInput = filterSec:AddSearchDropdown("Mutation", getMutationList(),
 local variantInput = { Get = function() return "Any" end } -- hatch type is part of Pet name, e.g. GIANT Barn Owl
 local maxListedInput = filterSec:AddInput("Per Filter Cap", "5")
 
+State.OpenFilterEditPopup = function(index, managerOverlay)
+    reloadFilters()
+    index = toInt(index)
+    local f = index and State.FilterData.Filters and State.FilterData.Filters[index]
+    if not f then
+        log("Edit filter failed", "bad index", tostring(index))
+        return
+    end
+
+    local overlay = make("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.3,
+        BorderSizePixel = 0,
+        ZIndex = 100,
+    }, win.Gui)
+    local modal = make("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.fromOffset(420, 260),
+        BackgroundColor3 = T.Card,
+        BorderSizePixel = 0,
+        ZIndex = 101,
+    }, overlay)
+    corner(modal, 10); stroke(modal); pad(modal, 12)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 28),
+        BackgroundTransparency = 1,
+        Text = "Edit Filter - " .. tostring(f.Pet or "?"),
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 102,
+    }, modal)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 50),
+        Position = UDim2.fromOffset(0, 34),
+        BackgroundTransparency = 1,
+        Text = string.format("Base KG %s-%s | Age %s-%s | Mutation %s",
+            tostring(f.MinWeight or 0),
+            tostring(f.MaxWeight or "?"),
+            tostring(f.MinLevel or 1),
+            tostring(f.MaxLevel or 100),
+            tostring(f.Mutation or "Any")
+        ),
+        TextColor3 = T.Sub,
+        Font = Enum.Font.Code,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextWrapped = true,
+        ZIndex = 102,
+    }, modal)
+
+    make("TextLabel", {
+        Size = UDim2.new(0, 120, 0, 26),
+        Position = UDim2.fromOffset(0, 92),
+        BackgroundTransparency = 1,
+        Text = "Price",
+        TextColor3 = T.Sub,
+        Font = Enum.Font.Gotham,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 102,
+    }, modal)
+    local priceBox = make("TextBox", {
+        Size = UDim2.new(1, -130, 0, 26),
+        Position = UDim2.fromOffset(130, 92),
+        BackgroundColor3 = T.Card2,
+        Text = tostring(f.Price or ""),
+        TextColor3 = T.Text,
+        Font = Enum.Font.Gotham,
+        TextSize = 12,
+        ClearTextOnFocus = false,
+        BorderSizePixel = 0,
+        ZIndex = 102,
+    }, modal)
+    corner(priceBox, 6); stroke(priceBox); pad(priceBox, 0, 0, 6, 6)
+
+    make("TextLabel", {
+        Size = UDim2.new(0, 120, 0, 26),
+        Position = UDim2.fromOffset(0, 126),
+        BackgroundTransparency = 1,
+        Text = "Max Listing",
+        TextColor3 = T.Sub,
+        Font = Enum.Font.Gotham,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 102,
+    }, modal)
+    local maxBox = make("TextBox", {
+        Size = UDim2.new(1, -130, 0, 26),
+        Position = UDim2.fromOffset(130, 126),
+        BackgroundColor3 = T.Card2,
+        Text = tostring(f.MaxListedPet or 5),
+        TextColor3 = T.Text,
+        Font = Enum.Font.Gotham,
+        TextSize = 12,
+        ClearTextOnFocus = false,
+        BorderSizePixel = 0,
+        ZIndex = 102,
+    }, modal)
+    corner(maxBox, 6); stroke(maxBox); pad(maxBox, 0, 0, 6, 6)
+
+    local saveBtn = make("TextButton", {
+        Size = UDim2.fromOffset(130, 30),
+        Position = UDim2.new(1, -272, 1, -34),
+        BackgroundColor3 = T.Accent,
+        Text = "Save",
+        TextColor3 = Color3.new(1, 1, 1),
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 102,
+    }, modal)
+    corner(saveBtn, 7)
+    local cancelBtn = make("TextButton", {
+        Size = UDim2.fromOffset(130, 30),
+        Position = UDim2.new(1, -134, 1, -34),
+        BackgroundColor3 = T.Card2,
+        Text = "Cancel",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 102,
+    }, modal)
+    corner(cancelBtn, 7); stroke(cancelBtn)
+
+    cancelBtn.Activated:Connect(function()
+        overlay:Destroy()
+    end)
+    saveBtn.Activated:Connect(function()
+        reloadFilters()
+        local row = State.FilterData.Filters and State.FilterData.Filters[index]
+        if row then
+            row.Price = clampPrice(priceBox.Text) or row.Price
+            row.MaxListedPet = toInt(maxBox.Text) or row.MaxListedPet or 5
+            saveFilters()
+            log("Updated filter", tostring(index), tostring(row.Pet or "?"), "price", tostring(row.Price), "max", tostring(row.MaxListedPet))
+            refreshSellerLog(true)
+        end
+        overlay:Destroy()
+        if managerOverlay then managerOverlay:Destroy() end
+        State.OpenFilterManager()
+    end)
+end
+
 State.OpenFilterManager = function()
     local overlay = make("Frame", {
         Size = UDim2.new(1, 0, 1, 0),
@@ -3725,14 +3875,15 @@ State.OpenFilterManager = function()
             Size = UDim2.new(1, -116, 1, 0),
             Position = UDim2.fromOffset(8, 0),
             BackgroundTransparency = 1,
-            Text = string.format("%02d. %s | %s | Base %s-%s | Age %s-%s | %s",
+            Text = string.format("%02d. %s | Price %s | Base KG %s-%s | Age %s-%s | Max %s | %s",
                 i,
                 tostring(f.Pet or "?"),
                 tostring(f.Price or "?"),
                 tostring(f.MinWeight or 0),
                 tostring(f.MaxWeight or "?"),
-                tostring(f.MinAge or 0),
-                tostring(f.MaxAge or "?"),
+                tostring(f.MinLevel or 1),
+                tostring(f.MaxLevel or 100),
+                tostring(f.MaxListedPet or 5),
                 tostring(f.Mutation or "Any")
             ),
             TextColor3 = T.Text,
@@ -3768,16 +3919,7 @@ State.OpenFilterManager = function()
         corner(delBtn, 6)
 
         editBtn.Activated:Connect(function()
-            petInput:Set(f.Pet or "")
-            priceInput:Set(f.Price or "")
-            minKgInput:Set(f.MinWeight or "")
-            maxKgInput:Set(f.MaxWeight or "")
-            minAgeInput:Set(f.MinAge or "")
-            maxAgeInput:Set(f.MaxAge or "")
-            mutationInput:Set(f.Mutation or "Any")
-            maxListedInput:Set(f.MaxListed or f.PerFilterCap or "")
-            log("Loaded filter for edit", tostring(f.Pet or "?"), "index", tostring(i))
-            overlay:Destroy()
+            State.OpenFilterEditPopup(i, overlay)
         end)
         delBtn.Activated:Connect(function()
             deleteFilter(i)
@@ -3884,7 +4026,7 @@ refreshSellerLog = function(showCandidates)
             break
         end
         table.insert(lines, string.format(
-            "%02d. %s | price %s | BaseKG %s-%s | Age %s-%s | Mut %s | Cap %s",
+            "%02d. %s | Price %s | Base KG %s-%s | Age %s-%s | Mut %s | Max %s",
             i,
             f.Pet,
             tostring(f.Price),
@@ -3893,7 +4035,7 @@ refreshSellerLog = function(showCandidates)
             tostring(f.MinLevel),
             tostring(f.MaxLevel),
             tostring(f.Mutation or "Any"),
-            tostring(f.MaxListedPet or 0)
+            tostring(f.MaxListedPet or 5)
         ))
     end
 
