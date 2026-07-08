@@ -1863,25 +1863,28 @@ State.WebhookEmbedForListing = function(kind, l, extra)
     local userValue = tostring(extra.User or l.OwnerName or "")
     if kind == "sold" then userValue = tostring(extra.User or "") end
     local displayKg = tonumber(pet.VisualWeight or pet.BaseWeight) or 0
+    local iconUrl = "https://www.roblox.com/asset-thumbnail/image?assetId=" .. tostring(game.PlaceId) .. "&width=150&height=150&format=png"
     local fields = {}
 
     if userValue ~= "" and userValue ~= "Unknown" then
         table.insert(fields, {name = userLabel, value = userValue, inline = false})
     end
-    table.insert(fields, {name = priceLabel, value = commaNumber(l.Price) .. " Tokens", inline = true})
+    table.insert(fields, {name = priceLabel, value = "**" .. commaNumber(l.Price) .. " Tokens**", inline = true})
     table.insert(fields, {name = "Mutation", value = tostring(pet.Mutation or "Normal"), inline = true})
     table.insert(fields, {name = "BaseWeight", value = fmtKg(pet.BaseWeight), inline = true})
     table.insert(fields, {name = "Age", value = tostring(pet.Age or "?"), inline = true})
     table.insert(fields, {name = "Token Balance", value = commaNumber(getTokenBalance()) .. " Tokens", inline = true})
     table.insert(fields, {name = "Pet Inventory", value = tostring(#getOwnPetsFromData()) .. " pets", inline = true})
-    table.insert(fields, {name = "Server", value = "`" .. tostring(game.PlaceId) .. ":" .. tostring(game.JobId) .. "`", inline = false})
+    table.insert(fields, {name = "Server", value = "```" .. tostring(game.PlaceId) .. ":" .. tostring(game.JobId) .. "```", inline = false})
 
     return {
         username = "NOMO Market",
+        avatar_url = iconUrl,
         embeds = {{
             title = string.format("%s - %s [Age %s] [%.2f KG]", titlePrefix, tostring(pet.Name or "?"), tostring(pet.Age or "?"), displayKg),
             color = color,
             fields = fields,
+            thumbnail = {url = iconUrl},
             footer = {text = "NOMO Market - " .. VERSION},
             timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
         }},
