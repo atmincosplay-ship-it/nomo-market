@@ -3572,11 +3572,6 @@ sellerCtrl:AddInput("Scan Interval", tostring(CFG.Seller.ScanInterval), function
     CFG.Seller.ScanInterval = toNumber(v) or CFG.Seller.ScanInterval
 end)
 
-sellerCtrl:AddDropdown("Weight Filter", {"Base", "Visual"}, CFG.Seller.WeightMode or "Base", function(v)
-    CFG.Seller.WeightMode = tostring(v or "Base")
-    log("WeightMode", CFG.Seller.WeightMode)
-end)
-
 sellerCtrl:AddButton("LIST UNTIL BOOTH FULL", function()
     CFG.Seller.BoothCap = 50
     CFG.Seller.ListOnceMax = 50
@@ -3629,6 +3624,11 @@ end, "outline")
 local sellerLog
 local diagnosePetFilter
 
+filterSec:AddDropdown("Listing Weight Mode", {"Base", "Visual"}, CFG.Seller.WeightMode or "Base", function(v)
+    CFG.Seller.WeightMode = tostring(v or "Base")
+    log("ListingWeightMode", CFG.Seller.WeightMode)
+end)
+
 local petInput = filterSec:AddSearchDropdown("Pet", getPetList(), "Ankylosaurus")
 filterSec:AddButton("Diagnose This Pet", function()
     if sellerLog and diagnosePetFilter then
@@ -3657,7 +3657,7 @@ diagnosePetFilter = function(petName)
 
     local lines = {
         "Diagnose: " .. petName,
-        "WeightMode: " .. tostring(CFG.Seller.WeightMode or "Base"),
+        "Listing Weight Mode: " .. tostring(CFG.Seller.WeightMode or "Base"),
         "Already in booth: " .. tostring(myCounts[target] or 0),
         "------------------------------",
         "Owned matching name:",
@@ -3726,7 +3726,7 @@ refreshSellerLog = function(showCandidates)
         "Filters: " .. tostring(#filters),
         "Booth listings: " .. tostring(#myListings) .. " / " .. tostring(CFG.Seller.BoothCap or 50),
         "Listed this run: " .. tostring(State.ListedThisSession or 0),
-        "Weight filter: " .. tostring(CFG.Seller.WeightMode or "Base") .. " KG",
+        "Listing weight mode: " .. tostring(CFG.Seller.WeightMode or "Base") .. " KG",
         "Per filter cap: enabled",
         "Auto smart rebuild: " .. tostring(CFG.Seller.AutoSmartRebuildOnStart),
         "Remote config: " .. tostring(CFG.Seller.RemoteConfigEnabled) .. " | " .. tostring((CFG.Seller.RemoteConfigURL ~= "" and "URL set") or "no URL"),
