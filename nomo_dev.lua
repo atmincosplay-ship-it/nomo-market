@@ -58,8 +58,8 @@ CFG.Sniper = CFG.Sniper or {
 CFG.Webhook = CFG.Webhook or {
     Enabled = false,
     Url = "",
-    SnipeUrl = "",
-    SoldUrl = "",
+    SnipeUrl = tostring(getgenv().nomo_sniper_webhook or getgenv().NOMO_SNIPER_WEBHOOK or ""),
+    SoldUrl = tostring(getgenv().nomo_market_webhook or getgenv().NOMO_MARKET_WEBHOOK or ""),
     IconUrl = "",
     PetSold = true,
     SuccessfulSnipe = true,
@@ -118,6 +118,17 @@ if CFG.Sniper.ScanInterval < 0.5 then CFG.Sniper.ScanInterval = 0.5 end
 CFG.Performance = CFG.Performance or {}
 CFG.Performance.ListingCacheSeconds = tonumber(CFG.Performance.ListingCacheSeconds) or 0.75
 if CFG.Performance.ListingCacheSeconds < 0.25 then CFG.Performance.ListingCacheSeconds = 0.25 end
+CFG.Performance.NoUI = CFG.Performance.NoUI == true or tostring(getgenv().mode or ""):lower() == "noui" or getgenv().noui == true
+CFG.Performance.FpsLimit = tonumber(getgenv().fps_limit) or tonumber(CFG.Performance.FpsLimit) or 0
+CFG.Performance.FpsLimitSet = getgenv().fps_limit ~= nil or CFG.Performance.FpsLimitSet == true
+CFG.Performance.RemovePlants = CFG.Performance.RemovePlants == true or getgenv().remove_plants == true
+CFG.Performance.RemoveWeatherVisuals = CFG.Performance.RemoveWeatherVisuals == true or getgenv().remove_weather_visuals == true
+CFG.Performance.FullPerformanceMode = CFG.Performance.FullPerformanceMode == true or getgenv().full_performance_mode == true
+if CFG.Performance.FullPerformanceMode then
+    CFG.Performance.NoUI = true
+    CFG.Performance.RemovePlants = true
+    CFG.Performance.RemoveWeatherVisuals = true
+end
 CFG.Sniper.BuyCooldown = 0
 CFG.Sniper.WatchlistId = tostring(CFG.Sniper.WatchlistId or "1")
 CFG.Sniper.WeightMode = CFG.Sniper.WeightMode or "Base"
@@ -127,6 +138,12 @@ CFG.UI = CFG.UI or {
     FilterGameSpam = true,
 }
 CFG.UI.MaxDropdownRows = CFG.UI.MaxDropdownRows or 80
+if tostring(CFG.Webhook.SnipeUrl or "") == "" then
+    CFG.Webhook.SnipeUrl = tostring(getgenv().nomo_sniper_webhook or getgenv().NOMO_SNIPER_WEBHOOK or "")
+end
+if tostring(CFG.Webhook.SoldUrl or "") == "" then
+    CFG.Webhook.SoldUrl = tostring(getgenv().nomo_market_webhook or getgenv().NOMO_MARKET_WEBHOOK or "")
+end
 
 --//====================================================--
 --// Stop old UI/loop
@@ -3736,7 +3753,117 @@ end
 --// Uses private NOMO Hub UI V3.2
 --//====================================================--
 
-local win = Library:CreateWindow({
+State.NoopWidget = function(default)
+    local obj = {}
+    setmetatable(obj, {
+        __index = function(_, key)
+            if key == "Get" then
+                return function() return default or "" end
+            elseif key == "Set" or key == "Add" or key == "Clear" or key == "Refresh" then
+                return function() end
+            end
+            return function() return State.NoopWidget(default) end
+        end,
+    })
+    return obj
+end
+
+State.ApplyPerformanceMode = function()
+    if CFG.Performance.FpsLimitSet and type(setfpscap) == "function" then
+        pcall(setfpscap, CFG.Performance.FpsLimit)
+    end
+
+    if CFG.Performance.FullPerformanceMode then
+        pcall(function()
+            game:GetService("RunService"):Set3dRenderingEnabled(false)
+        end)
+        pcall(function()
+            local lighting = game:GetService("Lighting")
+            lighting.GlobalShadows = false
+            lighting.FogEnd = 100000
+        end)
+    end
+
+    if CFG.Performance.RemoveWeatherVisuals or CFG.Performance.RemovePlants then
+        pcall(function()
+            for _, inst in ipairs(workspace:GetDescendants()) do
+                local className = inst.ClassName
+                local name = tostring(inst.Name or ""):lower()
+                if CFG.Performance.RemoveWeatherVisuals and (className == "ParticleEmitter" or className == "Trail" or className == "Beam" or className == "Smoke" or className == "Fire" or className == "Sparkles") then
+                    inst.Enabled = false
+                elseif CFG.Performance.RemovePlants and (name:find("plant", 1, true) or name:find("fruit", 1, true)) and inst:IsA("BasePart") then
+                    inst.LocalTransparencyModifier = 1
+                    inst.CanCollide = false
+                elseif CFG.Performance.FullPerformanceMode and (className == "Decal" or className == "Texture") then
+                    inst.Transparency = 1
+                end
+            end
+        end)
+    end
+end
+
+State.CreateHeadlessWindow = function()
+    State.ApplyPerformanceMode()
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "NomoHeadless"
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+
+    local bg = Instance.new("Frame")
+    bg.Size = UDim2.fromScale(1, 1)
+    bg.BackgroundColor3 = Color3.new(0, 0, 0)
+    bg.BorderSizePixel = 0
+    bg.Parent = gui
+
+    local panel = Instance.new("TextLabel")
+    panel.AnchorPoint = Vector2.new(0.5, 0)
+    panel.Position = UDim2.new(0.5, 0, 0, 26)
+    panel.Size = UDim2.fromOffset(520, 220)
+    panel.BackgroundTransparency = 1
+    panel.TextColor3 = Color3.fromRGB(235, 241, 255)
+    panel.Font = Enum.Font.GothamBold
+    panel.TextSize = 24
+    panel.TextWrapped = true
+    panel.TextYAlignment = Enum.TextYAlignment.Top
+    panel.Text = "NOMO Market loading..."
+    panel.Parent = gui
+    State.PerfStatsLabel = panel
+
+    local section = State.NoopWidget()
+    local page = State.NoopWidget()
+    page.AddSection = function() return section end
+    page.AddSectionInRow = function() return section end
+
+    return {
+        Gui = gui,
+        Pills = {Status = State.NoopWidget(), Booth = State.NoopWidget(), Balance = State.NoopWidget()},
+        CreatePage = function() return page end,
+        SelectPage = function() end,
+    }
+end
+
+State.UpdatePerfStats = function()
+    if not State.PerfStatsLabel then return end
+    local session = math.floor(os.clock())
+    local mins = math.floor(session / 60)
+    local secs = session % 60
+    State.PerfStatsLabel.Text = table.concat({
+        "NOMO MARKET",
+        "Mode: PERFORMANCE / NO UI",
+        "Booth: " .. tostring(State.LastBooth and State.LastBooth.Id or "?"),
+        "Tokens: " .. commaNumber(getTokenBalance()),
+        "Listed Session: " .. tostring(State.ListedThisSession or 0),
+        "Listings Cached: " .. tostring(type(State.ListingsCache) == "table" and #State.ListingsCache or 0),
+        "Sniper Matches: " .. tostring(type(State.LastSniperMatches) == "table" and #State.LastSniperMatches or 0),
+        string.format("Session: %dm %02ds", mins, secs),
+        "Version: " .. VERSION,
+    }, "\n")
+end
+
+local win = (CFG.Performance.NoUI and State.CreateHeadlessWindow() or Library:CreateWindow({
     TitleAccent = "NOMO",
     Title = "MARKET",
     Subtitle = "SELLER LITE",
@@ -3750,7 +3877,11 @@ local win = Library:CreateWindow({
     -- Optional later:
     -- MiniImage = "rbxassetid://YOUR_IMAGE_ID",
     -- MiniImage = "Nomo/blue_rose.png",
-})
+}))
+
+if not CFG.Performance.NoUI then
+    State.ApplyPerformanceMode()
+end
 
 win.Pills.Status:Set("Ready", T.Green)
 win.Pills.Booth:Set("Data", T.Accent)
@@ -3774,6 +3905,7 @@ local function refreshPills()
     local boothText = best and best.Status or "No Booth"
     win.Pills.Booth:Set(boothText, boothText == "MINE" and T.Green or (boothText == "FREE" and T.Yellow or T.Sub))
     win.Pills.Balance:Set(commaNumber(getTokenBalance()), T.Green)
+    State.UpdatePerfStats()
 end
 
 
