@@ -3365,8 +3365,8 @@ function Library:CreateWindow(cfg)
 				function log:Add(text)
 					make("TextLabel", {
 						Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1,
-						RichText = true,
-						Text = ('<font color="#5a8dee">%s</font>  <font color="#a8b6cc">%s</font>'):format(os.date("%H:%M:%S"), text),
+						RichText = false,
+						Text = ("%s  %s"):format(os.date("%H:%M:%S"), tostring(text or "")),
 						Font = Enum.Font.Code, TextSize = 11, TextColor3 = T.Sub,
 						TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
 					}, logFrame)
