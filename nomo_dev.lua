@@ -58,6 +58,8 @@ CFG.Sniper = CFG.Sniper or {
 CFG.Webhook = CFG.Webhook or {
     Enabled = false,
     Url = "",
+    SnipeUrl = "",
+    SoldUrl = "",
     PetSold = true,
     SuccessfulSnipe = true,
 }
@@ -501,9 +503,13 @@ State.LoadRuntimeSettings = function()
     if type(data.Webhook) == "table" then
         if data.Webhook.Enabled ~= nil then CFG.Webhook.Enabled = data.Webhook.Enabled == true end
         if type(data.Webhook.Url) == "string" then CFG.Webhook.Url = data.Webhook.Url end
+        if type(data.Webhook.SnipeUrl) == "string" then CFG.Webhook.SnipeUrl = data.Webhook.SnipeUrl end
+        if type(data.Webhook.SoldUrl) == "string" then CFG.Webhook.SoldUrl = data.Webhook.SoldUrl end
         if data.Webhook.PetSold ~= nil then CFG.Webhook.PetSold = data.Webhook.PetSold == true end
         if data.Webhook.SuccessfulSnipe ~= nil then CFG.Webhook.SuccessfulSnipe = data.Webhook.SuccessfulSnipe == true end
     end
+    if tostring(CFG.Webhook.SnipeUrl or "") == "" then CFG.Webhook.SnipeUrl = tostring(CFG.Webhook.Url or "") end
+    if tostring(CFG.Webhook.SoldUrl or "") == "" then CFG.Webhook.SoldUrl = tostring(CFG.Webhook.Url or "") end
     if CFG.Seller.AutoList then
         CFG.Seller.PreviewOnly = false
     end
@@ -530,6 +536,8 @@ State.SaveRuntimeSettings = function()
         Webhook = {
             Enabled = CFG.Webhook.Enabled == true,
             Url = tostring(CFG.Webhook.Url or ""),
+            SnipeUrl = tostring(CFG.Webhook.SnipeUrl or ""),
+            SoldUrl = tostring(CFG.Webhook.SoldUrl or ""),
             PetSold = CFG.Webhook.PetSold == true,
             SuccessfulSnipe = CFG.Webhook.SuccessfulSnipe == true,
         },
@@ -1790,20 +1798,27 @@ local function listingToPseudoPet(l)
     }
 end
 
-State.WebhookPost = function(payload)
+State.WebhookPost = function(payload, route)
     if not CFG.Webhook or CFG.Webhook.Enabled ~= true then return false end
     local url = tostring(CFG.Webhook.Url or "")
+    if route == "snipe" then
+        url = tostring(CFG.Webhook.SnipeUrl or CFG.Webhook.Url or "")
+    elseif route == "sold" then
+        url = tostring(CFG.Webhook.SoldUrl or CFG.Webhook.Url or "")
+    end
     if url == "" then return false end
 
-    table.insert(State.WebhookQueue, payload)
+    table.insert(State.WebhookQueue, {Payload = payload, Url = url})
     if State.WebhookBusy then return true end
     State.WebhookBusy = true
 
     task.spawn(function()
         while #State.WebhookQueue > 0 and State.Running do
             local item = table.remove(State.WebhookQueue, 1)
+            local payload = type(item) == "table" and item.Payload or item
+            local sendUrl = type(item) == "table" and item.Url or url
             local ok, body = pcall(function()
-                return HttpService:JSONEncode(item)
+                return HttpService:JSONEncode(payload)
             end)
             if ok then
                 local req = (type(request) == "function" and request)
@@ -1813,7 +1828,7 @@ State.WebhookPost = function(payload)
                 if req then
                     local sent, err = pcall(function()
                         return req({
-                            Url = url,
+                            Url = sendUrl,
                             Method = "POST",
                             Headers = {["Content-Type"] = "application/json"},
                             Body = body,
@@ -1822,7 +1837,7 @@ State.WebhookPost = function(payload)
                     if not sent then log("Webhook failed", tostring(err)) end
                 else
                     local sent, err = pcall(function()
-                        return HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
+                        return HttpService:PostAsync(sendUrl, body, Enum.HttpContentType.ApplicationJson)
                     end)
                     if not sent then log("Webhook failed", tostring(err)) end
                 end
@@ -1870,13 +1885,13 @@ end
 
 State.SendSoldWebhook = function(l)
     if not CFG.Webhook or CFG.Webhook.Enabled ~= true or CFG.Webhook.PetSold ~= true then return false end
-    return State.WebhookPost(State.WebhookEmbedForListing("sold", l, {}))
+    return State.WebhookPost(State.WebhookEmbedForListing("sold", l, {}), "sold")
 end
 
 State.SendSnipeWebhook = function(match)
     if not CFG.Webhook or CFG.Webhook.Enabled ~= true or CFG.Webhook.SuccessfulSnipe ~= true then return false end
     if type(match) ~= "table" or type(match.Listing) ~= "table" then return false end
-    return State.WebhookPost(State.WebhookEmbedForListing("snipe", match.Listing, {User = match.Listing.OwnerName}))
+    return State.WebhookPost(State.WebhookEmbedForListing("snipe", match.Listing, {User = match.Listing.OwnerName}), "snipe")
 end
 
 State.TrackSoldListings = function(myListings)
@@ -4930,6 +4945,75 @@ sniperCtrl:AddButton("BUY FIRST (blocked if DryRun)", function()
     State.RefreshSniperLog()
 end, "outline")
 
+--// WEBHOOK PAGE
+State.WebhookPage = win:CreatePage("Webhook")
+State.WebhookSec = State.WebhookPage:AddSection("Webhook Configuration")
+State.WebhookRouteSec = State.WebhookPage:AddSection("Routes")
+
+State.WebhookSec:AddToggle("Enable Webhook", CFG.Webhook.Enabled == true, function(v)
+    CFG.Webhook.Enabled = v
+    State.SaveRuntimeSettings()
+    log("Webhook", tostring(v))
+end)
+
+State.WebhookSec:AddToggle("Successful Snipes", CFG.Webhook.SuccessfulSnipe ~= false, function(v)
+    CFG.Webhook.SuccessfulSnipe = v
+    State.SaveRuntimeSettings()
+end)
+
+State.WebhookSec:AddToggle("Booth Sales", CFG.Webhook.PetSold ~= false, function(v)
+    CFG.Webhook.PetSold = v
+    State.SaveRuntimeSettings()
+end)
+
+State.SnipeWebhookUrlInput = State.WebhookRouteSec:AddInput("Snipe Webhook URL", tostring(CFG.Webhook.SnipeUrl or CFG.Webhook.Url or ""), function(v)
+    CFG.Webhook.SnipeUrl = tostring(v or "")
+    State.SaveRuntimeSettings()
+end)
+
+State.SoldWebhookUrlInput = State.WebhookRouteSec:AddInput("Booth Sale Webhook URL", tostring(CFG.Webhook.SoldUrl or CFG.Webhook.Url or ""), function(v)
+    CFG.Webhook.SoldUrl = tostring(v or "")
+    State.SaveRuntimeSettings()
+end)
+
+State.WebhookRouteSec:AddButton("Test Snipe Webhook", function()
+    CFG.Webhook.SnipeUrl = State.SnipeWebhookUrlInput:Get()
+    CFG.Webhook.SoldUrl = State.SoldWebhookUrlInput:Get()
+    State.SaveRuntimeSettings()
+    local wasEnabled = CFG.Webhook.Enabled
+    CFG.Webhook.Enabled = true
+    local sent = State.WebhookPost({
+        username = "NOMO Market",
+        embeds = {{
+            title = "NOMO snipe webhook test",
+            color = 16731389,
+            description = "Snipe webhook is connected.",
+            footer = {text = "NOMO " .. VERSION},
+        }},
+    }, "snipe")
+    CFG.Webhook.Enabled = wasEnabled
+    log("Snipe webhook test sent", tostring(sent))
+end, "outline")
+
+State.WebhookRouteSec:AddButton("Test Sale Webhook", function()
+    CFG.Webhook.SnipeUrl = State.SnipeWebhookUrlInput:Get()
+    CFG.Webhook.SoldUrl = State.SoldWebhookUrlInput:Get()
+    State.SaveRuntimeSettings()
+    local wasEnabled = CFG.Webhook.Enabled
+    CFG.Webhook.Enabled = true
+    local sent = State.WebhookPost({
+        username = "NOMO Market",
+        embeds = {{
+            title = "NOMO booth sale webhook test",
+            color = 16766720,
+            description = "Booth sale webhook is connected.",
+            footer = {text = "NOMO " .. VERSION},
+        }},
+    }, "sold")
+    CFG.Webhook.Enabled = wasEnabled
+    log("Sale webhook test sent", tostring(sent))
+end, "outline")
+
 --// SETTINGS PAGE
 State.SettingsPage = win:CreatePage("Settings")
 State.SettingSec = State.SettingsPage:AddSection("Settings")
@@ -4952,45 +5036,6 @@ State.SettingSec:AddToggle("Filter Game Warn Spam", CFG.UI.FilterGameSpam ~= fal
         log("WarnFilter disabled after next reload")
     end
 end)
-
-State.SettingSec:AddToggle("Enable Webhook", CFG.Webhook.Enabled == true, function(v)
-    CFG.Webhook.Enabled = v
-    State.SaveRuntimeSettings()
-    log("Webhook", tostring(v))
-end)
-
-State.WebhookUrlInput = State.SettingSec:AddInput("Webhook URL", tostring(CFG.Webhook.Url or ""), function(v)
-    CFG.Webhook.Url = tostring(v or "")
-    State.SaveRuntimeSettings()
-end)
-
-State.SettingSec:AddToggle("Webhook Pet Sold", CFG.Webhook.PetSold ~= false, function(v)
-    CFG.Webhook.PetSold = v
-    State.SaveRuntimeSettings()
-end)
-
-State.SettingSec:AddToggle("Webhook Snipes", CFG.Webhook.SuccessfulSnipe ~= false, function(v)
-    CFG.Webhook.SuccessfulSnipe = v
-    State.SaveRuntimeSettings()
-end)
-
-State.SettingSec:AddButton("Test Webhook", function()
-    CFG.Webhook.Url = State.WebhookUrlInput:Get()
-    State.SaveRuntimeSettings()
-    local wasEnabled = CFG.Webhook.Enabled
-    CFG.Webhook.Enabled = true
-    local sent = State.WebhookPost({
-        username = "NOMO Market",
-        embeds = {{
-            title = "NOMO webhook test",
-            color = 3447003,
-            description = "Webhook is connected.",
-            footer = {text = "NOMO " .. VERSION},
-        }},
-    })
-    CFG.Webhook.Enabled = wasEnabled
-    log("Webhook test sent", tostring(sent))
-end, "outline")
 
 State.SettingSec:AddButton("Reload Pet API List", function()
     loadGamePetList()
