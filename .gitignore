@@ -7,5 +7,6 @@
 !NOMO_MARKET_UI_TEST.lua
 !nomo_stable.lua
 !nomo_obsidian.lua
+!nomo_dev.lua
 !.gitignore
 !README.md
