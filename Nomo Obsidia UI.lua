@@ -7,16 +7,6 @@
 local VERSION = "V7.0 SNIPER SAFETY"
 print("[NOMO] Booting " .. VERSION)
 
-local NOMO_MODE = tostring(getgenv().NOMO_MODE or getgenv().mode or "full"):lower()
-if NOMO_MODE == "no_ui" or NOMO_MODE == "none" or NOMO_MODE == "headless" then
-    NOMO_MODE = "noui"
-end
-if NOMO_MODE ~= "full" and NOMO_MODE ~= "status" and NOMO_MODE ~= "noui" then
-    NOMO_MODE = "full"
-end
-getgenv().NOMO_MODE = NOMO_MODE
-print("[NOMO] Mode:", NOMO_MODE)
-
 --//====================================================--
 --// Config
 --//====================================================--
@@ -151,7 +141,6 @@ local State = {
     LastSellerScanAt = 0,
     LastSniperScanAt = 0,
     LastAutoClaimAt = 0,
-    LastUIRefreshAt = 0,
     LastListAt = 0,
     ListTimes = {},
     ListedThisSession = 0,
@@ -823,22 +812,6 @@ local function claimBestFreeBooth()
 
     log("Claim not verified", target.Id)
     return false
-end
-
-local function autoClaimTick(reason)
-    if not CFG.Booth.AutoClaim then
-        return false
-    end
-
-    local target, status = findBestBooth(true)
-    log("AutoClaim check", tostring(reason or "loop"), tostring(status), target and target.Id or "none")
-
-    if status == "MINE" then
-        State.LastBooth = target
-        return true
-    end
-
-    return claimBestFreeBooth()
 end
 
 local function hasOwnBooth(force)
@@ -2285,764 +2258,1772 @@ local function buyFirstMatch()
 end
 
 
+-- NOMO-style Hub UI V3.2 (private Obsidian-style, mini presets)
+-- Single file: library + demo (Seller page) at the bottom.
 
--- ============================================================
---  NOMO MARKET  |  Holy PRO style  |  Blue #6366F1 accent
---  Obsidian library (deividcomsono/Obsidian)
--- ============================================================
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
 
-local refreshSellerLog = function() end
-local refreshMyListingsLog = function() end
-local refreshMarketSample = function() end
-local refreshSniperLog = function() end
-local applySniperLimits = function() end
-local NOMO_NOTIFY = function() end
+local SCALE = 0.85 -- readable size for Redfinger / 1280x720
 
-if NOMO_MODE == "full" then
-print("[NOMO UI] Loading Obsidian...")
+local T = {
+	BG        = Color3.fromRGB(8, 12, 22),
+	Sidebar   = Color3.fromRGB(11, 16, 28),
+	Card      = Color3.fromRGB(13, 19, 34),
+	Card2     = Color3.fromRGB(18, 26, 44),
+	Border    = Color3.fromRGB(32, 46, 78),
+	Accent    = Color3.fromRGB(56, 132, 255),
+	AccentSoft= Color3.fromRGB(19, 34, 62),
+	Text      = Color3.fromRGB(230, 237, 248),
+	Sub       = Color3.fromRGB(122, 138, 166),
+	Green     = Color3.fromRGB(52, 199, 123),
+	Yellow    = Color3.fromRGB(235, 190, 80),
+	Red       = Color3.fromRGB(240, 85, 85),
+	Toggle0   = Color3.fromRGB(45, 55, 75),
+}
 
-local REPO_URL = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
-local HttpSvc  = game:GetService("HttpService")
-
-local ok1, Library = pcall(function() return loadstring(game:HttpGet(REPO_URL.."Library.lua"))() end)
-if not ok1 or not Library then warn("[NOMO UI] Library failed:", tostring(Library)); NOMO_MODE = "noui" else
-print("[NOMO UI] Library OK")
-NOMO_NOTIFY = function(opts)
-    pcall(function()
-        Library:Notify(opts)
-    end)
+local function make(class, props, parent)
+	local o = Instance.new(class)
+	for k, v in pairs(props) do o[k] = v end
+	o.Parent = parent
+	return o
+end
+local function corner(p, r) make("UICorner", {CornerRadius = UDim.new(0, r or 8)}, p) end
+local function stroke(p, c, tr) make("UIStroke", {Color = c or T.Border, Thickness = 1, Transparency = tr or 0}, p) end
+local function pad(p, t, b, l, r)
+	make("UIPadding", {
+		PaddingTop = UDim.new(0, t), PaddingBottom = UDim.new(0, b or t),
+		PaddingLeft = UDim.new(0, l or t), PaddingRight = UDim.new(0, r or l or t),
+	}, p)
+end
+local function vlist(p, gap)
+	return make("UIListLayout", {Padding = UDim.new(0, gap or 6), SortOrder = Enum.SortOrder.LayoutOrder}, p)
 end
 
-local ok2, ThemeManager = pcall(function() return loadstring(game:HttpGet(REPO_URL.."addons/ThemeManager.lua"))() end)
-local ok3, SaveManager  = pcall(function() return loadstring(game:HttpGet(REPO_URL.."addons/SaveManager.lua"))() end)
+local function clampGuiPosition(frame, pos)
+	local cam = workspace.CurrentCamera
+	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
 
--- ── UI Settings ──────────────────────────────────────────────
-local UIState = { ShowUIOnLoad = true }
-pcall(function()
-    if type(isfile)=="function" and isfile("Nomo/UISettings.json") then
-        local d = HttpSvc:JSONDecode(readfile("Nomo/UISettings.json"))
-        if type(d.ShowUIOnLoad)=="boolean" then UIState.ShowUIOnLoad = d.ShowUIOnLoad end
-    end
-end)
+	-- AbsoluteSize can ignore UIScale in some executors, so multiply by SCALE.
+	local sx = (frame.AbsoluteSize.X > 0 and frame.AbsoluteSize.X or 820) * (SCALE or 1)
+	local sy = (frame.AbsoluteSize.Y > 0 and frame.AbsoluteSize.Y or 500) * (SCALE or 1)
 
--- ── Accent / color constants (blue #6366F1) ──────────────────
-local ACCENT   = "rgb(99,102,241)"
-local ACCENT_G = "rgb(129,140,248)"   -- lighter
-local DIM      = "rgb(100,100,120)"
-local WHITE    = "rgb(232,230,240)"
-local GREEN    = "rgb(74,222,128)"
-local RED_C    = "rgb(248,113,113)"
-local YELLOW   = "rgb(250,204,21)"
+	local maxX = math.max(0, vp.X - sx - 6)
+	local maxY = math.max(0, vp.Y - sy - 6)
 
-local function C(text, color, bold)
-    if bold then return '<font color="'..color..'"><b>'..text..'</b></font>' end
-    return '<font color="'..color..'">'..text..'</font>'
+	local x = math.clamp(pos.X.Offset, 0, maxX)
+	local y = math.clamp(pos.Y.Offset, 0, maxY)
+
+	return UDim2.new(0, x, 0, y)
 end
 
--- ── Window ───────────────────────────────────────────────────
-local Window = Library:CreateWindow({
-    Title      = C("NOMO", WHITE).." "..C("MARKET", ACCENT, true),
-    Footer     = C("nomo market", DIM).." · "..C(tostring(VERSION or ""), ACCENT_G),
-    Center     = true,
-    AutoShow   = UIState.ShowUIOnLoad,
-    Resizable  = true,
-    NotifySide = "Right",
-    ShowCustomCursor = true,
-    Size = UDim2.fromOffset(860, 560),
+
+local Library = {}
+
+local function resolveAsset(pathOrId)
+	if not pathOrId or pathOrId == "" then return nil end
+	if tostring(pathOrId):match("^rbxassetid://") or tostring(pathOrId):match("^http") then
+		return pathOrId
+	end
+	if type(getcustomasset) == "function" then
+		local ok, asset = pcall(getcustomasset, pathOrId)
+		if ok then return asset end
+	end
+	return pathOrId
+end
+
+function Library:CreateWindow(cfg)
+	cfg = cfg or {}
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "NomoHub"
+	gui.ResetOnSpawn = false
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	-- Arceus-safe: PlayerGui first. CoreGui can trigger capability errors on some executors.
+	local pg = Players.LocalPlayer:WaitForChild("PlayerGui")
+	gui.Parent = pg
+
+	local main = make("Frame", {
+		Size = UDim2.fromOffset(820, 500),
+		Position = UDim2.new(0, 110, 0, 58),
+		BackgroundColor3 = T.BG,
+		BorderSizePixel = 0,
+		Active = true,
+		ClipsDescendants = true,
+	}, gui)
+	corner(main, 12)
+	stroke(main, T.Border)
+	make("UIScale", {Scale = SCALE}, main)
+
+	----------------------------------------------------------------
+	-- TOP BAR
+	----------------------------------------------------------------
+	local top = make("Frame", {Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1}, main)
+
+	local search = make("TextBox", {
+		Size = UDim2.fromOffset(260, 32),
+		Position = UDim2.fromOffset(196, 10),
+		BackgroundColor3 = T.Card,
+		Text = "",
+		PlaceholderText = "  Search pets, UUIDs, users...",
+		PlaceholderColor3 = T.Sub,
+		TextColor3 = T.Text,
+		Font = Enum.Font.Gotham,
+		TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ClearTextOnFocus = false,
+		BorderSizePixel = 0,
+	}, top)
+	corner(search, 8); stroke(search); pad(search, 0, 0, 8, 8)
+
+	-- status pills (right side)
+	local pillHolder = make("Frame", {
+		Size = UDim2.new(1, -530, 0, 32),
+		Position = UDim2.new(1, -74, 0, 10),
+		AnchorPoint = Vector2.new(1, 0),
+		BackgroundTransparency = 1,
+	}, top)
+	make("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		HorizontalAlignment = Enum.HorizontalAlignment.Right,
+		Padding = UDim.new(0, 8),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, pillHolder)
+
+	local function makePill(label, value, color)
+		local f = make("Frame", {Size = UDim2.fromOffset(110, 32), BackgroundColor3 = T.Card, BorderSizePixel = 0}, pillHolder)
+		corner(f, 8); stroke(f)
+		make("TextLabel", {
+			Size = UDim2.new(1, -10, 0, 12), Position = UDim2.fromOffset(10, 4),
+			BackgroundTransparency = 1, Text = label, TextColor3 = T.Sub,
+			Font = Enum.Font.Gotham, TextSize = 9, TextXAlignment = Enum.TextXAlignment.Left,
+		}, f)
+		local v = make("TextLabel", {
+			Size = UDim2.new(1, -10, 0, 12), Position = UDim2.fromOffset(10, 16),
+			BackgroundTransparency = 1, Text = value, TextColor3 = color or T.Text,
+			Font = Enum.Font.GothamBold, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
+		}, f)
+		return {Set = function(_, txt, col) v.Text = txt if col then v.TextColor3 = col end end}
+	end
+
+	local pills = {
+		Status  = makePill("STATUS", "● Online", T.Green),
+		Booth   = makePill("BOOTH", "Active", T.Green),
+		Balance = makePill("BALANCE", "0¢", T.Yellow),
+	}
+
+	-- window buttons
+	local function winBtn(txt, x, cb)
+		local b = make("TextButton", {
+			Size = UDim2.fromOffset(26, 26), Position = UDim2.new(1, x, 0, 13),
+			BackgroundColor3 = T.Card, Text = txt, TextColor3 = T.Sub,
+			Font = Enum.Font.GothamBold, TextSize = 14, BorderSizePixel = 0,
+		}, top)
+		corner(b, 6)
+		b.Activated:Connect(cb)
+		return b
+	end
+	winBtn("×", -36, function() gui:Destroy() end)
+
+	-- Hydra/Holy-style minimize: hide full window and show compact floating button.
+	local mini = make("TextButton", {
+		Size = UDim2.fromOffset(cfg.MiniSize or 58, cfg.MiniSize or 58),
+		-- top-center like Hydra/Holy floating button
+		Position = cfg.MiniPosition or UDim2.new(0.5, -160, 0, 2),
+		BackgroundColor3 = T.Card,
+		Text = "",
+		TextColor3 = T.Accent,
+		Font = Enum.Font.GothamBold,
+		TextSize = 13,
+		BorderSizePixel = 0,
+		Visible = false,
+		Active = true,
+	}, gui)
+	corner(mini, cfg.MiniCorner or 14)
+	stroke(mini, T.Accent, 0)
+	make("UIGradient", {
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, T.AccentSoft),
+			ColorSequenceKeypoint.new(1, T.Card),
+		}),
+		Rotation = 90,
+	}, mini)
+
+	local miniImageAsset = resolveAsset(cfg.MiniImage)
+	if miniImageAsset then
+		local img = make("ImageLabel", {
+			Size = UDim2.new(1, -10, 1, -10),
+			Position = UDim2.fromOffset(5, 5),
+			BackgroundTransparency = 1,
+			Image = miniImageAsset,
+			ScaleType = Enum.ScaleType.Fit,
+		}, mini)
+	else
+		make("TextLabel", {
+			Size = UDim2.new(1, 0, 1, 0),
+			BackgroundTransparency = 1,
+			Text = cfg.MiniText or "NOMO",
+			TextColor3 = T.Accent,
+			Font = Enum.Font.GothamBold,
+			TextSize = 13,
+		}, mini)
+	end
+
+	local function setMinimized(v)
+		main.Visible = not v
+		mini.Visible = v
+	end
+
+	winBtn("–", -66, function()
+		setMinimized(true)
+	end)
+
+	mini.Activated:Connect(function()
+		setMinimized(false)
+	end)
+
+	-- drag mini button
+	do
+		local draggingMini, dragStartMini, miniStartPos
+		mini.InputBegan:Connect(function(i)
+			if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+				draggingMini, dragStartMini, miniStartPos = true, i.Position, mini.Position
+			end
+		end)
+		UserInputService.InputChanged:Connect(function(i)
+			if draggingMini and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+				local d = i.Position - dragStartMini
+				local newPos = UDim2.new(miniStartPos.X.Scale, miniStartPos.X.Offset + d.X, miniStartPos.Y.Scale, miniStartPos.Y.Offset + d.Y)
+				mini.Position = clampGuiPosition(mini, newPos)
+			end
+		end)
+		UserInputService.InputEnded:Connect(function(i)
+			if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then draggingMini = false end
+		end)
+	end
+
+	-- drag via top bar
+	do
+		local dragging, dragStart, startPos
+		top.InputBegan:Connect(function(i)
+			if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+				dragging, dragStart, startPos = true, i.Position, main.Position
+			end
+		end)
+		UserInputService.InputChanged:Connect(function(i)
+			if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+				local d = i.Position - dragStart
+				local newPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+				main.Position = clampGuiPosition(main, newPos)
+			end
+		end)
+		UserInputService.InputEnded:Connect(function(i)
+			if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = false end
+		end)
+	end
+
+	----------------------------------------------------------------
+	-- SIDEBAR
+	----------------------------------------------------------------
+	local side = make("Frame", {
+		Size = UDim2.new(0, 180, 1, 0),
+		BackgroundColor3 = T.Sidebar,
+		BorderSizePixel = 0,
+	}, main)
+
+	make("TextLabel", {
+		Size = UDim2.new(1, -20, 0, 20), Position = UDim2.fromOffset(16, 16),
+		BackgroundTransparency = 1, RichText = true,
+		Text = ('<font color="#%s"><b>%s</b></font> <b>%s</b>'):format(T.Accent:ToHex(), cfg.TitleAccent or "NOMO", cfg.Title or "MARKET"),
+		TextColor3 = T.Text, Font = Enum.Font.GothamBold, TextSize = 16,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, side)
+	make("TextLabel", {
+		Size = UDim2.new(1, -20, 0, 12), Position = UDim2.fromOffset(16, 36),
+		BackgroundTransparency = 1, Text = cfg.Subtitle or "SELLER LITE",
+		TextColor3 = T.Accent, Font = Enum.Font.Gotham, TextSize = 10,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, side)
+
+	local navHolder = make("Frame", {
+		Size = UDim2.new(1, -16, 1, -140), Position = UDim2.fromOffset(8, 64),
+		BackgroundTransparency = 1,
+	}, side)
+	vlist(navHolder, 4)
+
+	-- profile box (bottom)
+	local prof = make("Frame", {
+		Size = UDim2.new(1, -16, 0, 58), Position = UDim2.new(0, 8, 1, -68),
+		BackgroundColor3 = T.Card, BorderSizePixel = 0,
+	}, side)
+	corner(prof, 8); stroke(prof)
+	make("TextLabel", {
+		Size = UDim2.new(1, -12, 0, 16), Position = UDim2.fromOffset(12, 8),
+		BackgroundTransparency = 1, Text = Players.LocalPlayer and Players.LocalPlayer.Name or "Player",
+		TextColor3 = T.Text, Font = Enum.Font.GothamBold, TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, prof)
+	make("TextLabel", {
+		Size = UDim2.new(1, -12, 0, 12), Position = UDim2.fromOffset(12, 23),
+		BackgroundTransparency = 1, Text = cfg.PlanText or "LITE PLAN",
+		TextColor3 = T.Sub, Font = Enum.Font.Gotham, TextSize = 9,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, prof)
+	make("TextLabel", {
+		Size = UDim2.new(1, -12, 0, 12), Position = UDim2.fromOffset(12, 34),
+		BackgroundTransparency = 1, Text = cfg.VersionText or "",
+		TextColor3 = T.Accent, Font = Enum.Font.GothamBold, TextSize = 9,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, prof)
+
+	----------------------------------------------------------------
+	-- CONTENT / PAGES
+	----------------------------------------------------------------
+	local content = make("Frame", {
+		Size = UDim2.new(1, -196, 1, -68), Position = UDim2.fromOffset(188, 60),
+		BackgroundTransparency = 1,
+	}, main)
+
+	local window = {Pills = pills, SearchBox = search}
+	local pages = {}
+
+	local function selectPage(name)
+		for n, p in pairs(pages) do
+			p.frame.Visible = (n == name)
+			p.btn.BackgroundColor3 = (n == name) and T.AccentSoft or T.Sidebar
+			p.btn.BackgroundTransparency = (n == name) and 0 or 1
+			p.btn.TextColor3 = (n == name) and T.Accent or T.Sub
+		end
+	end
+	window.SelectPage = function(_, name) selectPage(name) end
+
+	function window:CreatePage(name)
+		local btn = make("TextButton", {
+			Size = UDim2.new(1, 0, 0, 34),
+			BackgroundColor3 = T.Sidebar, BackgroundTransparency = 1,
+			Text = name, TextColor3 = T.Sub,
+			Font = Enum.Font.GothamMedium, TextSize = 13, BorderSizePixel = 0,
+		}, navHolder)
+		corner(btn, 8)
+		pad(btn, 0, 0, 12, 0)
+		btn.TextXAlignment = Enum.TextXAlignment.Left
+
+		local frame = make("ScrollingFrame", {
+			Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1,
+			ScrollBarThickness = 3, ScrollBarImageColor3 = T.Border,
+			CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+			Visible = false, BorderSizePixel = 0,
+		}, content)
+		vlist(frame, 10)
+
+		pages[name] = {btn = btn, frame = frame}
+		btn.Activated:Connect(function() selectPage(name) end)
+		if not next(pages, next(pages)) and #navHolder:GetChildren() <= 2 then selectPage(name) end
+
+		local page = {}
+
+		-- row = horizontal container for side-by-side sections
+		function page:AddRow()
+			local row = make("Frame", {
+				Size = UDim2.new(1, -6, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+				BackgroundTransparency = 1,
+			}, frame)
+			make("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal,
+				Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder,
+			}, row)
+			return row
+		end
+
+		local function newSection(parent, title, widthScale)
+			local card = make("Frame", {
+				Size = UDim2.new(widthScale or 1, widthScale and -6 or -6, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BackgroundColor3 = T.Card, BorderSizePixel = 0,
+			}, parent)
+			corner(card, 10); stroke(card); pad(card, 12)
+			vlist(card, 8)
+			make("TextLabel", {
+				Size = UDim2.new(1, 0, 0, 18), BackgroundTransparency = 1,
+				Text = title, TextColor3 = T.Text, Font = Enum.Font.GothamBold,
+				TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left,
+				LayoutOrder = -1,
+			}, card)
+
+			local sec = {Frame = card}
+
+			local function baseRow(h)
+				return make("Frame", {Size = UDim2.new(1, 0, 0, h or 30), BackgroundTransparency = 1}, card)
+			end
+			local function rowLabel(row, text)
+				make("TextLabel", {
+					Size = UDim2.new(1, -150, 1, 0), BackgroundTransparency = 1,
+					Text = text, TextColor3 = T.Text, Font = Enum.Font.Gotham,
+					TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
+				}, row)
+			end
+
+			function sec:AddToggle(text, default, cb)
+				local state = default or false
+				local row = baseRow(28)
+				rowLabel(row, text)
+				local hit = make("TextButton", {Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = ""}, row)
+				local bg = make("Frame", {
+					Size = UDim2.fromOffset(36, 18), Position = UDim2.new(1, -36, 0.5, -9),
+					BackgroundColor3 = state and T.Accent or T.Toggle0, BorderSizePixel = 0,
+				}, row)
+				corner(bg, 9)
+				local knob = make("Frame", {
+					Size = UDim2.fromOffset(14, 14),
+					Position = state and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7),
+					BackgroundColor3 = T.Text, BorderSizePixel = 0,
+				}, bg)
+				corner(knob, 7)
+				local function set(v)
+					state = v
+					-- Arceus-safe: no TweenService on executor-created UI.
+					bg.BackgroundColor3 = state and T.Accent or T.Toggle0
+					knob.Position = state and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
+					if cb then cb(state) end
+				end
+				hit.Activated:Connect(function() set(not state) end)
+				return {Set = function(_, v) set(v) end, Get = function() return state end}
+			end
+
+			function sec:AddStepper(text, default, min, max, cb)
+				local val = default or 0
+				local row = baseRow(28)
+				rowLabel(row, text)
+				local box = make("TextBox", {
+					Size = UDim2.fromOffset(48, 24), Position = UDim2.new(1, -76, 0.5, -12),
+					BackgroundColor3 = T.Card2, Text = tostring(val), TextColor3 = T.Text,
+					Font = Enum.Font.GothamMedium, TextSize = 12, BorderSizePixel = 0,
+				}, row)
+				corner(box, 6); stroke(box)
+				local function set(v)
+					v = math.clamp(v, min or -math.huge, max or math.huge)
+					val = v
+					box.Text = tostring(v)
+					if cb then cb(v) end
+				end
+				local function stepBtn(txt, x, delta)
+					local b = make("TextButton", {
+						Size = UDim2.fromOffset(24, 24), Position = UDim2.new(1, x, 0.5, -12),
+						BackgroundColor3 = T.Card2, Text = txt, TextColor3 = T.Accent,
+						Font = Enum.Font.GothamBold, TextSize = 14, BorderSizePixel = 0,
+					}, row)
+					corner(b, 6); stroke(b)
+					b.Activated:Connect(function() set(val + delta) end)
+				end
+				stepBtn("–", -104, -1)
+				stepBtn("+", -24, 1)
+				box.FocusLost:Connect(function() set(tonumber(box.Text) or val) end)
+				return {Set = function(_, v) set(v) end, Get = function() return val end}
+			end
+
+			function sec:AddInput(text, default, cb)
+				local row = baseRow(28)
+				rowLabel(row, text)
+				local box = make("TextBox", {
+					Size = UDim2.fromOffset(130, 24), Position = UDim2.new(1, -130, 0.5, -12),
+					BackgroundColor3 = T.Card2, Text = tostring(default or ""), TextColor3 = T.Text,
+					Font = Enum.Font.Gotham, TextSize = 12, ClearTextOnFocus = false, BorderSizePixel = 0,
+				}, row)
+				corner(box, 6); stroke(box); pad(box, 0, 0, 6, 6)
+				box.FocusLost:Connect(function() if cb then cb(box.Text) end end)
+				return {Set = function(_, v) box.Text = tostring(v) end, Get = function() return box.Text end}
+			end
+
+			function sec:AddDropdown(text, options, default, cb)
+                -- V5.9: all dropdowns use the same popup selector UI.
+                -- This keeps small dropdowns and large API dropdowns consistent.
+                return sec:AddSearchDropdown(text, options or {}, default, cb)
+            end
+
+            function sec:AddSearchDropdown(text, options, default, cb)
+                options = options or {}
+                local current = default or options[1] or ""
+
+                local function nrm(s)
+                    s = tostring(s or ""):lower()
+                    s = s:gsub("%b[]", ""):gsub("%b()", ""):gsub("_", " "):gsub("%s+", " ")
+                    return s:gsub("^%s+", ""):gsub("%s+$", "")
+                end
+
+                local holder = make("Frame", {
+                    Size = UDim2.new(1, 0, 0, 28),
+                    AutomaticSize = Enum.AutomaticSize.Y,
+                    BackgroundTransparency = 1,
+                }, card)
+
+                local row = make("Frame", {Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1}, holder)
+                rowLabel(row, text)
+
+                local openBtn = make("TextButton", {
+                    Size = UDim2.fromOffset(130, 24),
+                    Position = UDim2.new(1, -130, 0.5, -12),
+                    BackgroundColor3 = T.Card2,
+                    Text = tostring(current),
+                    TextColor3 = T.Text,
+                    Font = Enum.Font.Gotham,
+                    TextSize = 12,
+                    BorderSizePixel = 0,
+                    AutoButtonColor = false,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
+                }, row)
+                corner(openBtn, 6); stroke(openBtn); pad(openBtn, 0, 0, 6, 6)
+
+                local overlay = make("Frame", {
+                    Size = UDim2.new(1, 0, 1, 0),
+                    BackgroundColor3 = Color3.new(0, 0, 0),
+                    BackgroundTransparency = 0.35,
+                    Visible = false,
+                    BorderSizePixel = 0,
+                    ZIndex = 80,
+                }, gui)
+
+                local modal = make("Frame", {
+                    AnchorPoint = Vector2.new(0.5, 0.5),
+                    Position = UDim2.new(0.5, 0, 0.5, 0),
+                    Size = UDim2.fromOffset(470, 360),
+                    BackgroundColor3 = T.Card,
+                    BorderSizePixel = 0,
+                    ZIndex = 81,
+                }, overlay)
+                corner(modal, 12); stroke(modal, T.Border); pad(modal, 12)
+
+                local titleRow = make("Frame", {
+                    Size = UDim2.new(1, 0, 0, 28),
+                    BackgroundTransparency = 1,
+                    ZIndex = 81,
+                }, modal)
+                make("TextLabel", {
+                    Size = UDim2.new(1, -88, 1, 0),
+                    BackgroundTransparency = 1,
+                    Text = text,
+                    TextColor3 = T.Text,
+                    Font = Enum.Font.GothamBold,
+                    TextSize = 14,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    ZIndex = 81,
+                }, titleRow)
+                local doneBtn = make("TextButton", {
+                    Size = UDim2.fromOffset(72, 26),
+                    Position = UDim2.new(1, -72, 0, 1),
+                    BackgroundColor3 = T.Accent,
+                    Text = "Done",
+                    TextColor3 = Color3.new(1,1,1),
+                    Font = Enum.Font.GothamBold,
+                    TextSize = 12,
+                    BorderSizePixel = 0,
+                    ZIndex = 81,
+                }, titleRow)
+                corner(doneBtn, 8)
+
+                local searchBox = make("TextBox", {
+                    Size = UDim2.new(1, 0, 0, 32),
+                    Position = UDim2.fromOffset(0, 36),
+                    BackgroundColor3 = T.Card2,
+                    PlaceholderText = "Search items...",
+                    PlaceholderColor3 = T.Sub,
+                    Text = "",
+                    TextColor3 = T.Text,
+                    Font = Enum.Font.Gotham,
+                    TextSize = 13,
+                    ClearTextOnFocus = false,
+                    BorderSizePixel = 0,
+                    ZIndex = 81,
+                }, modal)
+                corner(searchBox, 8); stroke(searchBox); pad(searchBox, 0, 0, 10, 10)
+
+                local listWrap = make("Frame", {
+                    Size = UDim2.new(1, 0, 1, -76),
+                    Position = UDim2.fromOffset(0, 76),
+                    BackgroundColor3 = T.BG,
+                    BorderSizePixel = 0,
+                    ZIndex = 81,
+                }, modal)
+                corner(listWrap, 10); stroke(listWrap)
+
+                local list = make("ScrollingFrame", {
+                    Size = UDim2.new(1, -8, 1, -8),
+                    Position = UDim2.fromOffset(4, 4),
+                    BackgroundTransparency = 1,
+                    BorderSizePixel = 0,
+                    ScrollBarThickness = 4,
+                    ScrollBarImageColor3 = T.Border,
+                    CanvasSize = UDim2.new(0,0,0,0),
+                    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+                    ZIndex = 82,
+                }, listWrap)
+                local listLayout = vlist(list, 2)
+                pad(list, 4, 4, 4, 4)
+
+                local function clearList()
+                    for _, child in ipairs(list:GetChildren()) do
+                        if child:IsA("TextButton") or child:IsA("TextLabel") then
+                            child:Destroy()
+                        end
+                    end
+                end
+
+                local function filtered(query)
+                    local q = nrm(query)
+                    local start, contain = {}, {}
+                    for _, opt in ipairs(options) do
+                        local name = tostring(opt)
+                        local nn = nrm(name)
+                        if q == "" or nn:find(q, 1, true) then
+                            if q ~= "" and nn:sub(1, #q) == q then
+                                table.insert(start, name)
+                            else
+                                table.insert(contain, name)
+                            end
+                        end
+                    end
+                    table.sort(start)
+                    table.sort(contain)
+                    for _, v in ipairs(contain) do table.insert(start, v) end
+                    return start
+                end
+
+                local function refreshButton()
+                    openBtn.Text = tostring(current ~= "" and current or "Select")
+                    if current == "" then openBtn.TextColor3 = T.Sub else openBtn.TextColor3 = T.Text end
+                end
+
+                local function rebuildList()
+                    clearList()
+                    local vals = filtered(searchBox.Text)
+                    if #vals == 0 then
+                        make("TextLabel", {
+                            Size = UDim2.new(1, 0, 0, 28),
+                            BackgroundTransparency = 1,
+                            Text = "No match",
+                            TextColor3 = T.Sub,
+                            Font = Enum.Font.Gotham,
+                            TextSize = 12,
+                            ZIndex = 82,
+                        }, list)
+                        return
+                    end
+
+                    local maxRows = math.max(20, toInt(CFG.UI.MaxDropdownRows) or 80)
+                    for i, name in ipairs(vals) do
+                        if i > maxRows then
+                            make("TextLabel", {
+                                Size = UDim2.new(1, 0, 0, 28),
+                                BackgroundTransparency = 1,
+                                Text = "... +" .. tostring(#vals - maxRows) .. " more, type to narrow",
+                                TextColor3 = T.Sub,
+                                Font = Enum.Font.Gotham,
+                                TextSize = 12,
+                                TextXAlignment = Enum.TextXAlignment.Left,
+                                ZIndex = 82,
+                            }, list)
+                            break
+                        end
+
+                        local selected = (tostring(name) == tostring(current))
+                        local b = make("TextButton", {
+                            Size = UDim2.new(1, 0, 0, 28),
+                            BackgroundColor3 = selected and T.AccentSoft or T.Card2,
+                            Text = tostring(name),
+                            TextColor3 = selected and T.Accent or T.Text,
+                            Font = Enum.Font.Gotham,
+                            TextSize = 12,
+                            TextXAlignment = Enum.TextXAlignment.Left,
+                            BorderSizePixel = 0,
+                            AutoButtonColor = false,
+                            ZIndex = 82,
+                        }, list)
+                        corner(b, 6)
+                        pad(b, 0, 0, 10, 10)
+                        b.Activated:Connect(function()
+                            current = tostring(name)
+                            refreshButton()
+                            if cb then cb(current) end
+                            overlay.Visible = false
+                        end)
+                    end
+                end
+
+                openBtn.Activated:Connect(function()
+                    overlay.Visible = true
+                    searchBox.Text = ""
+                    rebuildList()
+                    task.defer(function()
+                        pcall(function() searchBox:CaptureFocus() end)
+                    end)
+                end)
+
+                doneBtn.Activated:Connect(function()
+                    overlay.Visible = false
+                end)
+
+                overlay.InputBegan:Connect(function(inp)
+                    if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+                        local pos = UserInputService:GetMouseLocation()
+                        local mpos, msize = modal.AbsolutePosition, modal.AbsoluteSize
+                        if pos.X < mpos.X or pos.X > mpos.X + msize.X or pos.Y < mpos.Y or pos.Y > mpos.Y + msize.Y then
+                            overlay.Visible = false
+                        end
+                    end
+                end)
+
+                searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+                    if overlay.Visible then rebuildList() end
+                end)
+
+                refreshButton()
+
+                return {
+                    Get = function() return current end,
+                    Set = function(_, v) current = tostring(v or ""); refreshButton() end,
+                    SetOptions = function(_, opts) options = opts or {}; if overlay.Visible then rebuildList() end end,
+                    Open = function() overlay.Visible = true; searchBox.Text = ""; rebuildList() end,
+                }
+            end
+
+			function sec:AddButton(text, cb, style)
+				local filled = style ~= "outline"
+				local b = make("TextButton", {
+					Size = UDim2.new(1, 0, 0, 32),
+					BackgroundColor3 = filled and T.Accent or T.Card,
+					Text = text, TextColor3 = filled and Color3.new(1, 1, 1) or T.Accent,
+					Font = Enum.Font.GothamBold, TextSize = 13, BorderSizePixel = 0,
+				}, card)
+				corner(b, 8)
+				if not filled then stroke(b, T.Accent, 0.4) end
+				b.Activated:Connect(function() if cb then cb() end end)
+				return b
+			end
+
+			function sec:AddNote(text)
+				make("TextLabel", {
+					Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+					BackgroundTransparency = 1, Text = text, TextColor3 = T.Sub,
+					Font = Enum.Font.Gotham, TextSize = 11, TextWrapped = true,
+					TextXAlignment = Enum.TextXAlignment.Left,
+				}, card)
+			end
+
+            function sec:AddLabel(text, color)
+                local lbl = make("TextLabel", {
+                    Size = UDim2.new(1, 0, 0, 18),
+                    BackgroundTransparency = 1,
+                    Text = tostring(text or ""),
+                    TextColor3 = color or T.Text,
+                    Font = Enum.Font.Gotham,
+                    TextSize = 12,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
+                }, card)
+                return {
+                    Set = function(_, value, col)
+                        lbl.Text = tostring(value or "")
+                        if col then lbl.TextColor3 = col end
+                    end,
+                    Label = lbl,
+                }
+            end
+
+			-- Table: columns = {{name, widthScale}, ...}; row status = {text, color}
+			function sec:AddTable(columns)
+				local header = make("Frame", {Size = UDim2.new(1, 0, 0, 22), BackgroundTransparency = 1}, card)
+				local x = 0.06
+				for _, col in ipairs(columns) do
+					make("TextLabel", {
+						Size = UDim2.new(col[2], 0, 1, 0), Position = UDim2.new(x, 0, 0, 0),
+						BackgroundTransparency = 1, Text = col[1], TextColor3 = T.Sub,
+						Font = Enum.Font.GothamMedium, TextSize = 11,
+						TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+					}, header)
+					x += col[2]
+				end
+				local tbl = {}
+				function tbl:AddRow(values, status)
+					local r = make("Frame", {Size = UDim2.new(1, 0, 0, 30), BackgroundColor3 = T.Card2, BorderSizePixel = 0}, card)
+					corner(r, 6)
+					local checked = false
+					local cb = make("TextButton", {
+						Size = UDim2.fromOffset(14, 14), Position = UDim2.new(0, 10, 0.5, -7),
+						BackgroundColor3 = T.Card, Text = "", BorderSizePixel = 0,
+					}, r)
+					corner(cb, 4); stroke(cb)
+					cb.Activated:Connect(function()
+						checked = not checked
+						cb.BackgroundColor3 = checked and T.Accent or T.Card
+					end)
+					local cx = 0.06
+					for i, col in ipairs(columns) do
+						local isStatus = (i == #columns and status)
+						make("TextLabel", {
+							Size = UDim2.new(col[2], -4, 1, 0), Position = UDim2.new(cx, 0, 0, 0),
+							BackgroundTransparency = 1,
+							Text = isStatus and ("● " .. status[1]) or tostring(values[i] or ""),
+							TextColor3 = isStatus and status[2] or T.Text,
+							Font = Enum.Font.Gotham, TextSize = 11,
+							TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+						}, r)
+						cx += col[2]
+					end
+					return {IsChecked = function() return checked end, Frame = r}
+				end
+				return tbl
+			end
+
+			function sec:AddLog(height)
+				local logFrame = make("ScrollingFrame", {
+					Size = UDim2.new(1, 0, 0, height or 110),
+					BackgroundColor3 = T.Card2, BorderSizePixel = 0,
+					ScrollBarThickness = 3, CanvasSize = UDim2.new(),
+					AutomaticCanvasSize = Enum.AutomaticSize.Y,
+				}, card)
+				corner(logFrame, 6); pad(logFrame, 6); vlist(logFrame, 2)
+				local log = {}
+				function log:Add(text)
+					make("TextLabel", {
+						Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1,
+						RichText = true,
+						Text = ('<font color="#5a8dee">%s</font>  <font color="#a8b6cc">%s</font>'):format(os.date("%H:%M:%S"), text),
+						Font = Enum.Font.Code, TextSize = 11, TextColor3 = T.Sub,
+						TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+					}, logFrame)
+					logFrame.CanvasPosition = Vector2.new(0, 1e6)
+				end
+				function log:Clear()
+					for _, c in ipairs(logFrame:GetChildren()) do
+						if c:IsA("TextLabel") then c:Destroy() end
+					end
+				end
+				return log
+			end
+
+			return sec
+		end
+
+		function page:AddSection(title) return newSection(frame, title) end
+		function page:AddSectionInRow(row, title, widthScale) return newSection(row, title, widthScale) end
+
+		return page
+	end
+
+	return window
+end
+
+--//====================================================--
+--// NOMO Market V6.1 List Verify Guard
+--// Uses private NOMO Hub UI V3.2
+--//====================================================--
+
+local win = Library:CreateWindow({
+    TitleAccent = "NOMO",
+    Title = "MARKET",
+    Subtitle = "SELLER LITE",
+    PlanText = "PRIVATE DATA CORE",
+    VersionText = VERSION,
+    MiniText = "NOMO",
+
+    -- top, left-of-center: above Tokens / Booth
+    MiniPosition = UDim2.new(0.5, -160, 0, 2),
+
+    -- Optional later:
+    -- MiniImage = "rbxassetid://YOUR_IMAGE_ID",
+    -- MiniImage = "Nomo/blue_rose.png",
 })
 
-print("[NOMO UI] Window OK, adding tabs...")
+win.Pills.Status:Set("Ready", T.Green)
+win.Pills.Booth:Set("Data", T.Accent)
+win.Pills.Balance:Set(commaNumber(getTokenBalance()), T.Green)
 
--- ── Tabs ─────────────────────────────────────────────────────
-local Tabs = {
-    Home     = Window:AddTab("Home"),
-    Seller   = Window:AddTab("Seller"),
-    Market   = Window:AddTab("Market"),
-    Sniper   = Window:AddTab("Sniper"),
-    Settings = Window:AddTab("Settings"),
-}
-
--- ── Safe helpers ─────────────────────────────────────────────
-local function SetText(ctrl, text)
-    if not ctrl then return end
-    pcall(function()
-        if type(ctrl.SetText)=="function" then ctrl:SetText(tostring(text or ""))
-        else ctrl.Text = tostring(text or "") end
-    end)
+local function addLines(logObj, lines)
+    logObj:Clear()
+    for _, line in ipairs(lines) do
+        logObj:Add(line)
+    end
 end
 
-local function Opt(name, default)
-    local pools = {
-        rawget(getgenv(), "Options"),
-        rawget(_G, "Options"),
-        Library and Library.Options,
+local function safeLine(v)
+    return tostring(v or "-")
+end
+
+local refreshSellerLog
+
+local function refreshPills()
+    local best = findBestBooth()
+    local boothText = best and best.Status or "No Booth"
+    win.Pills.Booth:Set(boothText, boothText == "MINE" and T.Green or (boothText == "FREE" and T.Yellow or T.Sub))
+    win.Pills.Balance:Set(commaNumber(getTokenBalance()), T.Green)
+end
+
+
+--// BOOTH PAGE
+local boothPage = win:CreatePage("Booth")
+local boothRow = boothPage:AddRow()
+local boothCtrl = boothPage:AddSectionInRow(boothRow, "Booth Automation", 0.48)
+local boothDataSec = boothPage:AddSectionInRow(boothRow, "Booth Data", 0.52)
+
+boothCtrl:AddToggle("Auto Claim Booth", CFG.Booth.AutoClaim, function(v)
+    CFG.Booth.AutoClaim = v
+    log("AutoClaim", tostring(v))
+end)
+
+boothCtrl:AddToggle("Smart Reclaim", CFG.Booth.SmartReclaim, function(v)
+    CFG.Booth.SmartReclaim = v
+    log("SmartReclaim", tostring(v))
+end)
+
+boothCtrl:AddToggle("Compact Booth Data", CFG.UI.CompactBoothData ~= false, function(v)
+    CFG.UI.CompactBoothData = v
+    log("CompactBoothData", tostring(v))
+end)
+
+local boothMaxDist = boothCtrl:AddInput("Max Middle Distance", tostring(CFG.Booth.MaxMiddleDistance), function(v)
+    CFG.Booth.MaxMiddleDistance = toNumber(v) or CFG.Booth.MaxMiddleDistance
+end)
+
+local boothSkin = boothCtrl:AddInput("Booth Skin", tostring(CFG.Booth.BoothSkin or "Default"), function(v)
+    CFG.Booth.BoothSkin = trim(v) ~= "" and trim(v) or "Default"
+end)
+
+local boothClaimInterval = boothCtrl:AddInput("Claim Interval", tostring(CFG.Booth.ClaimInterval or 10), function(v)
+    CFG.Booth.ClaimInterval = toNumber(v) or CFG.Booth.ClaimInterval or 10
+end)
+
+local boothLog = boothDataSec:AddLog(315)
+
+local function refreshBoothLog()
+    refreshPills()
+    CFG.Booth.MaxMiddleDistance = toNumber(boothMaxDist:Get()) or CFG.Booth.MaxMiddleDistance
+    CFG.Booth.BoothSkin = trim(boothSkin:Get()) ~= "" and trim(boothSkin:Get()) or "Default"
+    CFG.Booth.ClaimInterval = toNumber(boothClaimInterval:Get()) or CFG.Booth.ClaimInterval or 10
+
+    local items = getBoothSnapshot()
+    local target, status = findBestBooth()
+    local lines = {
+        "Booths: " .. tostring(#items),
+        "Best: " .. tostring(target and (target.Id:sub(1, 8) .. "...") or "None") .. " / " .. tostring(status),
+        "MaxDist: " .. tostring(CFG.Booth.MaxMiddleDistance),
+        "Skin: " .. tostring(CFG.Booth.BoothSkin),
+        "AutoClaim every: " .. tostring(CFG.Booth.ClaimInterval) .. "s",
+        "------------------------------",
     }
 
-    for _, pool in ipairs(pools) do
-        local item = type(pool) == "table" and pool[name]
-        if type(item) == "table" and item.Value ~= nil then
-            return item.Value
+    for i, item in ipairs(items) do
+        if i > 16 then
+            table.insert(lines, "... +" .. tostring(#items - 16) .. " more")
+            break
+        end
+
+        local shortId = tostring(item.Id):sub(1, 8)
+        local status = item.Status
+        local owner = item.OwnerText
+
+        if status == "FREE" then
+            owner = "-"
+        elseif status == "MINE" then
+            owner = "YOU"
+        else
+            owner = tostring(owner):gsub("^Player_", "P_")
+            if #owner > 10 then owner = owner:sub(1, 10) end
+        end
+
+        if CFG.UI and CFG.UI.CompactBoothData ~= false then
+            table.insert(lines, string.format(
+                "%02d. %-5s d%-3d %s",
+                i,
+                status,
+                math.floor(item.MiddleDistance or 0),
+                shortId
+            ))
+        else
+            table.insert(lines, string.format(
+                "%02d. %s | %s | owner %s | dist %d",
+                i,
+                item.Id,
+                status,
+                owner,
+                math.floor(item.MiddleDistance or 0)
+            ))
         end
     end
 
-    return default
+    addLines(boothLog, lines)
 end
 
-local function linesToStr(lines, max)
-    max = max or 50
-    local out = {}
-    for i, l in ipairs(lines) do
-        if i > max then table.insert(out, C("... +"..( #lines-max).." more", DIM)) break end
-        table.insert(out, tostring(l))
-    end
-    return table.concat(out, "\n")
-end
+boothCtrl:AddButton("Refresh Booth Data", refreshBoothLog)
+boothCtrl:AddButton("Claim Best Free", function()
+    claimBestFreeBooth()
+    refreshBoothLog()
+end)
+boothCtrl:AddButton("Equip Skin", function()
+    CFG.Booth.BoothSkin = trim(boothSkin:Get()) ~= "" and trim(boothSkin:Get()) or "Default"
+    equipSkin()
+end, "outline")
 
--- ── Exotic-style pet list popup ──────────────────────────────
--- Creates a ScreenGui overlay with a scrollable searchable list.
--- callback(selectedName) is called when user clicks an item.
+--// SELLER PAGE
+local sellerPage = win:CreatePage("Seller")
+local sellerRow = sellerPage:AddRow()
+local sellerCtrl = sellerPage:AddSectionInRow(sellerRow, "Runtime Controls", 0.45)
+local filterSec = sellerPage:AddSectionInRow(sellerRow, "Filter Builder", 0.55)
 
-local function ShowPetPickerPopup(title, itemList, callback)
-    local PlayerGui = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
-    -- destroy any existing popup
-    local old = PlayerGui:FindFirstChild("NomoPetPicker")
-    if old then old:Destroy() end
+sellerCtrl:AddToggle("Auto List", CFG.Seller.AutoList, function(v)
+    CFG.Seller.AutoList = v
+    CFG.Seller.PreviewOnly = not v
+    log("AutoList", tostring(v))
+end)
 
-    local gui = Instance.new("ScreenGui")
-    gui.Name = "NomoPetPicker"
-    gui.ResetOnSpawn = false
-    gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-    gui.DisplayOrder = 999999
-    gui.Parent = PlayerGui
+sellerCtrl:AddToggle("Preview Only", CFG.Seller.PreviewOnly, function(v)
+    CFG.Seller.PreviewOnly = v
+    if v then CFG.Seller.AutoList = false end
+    log("PreviewOnly", tostring(v))
+end)
 
-    -- dim overlay
-    local overlay = Instance.new("Frame")
-    overlay.Size = UDim2.fromScale(1,1)
-    overlay.BackgroundColor3 = Color3.fromRGB(0,0,0)
-    overlay.BackgroundTransparency = 0.45
-    overlay.BorderSizePixel = 0
-    overlay.ZIndex = 1
-    overlay.Parent = gui
+sellerCtrl:AddToggle("Skip Favorited", CFG.Seller.SkipFavorited, function(v)
+    CFG.Seller.SkipFavorited = v
+end)
 
-    -- modal card
-    local card = Instance.new("Frame")
-    card.Size = UDim2.fromOffset(480, 400)
-    card.Position = UDim2.fromScale(0.5, 0.5)
-    card.AnchorPoint = Vector2.new(0.5, 0.5)
-    card.BackgroundColor3 = Color3.fromRGB(10, 10, 18)
-    card.BorderSizePixel = 0
-    card.ZIndex = 2
-    card.Parent = gui
+sellerCtrl:AddToggle("Skip Locked", CFG.Seller.SkipLocked, function(v)
+    CFG.Seller.SkipLocked = v
+end)
 
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 10)
-    corner.Parent = card
+sellerCtrl:AddInput("Scan Interval", tostring(CFG.Seller.ScanInterval), function(v)
+    CFG.Seller.ScanInterval = toNumber(v) or CFG.Seller.ScanInterval
+end)
 
-    local stroke = Instance.new("UIStroke")
-    stroke.Color = Color3.fromRGB(99, 102, 241)
-    stroke.Thickness = 1.5
-    stroke.Parent = card
+sellerCtrl:AddInput("List Cooldown", tostring(CFG.Seller.ListCooldown), function(v)
+    CFG.Seller.ListCooldown = toNumber(v) or CFG.Seller.ListCooldown
+end)
 
-    -- title bar
-    local titleBar = Instance.new("Frame")
-    titleBar.Size = UDim2.new(1, 0, 0, 40)
-    titleBar.BackgroundColor3 = Color3.fromRGB(15, 14, 28)
-    titleBar.BorderSizePixel = 0
-    titleBar.ZIndex = 3
-    titleBar.Parent = card
+sellerCtrl:AddInput("Booth Cap", tostring(CFG.Seller.BoothCap or 50), function(v)
+    CFG.Seller.BoothCap = toNumber(v) or CFG.Seller.BoothCap or 50
+    CFG.Seller.MaxAutoListSession = CFG.Seller.BoothCap
+end)
 
-    local titleCorner = Instance.new("UICorner")
-    titleCorner.CornerRadius = UDim.new(0, 10)
-    titleCorner.Parent = titleBar
+sellerCtrl:AddDropdown("Weight Filter", {"Base", "Visual"}, CFG.Seller.WeightMode or "Base", function(v)
+    CFG.Seller.WeightMode = tostring(v or "Base")
+    log("WeightMode", CFG.Seller.WeightMode)
+end)
 
-    local titleLbl = Instance.new("TextLabel")
-    titleLbl.Size = UDim2.new(1, -50, 1, 0)
-    titleLbl.Position = UDim2.fromOffset(14, 0)
-    titleLbl.BackgroundTransparency = 1
-    titleLbl.Text = "🔍  "..tostring(title or "Select")
-    titleLbl.Font = Enum.Font.GothamBold
-    titleLbl.TextSize = 14
-    titleLbl.TextColor3 = Color3.fromRGB(232, 230, 240)
-    titleLbl.TextXAlignment = Enum.TextXAlignment.Left
-    titleLbl.ZIndex = 4
-    titleLbl.Parent = titleBar
+local listOnceMaxInput = sellerCtrl:AddInput("List Max", tostring(CFG.Seller.ListOnceMax or 50), function(v)
+    CFG.Seller.ListOnceMax = toNumber(v) or CFG.Seller.ListOnceMax or 50
+end)
 
-    local closeBtn = Instance.new("TextButton")
-    closeBtn.Size = UDim2.fromOffset(32, 32)
-    closeBtn.Position = UDim2.new(1, -40, 0, 4)
-    closeBtn.BackgroundColor3 = Color3.fromRGB(30, 28, 50)
-    closeBtn.Text = "✕"
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 13
-    closeBtn.TextColor3 = Color3.fromRGB(180, 180, 200)
-    closeBtn.BorderSizePixel = 0
-    closeBtn.ZIndex = 4
-    closeBtn.Parent = titleBar
-    Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0,6)
-    closeBtn.MouseButton1Click:Connect(function() gui:Destroy() end)
-    overlay.InputBegan:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 then gui:Destroy() end
+sellerCtrl:AddButton("LIST UNTIL BOOTH FULL", function()
+    CFG.Seller.ListOnceMax = toNumber(listOnceMaxInput:Get()) or CFG.Seller.ListOnceMax or 50
+    task.spawn(function()
+        listOnce(CFG.Seller.ListOnceMax)
     end)
+end)
 
-    -- search box
-    local searchBox = Instance.new("TextBox")
-    searchBox.Size = UDim2.new(1, -24, 0, 34)
-    searchBox.Position = UDim2.fromOffset(12, 46)
-    searchBox.BackgroundColor3 = Color3.fromRGB(20, 18, 35)
-    searchBox.BorderSizePixel = 0
-    searchBox.PlaceholderText = "Search items..."
-    searchBox.PlaceholderColor3 = Color3.fromRGB(100, 96, 130)
-    searchBox.Text = ""
-    searchBox.Font = Enum.Font.GothamMedium
-    searchBox.TextSize = 13
-    searchBox.TextColor3 = Color3.fromRGB(232, 230, 240)
-    searchBox.ClearTextOnFocus = false
-    searchBox.ZIndex = 3
-    searchBox.Parent = card
-    Instance.new("UICorner", searchBox).CornerRadius = UDim.new(0,7)
-    local sStroke = Instance.new("UIStroke", searchBox)
-    sStroke.Color = Color3.fromRGB(60,60,100)
-    sStroke.Thickness = 1
+sellerCtrl:AddButton("REMOVE ALL MY LISTINGS", function()
+    task.spawn(function()
+        removeAllMyListings(CFG.Listings.RemoveAllMax or 50)
+        task.wait(0.6)
+        refreshSellerLog(true)
+    end)
+end, "outline")
 
-    -- scroll frame
-    local scroll = Instance.new("ScrollingFrame")
-    scroll.Size = UDim2.new(1, -24, 1, -96)
-    scroll.Position = UDim2.fromOffset(12, 86)
-    scroll.BackgroundTransparency = 1
-    scroll.BorderSizePixel = 0
-    scroll.ScrollBarThickness = 4
-    scroll.ScrollBarImageColor3 = Color3.fromRGB(99,102,241)
-    scroll.CanvasSize = UDim2.fromScale(1, 0)
-    scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    scroll.ZIndex = 3
-    scroll.Parent = card
+sellerCtrl:AddButton("REBUILD BOOTH", function()
+    task.spawn(function()
+        rebuildBooth()
+        task.wait(0.6)
+        refreshSellerLog(true)
+    end)
+end, "outline")
 
-    local layout = Instance.new("UIListLayout")
-    layout.SortOrder = Enum.SortOrder.LayoutOrder
-    layout.Padding = UDim.new(0, 2)
-    layout.Parent = scroll
+sellerCtrl:AddButton("SMART REBUILD", function()
+    task.spawn(function()
+        smartRebuildBooth()
+        task.wait(0.6)
+        refreshSellerLog(true)
+    end)
+end, "outline")
 
-    local padding = Instance.new("UIPadding", scroll)
-    padding.PaddingBottom = UDim.new(0, 6)
+sellerCtrl:AddToggle("Auto Smart Rebuild On Start", CFG.Seller.AutoSmartRebuildOnStart, function(v)
+    CFG.Seller.AutoSmartRebuildOnStart = v
+end)
 
-    -- row builder
-    local function BuildRows(filter)
-        for _, c in ipairs(scroll:GetChildren()) do
-            if c:IsA("TextButton") then c:Destroy() end
+sellerCtrl:AddToggle("Remote Config", CFG.Seller.RemoteConfigEnabled, function(v)
+    CFG.Seller.RemoteConfigEnabled = v
+end)
+
+sellerCtrl:AddButton("Reload Remote Config", function()
+    task.spawn(function()
+        reloadFilters()
+        task.wait(0.2)
+        refreshSellerLog(true)
+    end)
+end, "outline")
+
+local sellerLog
+local diagnosePetFilter
+
+local petInput = filterSec:AddSearchDropdown("Pet", getPetList(), "Ankylosaurus")
+filterSec:AddButton("Diagnose This Pet", function()
+    if sellerLog and diagnosePetFilter then
+        addLines(sellerLog, diagnosePetFilter(petInput:Get()))
+    end
+end, "outline")
+local priceInput = filterSec:AddInput("Price", "111")
+local minKgInput = filterSec:AddInput("Min Base KG", "1")
+local maxKgInput = filterSec:AddInput("Max Base KG", "3")
+local minAgeInput = filterSec:AddInput("Min Age", "1")
+local maxAgeInput = filterSec:AddInput("Max Age", "100")
+local mutationInput = filterSec:AddSearchDropdown("Mutation", getMutationList(), "Any")
+local variantInput = { Get = function() return "Any" end } -- hatch type is part of Pet name, e.g. GIANT Barn Owl
+local maxListedInput = filterSec:AddInput("Per Filter Cap", "5")
+
+local logRow = sellerPage:AddRow()
+local filterLogSec = sellerPage:AddSectionInRow(logRow, "Active Filters / Candidates", 1)
+sellerLog = filterLogSec:AddLog(210)
+
+diagnosePetFilter = function(petName)
+    petName = tostring(petName or "")
+    local target = norm(petName)
+    local pets = getInventoryPets()
+    local myCounts = countMyListingsByPet()
+    local scan = buildCandidates()
+
+    local lines = {
+        "Diagnose: " .. petName,
+        "WeightMode: " .. tostring(CFG.Seller.WeightMode or "Base"),
+        "Already in booth: " .. tostring(myCounts[target] or 0),
+        "------------------------------",
+        "Owned matching name:",
+    }
+
+    local found = 0
+    for _, p in ipairs(pets) do
+        if target == "" or p.NameNorm == target then
+            found += 1
+            local flags = ""
+            if p.Locked then flags ..= " LOCKED" end
+            if p.Favorite then flags ..= " FAV" end
+            if p.AlreadyListed then flags ..= " LISTED" end
+
+            table.insert(lines, string.format(
+                "%02d. Base %.2f | Visual %.2f | Age %s%s",
+                found,
+                tonumber(p.BaseWeight or p.Weight) or 0,
+                tonumber(p.VisualWeight or p.Weight) or 0,
+                tostring(p.Age or "?"),
+                flags
+            ))
         end
-        local count = 0
-        for _, item in ipairs(itemList) do
-            local name = tostring(item)
-            if filter=="" or name:lower():find(filter:lower(), 1, true) then
-                count = count + 1
-                local row = Instance.new("TextButton")
-                row.Size = UDim2.new(1, 0, 0, 34)
-                row.BackgroundColor3 = Color3.fromRGB(16, 14, 30)
-                row.BackgroundTransparency = 0.3
-                row.BorderSizePixel = 0
-                row.Text = name
-                row.Font = Enum.Font.GothamMedium
-                row.TextSize = 13
-                row.TextColor3 = Color3.fromRGB(210, 210, 230)
-                row.TextXAlignment = Enum.TextXAlignment.Left
-                row.ZIndex = 4
-                row.LayoutOrder = count
-                row.Parent = scroll
-                local rp = Instance.new("UIPadding", row)
-                rp.PaddingLeft = UDim.new(0, 12)
-                Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
-                row.MouseEnter:Connect(function()
-                    row.BackgroundColor3 = Color3.fromRGB(99,102,241)
-                    row.BackgroundTransparency = 0
-                    row.TextColor3 = Color3.fromRGB(255,255,255)
-                end)
-                row.MouseLeave:Connect(function()
-                    row.BackgroundColor3 = Color3.fromRGB(16, 14, 30)
-                    row.BackgroundTransparency = 0.3
-                    row.TextColor3 = Color3.fromRGB(210, 210, 230)
-                end)
-                row.MouseButton1Click:Connect(function()
-                    gui:Destroy()
-                    if type(callback)=="function" then callback(name) end
-                end)
+    end
+
+    local cand, skipped = 0, 0
+    for _, c in ipairs(scan.Candidates or {}) do
+        if c.Pet and c.Pet.NameNorm == target then cand += 1 end
+    end
+    for _, s in ipairs(scan.Skipped or {}) do
+        if s.Pet and s.Pet.NameNorm == target then skipped += 1 end
+    end
+
+    table.insert(lines, "------------------------------")
+    table.insert(lines, "Candidates: " .. tostring(cand))
+    table.insert(lines, "Skipped: " .. tostring(skipped))
+    table.insert(lines, "Skipped detail:")
+
+    local shown = 0
+    for _, s in ipairs(scan.Skipped or {}) do
+        if s.Pet and s.Pet.NameNorm == target then
+            shown += 1
+            if shown > 14 then
+                table.insert(lines, "... +" .. tostring(skipped - 14) .. " more")
+                break
             end
+            local p = s.Pet or {}
+            table.insert(lines, string.format(
+                "%02d. Base %.2f | Visual %.2f | Age %s | %s",
+                shown,
+                tonumber(p.BaseWeight or p.Weight) or 0,
+                tonumber(p.VisualWeight or p.Weight) or 0,
+                tostring(p.Age or "?"),
+                tostring(s.Reason or "?")
+            ))
         end
     end
 
-    BuildRows("")
-    searchBox:GetPropertyChangedSignal("Text"):Connect(function()
-        BuildRows(searchBox.Text)
-    end)
-
-    print("[NOMO UI] Pet picker shown: "..tostring(title))
+    return lines
 end
-
--- ── Shared state for pet picker selections ────────────────────
-local PickerState = {
-    SellerPet      = "Ankylosaurus",
-    SellerMutation = "Any",
-    SniperPet      = "Red Fox",
-}
-
--- ═══════════════════════════════════════════════════════════
---  HOME TAB  (was Booth)
---  Left = Runtime Controls | Right = Automation
--- ═══════════════════════════════════════════════════════════
-local HL = Tabs.Home:AddLeftGroupbox("Runtime Controls")
-local HR = Tabs.Home:AddRightGroupbox("Automation")
-
--- live status
-local homeStatusLbl = HL:AddLabel(C("Booth: —", DIM).."  |  "..C("Tokens: —", DIM))
-task.spawn(function()
-    while true do task.wait(2)
-        local bt = "—"
-        pcall(function()
-            local best, status = findBestBooth()
-            bt = status or "—"
-        end)
-        local tok = "0"
-        pcall(function() tok = commaNumber(getTokenBalance()) end)
-        SetText(homeStatusLbl,
-            C("Booth: ", DIM)..C(bt, ACCENT_G).."  |  "..
-            C("Tokens: ", DIM)..C(tok, WHITE))
-    end
-end)
-
-HL:AddToggle("BAutoList", {
-    Text    = C("AUTO LIST", GREEN, true),
-    Default = CFG.Seller.AutoList,
-    Tooltip = "Automatically list pets based on active filters.",
-}):OnChanged(function(v) CFG.Seller.AutoList=v; CFG.Seller.PreviewOnly=not v; log("AutoList",tostring(v)) end)
-
-HL:AddToggle("BPreviewOnly", {
-    Text    = "Preview Only (no list)",
-    Default = CFG.Seller.PreviewOnly,
-}):OnChanged(function(v) CFG.Seller.PreviewOnly=v; if v then CFG.Seller.AutoList=false end end)
-
-HL:AddToggle("BSkipFav",    { Text="Skip Favorited", Default=CFG.Seller.SkipFavorited  }):OnChanged(function(v) CFG.Seller.SkipFavorited=v end)
-HL:AddToggle("BSkipLocked", { Text="Skip Locked",    Default=CFG.Seller.SkipLocked     }):OnChanged(function(v) CFG.Seller.SkipLocked=v end)
-HL:AddDivider()
-HL:AddInput("BScanInterval", { Text="Scan Interval",  Default=tostring(CFG.Seller.ScanInterval),       Numeric=true, Finished=true }):OnChanged(function(v) CFG.Seller.ScanInterval=tonumber(v) or CFG.Seller.ScanInterval end)
-HL:AddInput("BListCooldown", { Text="List Cooldown",   Default=tostring(CFG.Seller.ListCooldown),       Numeric=true, Finished=true }):OnChanged(function(v) CFG.Seller.ListCooldown=tonumber(v) or CFG.Seller.ListCooldown end)
-HL:AddInput("BBoothCap",     { Text="Booth Cap",       Default=tostring(CFG.Seller.BoothCap or 50),    Numeric=true, Finished=true }):OnChanged(function(v) CFG.Seller.BoothCap=tonumber(v) or 50; CFG.Seller.MaxAutoListSession=CFG.Seller.BoothCap end)
-HL:AddDropdown("BWeightMode",{ Text="Weight Filter",   Default=CFG.Seller.WeightMode or "Base",        Values={"Base","Visual"} }):OnChanged(function(v) CFG.Seller.WeightMode=tostring(v or "Base") end)
-HL:AddInput("BListMax",      { Text="List Max (once)", Default=tostring(CFG.Seller.ListOnceMax or 50), Numeric=true, Finished=true }):OnChanged(function(v) CFG.Seller.ListOnceMax=tonumber(v) or 50 end)
-
--- Automation
-HR:AddToggle("BAutoClaim",   { Text=C("AUTO CLAIM BOOTH",GREEN,true), Default=CFG.Booth.AutoClaim            }):OnChanged(function(v) CFG.Booth.AutoClaim=v; log("AutoClaim",tostring(v)) end)
-HR:AddToggle("BSmartReclaim",{ Text="Smart Reclaim",                  Default=CFG.Booth.SmartReclaim         }):OnChanged(function(v) CFG.Booth.SmartReclaim=v end)
-HR:AddToggle("BAutoRebuild", { Text="Auto Smart Rebuild On Start",    Default=CFG.Seller.AutoSmartRebuildOnStart }):OnChanged(function(v) CFG.Seller.AutoSmartRebuildOnStart=v end)
-HR:AddToggle("BRemoteCfg",   { Text="Remote Config",                  Default=CFG.Seller.RemoteConfigEnabled }):OnChanged(function(v) CFG.Seller.RemoteConfigEnabled=v end)
-HR:AddDivider()
-HR:AddInput("BMaxDist",      { Text="Max Middle Distance", Default=tostring(CFG.Booth.MaxMiddleDistance),    Numeric=true, Finished=true }):OnChanged(function(v) CFG.Booth.MaxMiddleDistance=tonumber(v) or CFG.Booth.MaxMiddleDistance end)
-HR:AddInput("BBoothSkin",    { Text="Booth Skin",          Default=tostring(CFG.Booth.BoothSkin or "Default"), Finished=true }):OnChanged(function(v) CFG.Booth.BoothSkin=trim(v)~="" and trim(v) or "Default" end)
-HR:AddInput("BClaimInterval",{ Text="Claim Interval (s)",  Default=tostring(CFG.Booth.ClaimInterval or 10), Numeric=true, Finished=true }):OnChanged(function(v) CFG.Booth.ClaimInterval=tonumber(v) or 10 end)
-HR:AddDivider()
-HR:AddButton("LIST UNTIL BOOTH FULL",    function() CFG.Seller.ListOnceMax=tonumber(Opt("BListMax", CFG.Seller.ListOnceMax or 50)) or 50; task.spawn(function() listOnce(CFG.Seller.ListOnceMax) end) end)
-HR:AddButton("REMOVE ALL MY LISTINGS",   function() task.spawn(function() removeAllMyListings(CFG.Listings.RemoveAllMax or 50); task.wait(0.6) end) end)
-HR:AddButton("REBUILD BOOTH",            function() task.spawn(function() rebuildBooth();      task.wait(0.6) end) end)
-HR:AddButton("SMART REBUILD",            function() task.spawn(function() smartRebuildBooth(); task.wait(0.6) end) end)
-HR:AddButton("CLAIM BEST FREE",          function() claimBestFreeBooth() end)
-HR:AddButton("EQUIP SKIN",               function() local skin = tostring(Opt("BBoothSkin", CFG.Booth.BoothSkin or "Default")); CFG.Booth.BoothSkin=trim(skin)~="" and trim(skin) or "Default"; equipSkin() end)
-HR:AddButton("RELOAD REMOTE CONFIG",     function() task.spawn(reloadFilters) end)
-
--- ═══════════════════════════════════════════════════════════
---  SELLER TAB
---  Left = Filter Builder | Right = Active Filters/Candidates
--- ═══════════════════════════════════════════════════════════
-local SLL = Tabs.Seller:AddLeftGroupbox("Filter Builder")
-local SLR = Tabs.Seller:AddRightGroupbox("Active Filters / Candidates")
-
--- pet picker button (Exotic style)
-local sellerPetLbl = SLL:AddLabel(C("Pet: ", DIM)..C(PickerState.SellerPet, ACCENT_G))
-
-SLL:AddButton("🔍  Select Pet", function()
-    ShowPetPickerPopup("Select Pet", getPetList(), function(name)
-        PickerState.SellerPet = name
-        SetText(sellerPetLbl, C("Pet: ", DIM)..C(name, ACCENT_G))
-    end)
-end)
-
-local sellerMutLbl = SLL:AddLabel(C("Mutation: ", DIM)..C("Any", ACCENT_G))
-
-SLL:AddButton("🔍  Select Mutation", function()
-    local mutList = getMutationList()
-    table.insert(mutList, 1, "Any")
-    ShowPetPickerPopup("Select Mutation", mutList, function(name)
-        PickerState.SellerMutation = name
-        SetText(sellerMutLbl, C("Mutation: ", DIM)..C(name, ACCENT_G))
-    end)
-end)
-
-SLL:AddDivider()
-SLL:AddInput("SFilterPrice",  { Text="Price",         Default="111",  Numeric=true, Finished=false })
-SLL:AddInput("SFilterMinKg",  { Text="Min Base KG",   Default="1",    Numeric=true, Finished=false })
-SLL:AddInput("SFilterMaxKg",  { Text="Max Base KG",   Default="3",    Numeric=true, Finished=false })
-SLL:AddInput("SFilterMinAge", { Text="Min Age",       Default="1",    Numeric=true, Finished=false })
-SLL:AddInput("SFilterMaxAge", { Text="Max Age",       Default="100",  Numeric=true, Finished=false })
-SLL:AddInput("SFilterCap",    { Text="Per Filter Cap",Default="5",    Numeric=true, Finished=false })
-SLL:AddDivider()
-
-SLL:AddButton("+ ADD FILTER", function()
-    local ok = addFilter(PickerState.SellerPet, Opt("SFilterPrice", "111"), Opt("SFilterMinKg", "1"),
-              Opt("SFilterMaxKg", "3"), Opt("SFilterMinAge", "1"), Opt("SFilterMaxAge", "100"),
-              PickerState.SellerMutation, Opt("SFilterCap", "5"), "Any")
-    if not ok then log("Add filter UI failed", tostring(PickerState.SellerPet)) end
-    refreshSellerLog(true)
-end)
-SLL:AddButton("Preview Candidates",    function() refreshSellerLog(true) end)
-SLL:AddInput("SDelNum", { Text="Remove Filter #", Default="1", Numeric=true, Finished=false })
-SLL:AddButton("Remove Selected Filter",function() deleteFilter(Opt("SDelNum", 1)); refreshSellerLog(true) end)
-SLL:AddButton("Clear All Filters",     function() clearFilters(); refreshSellerLog(false) end)
-SLL:AddButton("Diagnose This Pet",     function()
-    if diagnosePetFilter then
-        local lines = diagnosePetFilter(PickerState.SellerPet)
-        SetText(sellerLogLbl, linesToStr(lines))
-    end
-end)
-
-local sellerLogLbl = SLR:AddLabel(C("Press Preview Candidates", DIM))
 
 refreshSellerLog = function(showCandidates)
-    local filters    = getFilters()
+    local filters = getFilters()
     local myListings = getMyListings()
     local lines = {
-        C("Filters: ", DIM)..C(tostring(#filters), WHITE),
-        C("Booth: ",   DIM)..C(#myListings.." / "..(CFG.Seller.BoothCap or 50), WHITE),
-        C("Listed: ",  DIM)..C(tostring(State.ListedThisSession or 0), WHITE),
-        C("Weight: ",  DIM)..C(CFG.Seller.WeightMode or "Base", ACCENT_G),
+        "Filters: " .. tostring(#filters),
+        "Booth listings: " .. tostring(#myListings) .. " / " .. tostring(CFG.Seller.BoothCap or 50),
+        "Listed this run: " .. tostring(State.ListedThisSession or 0),
+        "Weight filter: " .. tostring(CFG.Seller.WeightMode or "Base") .. " KG",
+        "Per filter cap: enabled",
+        "Auto smart rebuild: " .. tostring(CFG.Seller.AutoSmartRebuildOnStart),
+        "Remote config: " .. tostring(CFG.Seller.RemoteConfigEnabled) .. " | " .. tostring((CFG.Seller.RemoteConfigURL ~= "" and "URL set") or "no URL"),
+        "Verify after list: " .. tostring(CFG.Seller.VerifyAfterList),
         "------------------------------",
     }
+
     for i, f in ipairs(filters) do
-        if i > 12 then table.insert(lines, C("... +"..(#filters-12).." more", DIM)) break end
-        table.insert(lines, string.format("%02d. "..C("%s","rgb(129,140,248)").." | "..C("%s",WHITE).." | BKG "..C("%s-%s","rgb(74,222,128)").." | Age %s-%s | Mut "..C("%s","rgb(250,204,21)").." | Cap %s",
-            i, f.Pet, tostring(f.Price), fmtKg(f.MinWeight), fmtKg(f.MaxWeight),
-            tostring(f.MinLevel), tostring(f.MaxLevel), tostring(f.Mutation or "Any"), tostring(f.MaxListedPet or 0)))
+        if i > 10 then
+            table.insert(lines, "... +" .. tostring(#filters - 10) .. " more filters")
+            break
+        end
+        table.insert(lines, string.format(
+            "%02d. %s | price %s | BaseKG %s-%s | Age %s-%s | Mut %s | Cap %s",
+            i,
+            f.Pet,
+            tostring(f.Price),
+            fmtKg(f.MinWeight),
+            fmtKg(f.MaxWeight),
+            tostring(f.MinLevel),
+            tostring(f.MaxLevel),
+            tostring(f.Mutation or "Any"),
+            tostring(f.MaxListedPet or 0)
+        ))
     end
+
     if showCandidates then
-        local ok, scan = pcall(buildCandidates)
-        if ok and scan then
+        local scan = buildCandidates()
+        table.insert(lines, "------------------------------")
+        table.insert(lines, string.format(
+            "Pets %d | Candidates %d | Skipped %d",
+            #scan.Pets,
+            #scan.Candidates,
+            #scan.Skipped
+        ))
+
+        for i, c in ipairs(scan.Candidates) do
+            if i > 12 then
+                table.insert(lines, "... +" .. tostring(#scan.Candidates - 12) .. " more candidates")
+                break
+            end
+            table.insert(lines, string.format(
+                "%02d. %s | Base %s | Visual %s | Age %s | Mut %s | price %s %s",
+                i,
+                c.Pet.Name,
+                fmtKg(c.Pet.BaseWeight),
+                fmtKg(c.Pet.VisualWeight),
+                tostring(c.Pet.Age or "?"),
+                tostring(c.Pet.Mutation or "Normal"),
+                tostring(c.Filter.Price),
+                filterRiskText(c.Filter)
+            ))
+        end
+
+        if CFG.Seller.ShowSkipReasons and #scan.Skipped > 0 then
             table.insert(lines, "------------------------------")
-            table.insert(lines, C("Pets "..#scan.Pets, ACCENT_G).." | "..C("Cand "..#scan.Candidates, GREEN).." | "..C("Skip "..#scan.Skipped, DIM))
-            for i, c in ipairs(scan.Candidates) do
-                if i > 10 then table.insert(lines, C("... +"..(#scan.Candidates-10).." more", DIM)) break end
-                table.insert(lines, string.format("%02d. "..C("%s",ACCENT_G).." | B%s V%s | Age %s | Mut "..C("%s",YELLOW).." | "..C("%s",GREEN),
-                    i, c.Pet.Name, fmtKg(c.Pet.BaseWeight), fmtKg(c.Pet.VisualWeight),
-                    tostring(c.Pet.Age or "?"), tostring(c.Pet.Mutation or "Normal"), tostring(c.Filter.Price)))
+            table.insert(lines, "Skipped sample:")
+            for i, s in ipairs(scan.Skipped) do
+                if i > 8 then
+                    table.insert(lines, "... +" .. tostring(#scan.Skipped - 8) .. " more skipped")
+                    break
+                end
+                local p = s.Pet or {}
+                table.insert(lines, string.format(
+                    "%02d. %s | Base %s | Visual %s | Age %s | Mut %s | %s",
+                    i,
+                    tostring(p.Name or "?"),
+                    fmtKg(p.BaseWeight or p.Weight),
+                    fmtKg(p.VisualWeight or p.Weight),
+                    tostring(p.Age or "?"),
+                    tostring(p.Mutation or "Normal"),
+                    tostring(s.Reason or "?")
+                ))
             end
         end
     end
-    SetText(sellerLogLbl, linesToStr(lines))
+
+    addLines(sellerLog, lines)
 end
 
--- ═══════════════════════════════════════════════════════════
---  MARKET TAB
---  Left = My Listings | Right = Market Sample
--- ═══════════════════════════════════════════════════════════
-local ML = Tabs.Market:AddLeftGroupbox("My Listings")
-local MR = Tabs.Market:AddRightGroupbox("Market Sample")
-
-ML:AddButton("Refresh My Listings",    function() refreshMyListingsLog() end)
-ML:AddButton("REMOVE ALL MY LISTINGS", function()
-    task.spawn(function() removeAllMyListings(CFG.Listings.RemoveAllMax or 50); task.wait(0.6); refreshMyListingsLog() end)
+filterSec:AddButton("+ Add Filter", function()
+    addFilter(
+        petInput:Get(),
+        priceInput:Get(),
+        minKgInput:Get(),
+        maxKgInput:Get(),
+        minAgeInput:Get(),
+        maxAgeInput:Get(),
+        mutationInput:Get(),
+        maxListedInput:Get(),
+        variantInput:Get()
+    )
+    refreshSellerLog(true)
 end)
-ML:AddInput("MRemoveUUID", { Text="Remove by UUID (short ok)", Default="", Finished=false })
-ML:AddButton("Remove That Listing", function()
-    local uuid = tostring(Opt("MRemoveUUID", ""))
-    if uuid=="" then return end
-    for _, l in ipairs(getMyListings()) do
-        if tostring(l.ListingUUID or ""):sub(1,#uuid)==uuid then
-            removeListingUUID(l.ListingUUID); task.wait(0.4); refreshMyListingsLog()
-            NOMO_NOTIFY({ Title="Market", Content="Removed!", Duration=2 }); return
+
+filterSec:AddButton("Preview Candidates", function()
+    refreshSellerLog(true)
+end, "outline")
+
+local delFilterInput = filterLogSec:AddInput("Remove Filter #", "1")
+filterLogSec:AddButton("Remove Selected Filter", function()
+    deleteFilter(delFilterInput:Get())
+    refreshSellerLog(true)
+end, "outline")
+
+filterLogSec:AddButton("Clear All Filters", function()
+    clearFilters()
+    refreshSellerLog(false)
+end, "outline")
+
+--// LISTINGS PAGE
+local listingsPage = win:CreatePage("Listings")
+local listingRow = listingsPage:AddRow()
+local myListingSec = listingsPage:AddSectionInRow(listingRow, "My Listings", 1)
+local allListingSec = listingsPage:AddSection("Market Listings Sample")
+
+local myListingList = make("ScrollingFrame", {
+    Size = UDim2.new(1, 0, 0, 280),
+    BackgroundColor3 = T.BG,
+    BorderSizePixel = 0,
+    ScrollBarThickness = 4,
+    ScrollBarImageColor3 = T.Border,
+    CanvasSize = UDim2.new(0, 0, 0, 0),
+    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+}, myListingSec.Frame)
+corner(myListingList, 8); stroke(myListingList); pad(myListingList, 6, 6, 6, 6); vlist(myListingList, 4)
+
+local marketLog = allListingSec:AddLog(125)
+
+local function clearListingRows()
+    for _, child in ipairs(myListingList:GetChildren()) do
+        if child:IsA("Frame") or child:IsA("TextLabel") then
+            child:Destroy()
         end
     end
-    NOMO_NOTIFY({ Title="Market", Content="UUID not found", Duration=2 })
-end)
-local myListingsLbl = ML:AddLabel(C("Press Refresh", DIM))
+end
 
-MR:AddButton("Refresh Market Sample", function() refreshMarketSample() end)
-local marketLbl = MR:AddLabel(C("—", DIM))
+local function makeListingRow(i, l)
+    local row = make("Frame", {
+        Size = UDim2.new(1, -4, 0, 34),
+        BackgroundColor3 = T.Card2,
+        BorderSizePixel = 0,
+    }, myListingList)
+    corner(row, 7)
 
-refreshMyListingsLog = function()
+    local xBtn = make("TextButton", {
+        Size = UDim2.fromOffset(24, 24),
+        Position = UDim2.new(0, 6, 0.5, -12),
+        BackgroundColor3 = T.Red,
+        Text = "X",
+        TextColor3 = Color3.new(1, 1, 1),
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+    }, row)
+    corner(xBtn, 6)
+
+    local info = make("TextLabel", {
+        Size = UDim2.new(1, -40, 1, 0),
+        Position = UDim2.fromOffset(36, 0),
+        BackgroundTransparency = 1,
+        Text = string.format(
+            "%02d. %s | %s | %s | id %s",
+            i,
+            tostring(l.PetType or "?"),
+            tostring(l.ItemType or "?"),
+            commaNumber(l.Price),
+            tostring(l.ListingUUID or ""):sub(1, 8)
+        ),
+        TextColor3 = T.Text,
+        Font = Enum.Font.Gotham,
+        TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, row)
+
+    xBtn.Activated:Connect(function()
+        xBtn.Text = "..."
+        local ok = removeListingUUID(l.ListingUUID)
+        task.wait(0.35)
+        refreshMyListingsLog()
+        if not ok then
+            log("X remove failed", tostring(l.ListingUUID))
+        end
+    end)
+end
+
+function refreshMyListingsLog()
     local my = getMyListings()
-    local lines = {
-        C("My listings: "..#my, WHITE),
-        "------------------------------",
-    }
+    clearListingRows()
+
+    make("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 22),
+        BackgroundTransparency = 1,
+        Text = "My listings: " .. tostring(#my) .. "   |   tap X to remove",
+        TextColor3 = T.Sub,
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, myListingList)
+
     for i, l in ipairs(my) do
-        if i > 50 then table.insert(lines, C("... +"..(#my-50).." more", DIM)) break end
-        table.insert(lines, string.format("%02d. "..C("%s",ACCENT_G).." | "..C("%s tok",GREEN).." | %s",
-            i, tostring(l.PetType or "?"), commaNumber(l.Price), tostring(l.ListingUUID or ""):sub(1,8)))
-    end
-    SetText(myListingsLbl, linesToStr(lines))
-end
-
-refreshMarketSample = function()
-    local ok, all = pcall(getAllListings)
-    if not ok or type(all) ~= "table" then
-        SetText(marketLbl, C("Failed to fetch listings", RED_C))
-        return
-    end
-    local CAP = 6
-    local lines = { C("All listings: "..#all, WHITE) }
-    for i, l in ipairs(all) do
-        if i > CAP then table.insert(lines, C("... +"..(#all-CAP).." more", DIM)) break end
-        table.insert(lines, string.format("%02d. "..C("%s",ACCENT_G).." | "..C("%s",GREEN).." | %s",
-            i, l.PetType, tostring(l.Price), l.OwnerName))
-    end
-    SetText(marketLbl, linesToStr(lines))
-end
-
--- ═══════════════════════════════════════════════════════════
---  SNIPER TAB
---  Left = Sniper Control | Right = Matches / Watchlist
--- ═══════════════════════════════════════════════════════════
-local SNL = Tabs.Sniper:AddLeftGroupbox("Sniper Control")
-local SNR = Tabs.Sniper:AddRightGroupbox("Matches / Watchlist")
-
-SNL:AddToggle("SnEnabled", { Text=C("ENABLE SNIPER",GREEN,true),  Default=CFG.Sniper.Enabled }):OnChanged(function(v) CFG.Sniper.Enabled=v; log("Sniper",tostring(v)) end)
-SNL:AddToggle("SnDryRun",  { Text="Dry Run (no buy)",             Default=CFG.Sniper.DryRun  }):OnChanged(function(v) CFG.Sniper.DryRun=v end)
-SNL:AddToggle("SnRescan",  { Text="Rescan Before Buy",            Default=CFG.Sniper.RescanBeforeBuy }):OnChanged(function(v) CFG.Sniper.RescanBeforeBuy=v end)
-SNL:AddDivider()
-
--- sniper pet picker
-local sniperPetLbl = SNL:AddLabel(C("Pet: ", DIM)..C(PickerState.SniperPet, ACCENT_G))
-SNL:AddButton("🔍  Select Pet", function()
-    ShowPetPickerPopup("Sniper Target Pet", getPetList(), function(name)
-        PickerState.SniperPet = name
-        SetText(sniperPetLbl, C("Pet: ", DIM)..C(name, ACCENT_G))
-    end)
-end)
-
-SNL:AddInput("SnMaxPrice",    { Text="Max Price",    Default="6",                                         Numeric=true, Finished=false })
-SNL:AddInput("SnBuyCooldown", { Text="Buy Cooldown", Default=tostring(CFG.Sniper.BuyCooldown or 0),       Numeric=true, Finished=true  }):OnChanged(function(v) CFG.Sniper.BuyCooldown        =tonumber(v) or 0  end)
-SNL:AddInput("SnShow",        { Text="Show Max",     Default=tostring(CFG.Sniper.MaxMatchesShown or 20),  Numeric=true, Finished=true  }):OnChanged(function(v) CFG.Sniper.MaxMatchesShown     =tonumber(v) or 20 end)
-SNL:AddInput("SnPerPet",      { Text="Per Pet",      Default=tostring(CFG.Sniper.MaxMatchesPerPet or 5),  Numeric=true, Finished=true  }):OnChanged(function(v) CFG.Sniper.MaxMatchesPerPet    =tonumber(v) or 5  end)
-SNL:AddInput("SnPerOwner",    { Text="Per Owner",    Default=tostring(CFG.Sniper.MaxMatchesPerOwner or 2),Numeric=true, Finished=true  }):OnChanged(function(v) CFG.Sniper.MaxMatchesPerOwner  =tonumber(v) or 2  end)
-SNL:AddDivider()
-
-local sniperLogLbl = SNR:AddLabel(C("Press Dry Run Scan", DIM))
-
-applySniperLimits = function()
-    CFG.Sniper.BuyCooldown        = tonumber(Opt("SnBuyCooldown", CFG.Sniper.BuyCooldown or 0)) or 0
-    CFG.Sniper.MaxMatchesShown    = tonumber(Opt("SnShow", CFG.Sniper.MaxMatchesShown or 20)) or 20
-    CFG.Sniper.MaxMatchesPerPet   = tonumber(Opt("SnPerPet", CFG.Sniper.MaxMatchesPerPet or 5)) or 5
-    CFG.Sniper.MaxMatchesPerOwner = tonumber(Opt("SnPerOwner", CFG.Sniper.MaxMatchesPerOwner or 2)) or 2
-end
-
-refreshSniperLog = function()
-    local lines = {
-        C("DryRun=",DIM)..C(tostring(CFG.Sniper.DryRun),CFG.Sniper.DryRun and YELLOW or GREEN).." | "..
-        C("Rescan=",DIM)..C(tostring(CFG.Sniper.RescanBeforeBuy), WHITE),
-        "------------------------------",
-        C("Watchlist:",DIM),
-    }
-    for name, cfg2 in pairs(CFG.Sniper.Watchlist or {}) do
-        table.insert(lines, "  "..C("- ",DIM)..C(tostring(name),ACCENT_G).." "..C("<=",DIM).." "..C(tostring(type(cfg2)=="table" and cfg2.MaxPrice or cfg2),GREEN))
-    end
-    table.insert(lines, "------------------------------")
-    table.insert(lines, C("Matches: "..#State.LastSniperMatches, WHITE))
-    for i, m in ipairs(State.LastSniperMatches) do
-        if i > 18 then table.insert(lines, C("... +"..(#State.LastSniperMatches-18).." more", DIM)) break end
-        local l = m.Listing
-        table.insert(lines, string.format("%02d. "..C("%s",ACCENT_G).." | "..C("%s",GREEN).." | %s",
-            i, l.PetType, tostring(l.Price), l.OwnerName))
-    end
-    SetText(sniperLogLbl, linesToStr(lines))
-end
-
-SNL:AddButton("ADD WATCH",               function() applySniperLimits(); addWatch(PickerState.SniperPet, Opt("SnMaxPrice", 0)); refreshSniperLog() end)
-SNL:AddButton("DRY RUN SCAN",            function() applySniperLimits(); snipeDryRun(); refreshSniperLog() end)
-SNL:AddButton("Clear Watchlist",         function() clearWatch(); State.LastSniperMatches={}; State.LastSniperRawCount=0; refreshSniperLog() end)
-SNL:AddButton("BUY FIRST (blocked if DryRun)", function() buyFirstMatch(); refreshSniperLog() end)
-
--- ═══════════════════════════════════════════════════════════
---  SETTINGS TAB
--- ═══════════════════════════════════════════════════════════
-local SETL = Tabs.Settings:AddLeftGroupbox("Interface")
-local SETR = Tabs.Settings:AddRightGroupbox("Activity Log")
-
-SETL:AddToggle("ShowUIOnLoad", {
-    Text    = "Show UI On Load",
-    Default = UIState.ShowUIOnLoad,
-    Tooltip = "Show NOMO Market automatically when the script executes.",
-}):OnChanged(function(v)
-    UIState.ShowUIOnLoad = v
-    pcall(function()
-        if not (type(isfolder)=="function" and isfolder("Nomo")) then
-            if type(makefolder)=="function" then makefolder("Nomo") end
+        if i > 50 then
+            make("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 22),
+                BackgroundTransparency = 1,
+                Text = "... +" .. tostring(#my - 50) .. " more",
+                TextColor3 = T.Sub,
+                Font = Enum.Font.Gotham,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Left,
+            }, myListingList)
+            break
         end
-        writefile("Nomo/UISettings.json", HttpSvc:JSONEncode({ ShowUIOnLoad=v }))
-    end)
-end)
-
-SETL:AddToggle("SetCompact",    { Text="Compact Booth Data",    Default=CFG.UI.CompactBoothData ~= false }):OnChanged(function(v) CFG.UI.CompactBoothData=v end)
-SETL:AddToggle("SetFilterSpam", { Text="Filter Game Warn Spam", Default=CFG.UI.FilterGameSpam ~= false   }):OnChanged(function(v) CFG.UI.FilterGameSpam=v; if v then pcall(installWarnFilter) end end)
-SETL:AddInput("SetFilterPath",  { Text="Filter Path", Default=getFilterPath(), Finished=true }):OnChanged(function(v) CFG.Seller.ListingFilterPath=v end)
-SETL:AddButton("Save / Reload Filter Path", function() CFG.Seller.ListingFilterPath=tostring(Opt("SetFilterPath", getFilterPath())); reloadFilters(); log("Filter path",CFG.Seller.ListingFilterPath) end)
-SETL:AddButton("Reload Pet API List",       function() loadGamePetList(); log("PetList",tostring(#State.PetList)) end)
-SETL:AddButton("Stop Script",               function() State.Stop("settings stop"); NOMO_NOTIFY({ Title="NOMO", Content="Script stopped", Duration=3 }) end)
-
-local actLogLbl = SETR:AddLabel(C("Press Refresh Activity", DIM))
-SETR:AddButton("Refresh Activity", function() SetText(actLogLbl, linesToStr(State.Logs, 50)) end)
-
--- ═══════════════════════════════════════════════════════════
---  CONFIG TAB
--- ═══════════════════════════════════════════════════════════
-local CfgTab  = Window:AddTab("Config")
-local MenuGrp = CfgTab:AddLeftGroupbox("Keybind")
-MenuGrp:AddLabel("Toggle"):AddKeyPicker("MenuKeybind", { Default="RightShift", NoUI=true, Text="Menu keybind" })
-Library.ToggleKeybind = Opt("MenuKeybind", rawget(rawget(getgenv(), "Options") or {}, "MenuKeybind"))
-
-if ok2 and ThemeManager then
-    ThemeManager:SetLibrary(Library)
-    ThemeManager:AttachToGroupbox(CfgTab:AddRightGroupbox("Theme"))
-end
-if ok3 and SaveManager then
-    SaveManager:SetLibrary(Library)
-    SaveManager:SetIgnoreIndexes({})
-    SaveManager:SetFolder("NomoMarket")
-    SaveManager:AttachToGroupbox(CfgTab:AddLeftGroupbox("Config"))
-    pcall(function() SaveManager:LoadAutoloadConfig() end)
+        makeListingRow(i, l)
+    end
 end
 
-end -- successful Obsidian library load
-end -- NOMO_MODE == "full"
+local function refreshMarketSample()
+    local all = getAllListings()
+    local lines = {"All listings: " .. tostring(#all), "------------------------------"}
 
-local statusGui
-local statusText
-local updateStatusOverlay = function() end
-
-local function createStatusOverlay()
-    if NOMO_MODE ~= "status" then return end
-
-    local pg = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
-    local old = pg:FindFirstChild("NOMO_MARKET_STATUS")
-    if old then old:Destroy() end
-
-    statusGui = Instance.new("ScreenGui")
-    statusGui.Name = "NOMO_MARKET_STATUS"
-    statusGui.ResetOnSpawn = false
-    statusGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    statusGui.Parent = pg
-
-    local frame = Instance.new("Frame")
-    frame.Size = UDim2.fromOffset(360, 190)
-    frame.Position = UDim2.fromOffset(20, 80)
-    frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    frame.BackgroundTransparency = 0.18
-    frame.BorderSizePixel = 0
-    frame.Parent = statusGui
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
-    corner.Parent = frame
-
-    local stroke = Instance.new("UIStroke")
-    stroke.Color = Color3.fromRGB(99, 102, 241)
-    stroke.Thickness = 1
-    stroke.Parent = frame
-
-    statusText = Instance.new("TextLabel")
-    statusText.Size = UDim2.new(1, -18, 1, -18)
-    statusText.Position = UDim2.fromOffset(9, 9)
-    statusText.BackgroundTransparency = 1
-    statusText.RichText = true
-    statusText.TextXAlignment = Enum.TextXAlignment.Left
-    statusText.TextYAlignment = Enum.TextYAlignment.Top
-    statusText.Font = Enum.Font.GothamBold
-    statusText.TextSize = 18
-    statusText.TextColor3 = Color3.fromRGB(245, 245, 245)
-    statusText.Text = "NOMO MARKET\nLoading..."
-    statusText.Parent = frame
-
-    updateStatusOverlay = function()
-        if not statusText then return end
-        local ok, text = pcall(function()
-            local booth = select(2, findBestBooth()) or "?"
-            local mine = getMyListings()
-            local filters = getFilters()
-            local matches = State.LastSniperMatches or {}
-            return table.concat({
-                '<font color="rgb(99,255,99)">NOMO MARKET</font>',
-                'Mode: <font color="rgb(129,140,248)">' .. tostring(NOMO_MODE) .. '</font>',
-                'Booth: <font color="rgb(99,255,99)">' .. tostring(booth) .. '</font>',
-                'Listings: ' .. tostring(#mine) .. ' / ' .. tostring(CFG.Seller.BoothCap or 50),
-                'Filters: ' .. tostring(#filters),
-                'Auto List: ' .. tostring(CFG.Seller.AutoList == true),
-                'Sniper: ' .. tostring(CFG.Sniper.Enabled == true) .. ' | Matches: ' .. tostring(#matches),
-                'Tokens: <font color="rgb(99,255,99)">' .. commaNumber(getTokenBalance()) .. '</font>',
-                'Session: ' .. tostring(math.floor(os.clock())) .. 's',
-            }, '\n')
-        end)
-        statusText.Text = ok and text or ("NOMO MARKET\nStatus error: " .. tostring(text))
+    for i, l in ipairs(all) do
+        if i > 10 then
+            table.insert(lines, "... +" .. tostring(#all - 10) .. " more")
+            break
+        end
+        table.insert(lines, string.format(
+            "%02d. %s | price %s | owner %s",
+            i,
+            l.PetType,
+            tostring(l.Price),
+            l.OwnerName
+        ))
     end
 
-    updateStatusOverlay()
+    addLines(marketLog, lines)
 end
 
--- ═══════════════════════════════════════════════════════════
---  Startup init
--- ═══════════════════════════════════════════════════════════
-print("[NOMO UI] Running startup init...")
+myListingSec:AddButton("Refresh My Listings", refreshMyListingsLog)
+myListingSec:AddButton("REMOVE ALL MY LISTINGS", function()
+    task.spawn(function()
+        removeAllMyListings(CFG.Listings.RemoveAllMax or 50)
+        task.wait(0.6)
+        refreshMyListingsLog()
+    end)
+end, "outline")
+
+allListingSec:AddButton("Refresh Market Sample", refreshMarketSample)
+
+--// SNIPER PAGE
+local sniperPage = win:CreatePage("Sniper")
+local sniperRow = sniperPage:AddRow()
+local sniperCtrl = sniperPage:AddSectionInRow(sniperRow, "Sniper Control", 0.45)
+local sniperResultSec = sniperPage:AddSectionInRow(sniperRow, "Sniper Matches", 0.55)
+
+sniperCtrl:AddToggle("Enabled", CFG.Sniper.Enabled, function(v)
+    CFG.Sniper.Enabled = v
+    log("Sniper Enabled", tostring(v))
+end)
+
+sniperCtrl:AddToggle("Dry Run", CFG.Sniper.DryRun, function(v)
+    CFG.Sniper.DryRun = v
+    log("Sniper DryRun", tostring(v))
+end)
+
+sniperCtrl:AddToggle("Rescan Before Buy", CFG.Sniper.RescanBeforeBuy, function(v)
+    CFG.Sniper.RescanBeforeBuy = v
+    log("Sniper RescanBeforeBuy", tostring(v))
+end)
+
+local sPet = sniperCtrl:AddSearchDropdown("Pet", getPetList(), "Red Fox")
+local sMax = sniperCtrl:AddInput("Max Price", "6")
+local sBuyCooldown = sniperCtrl:AddInput("Buy Cooldown", tostring(CFG.Sniper.BuyCooldown or 8), function(v)
+    CFG.Sniper.BuyCooldown = toNumber(v) or CFG.Sniper.BuyCooldown or 8
+end)
+local sShow = sniperCtrl:AddInput("Show", tostring(CFG.Sniper.MaxMatchesShown or 20), function(v)
+    CFG.Sniper.MaxMatchesShown = toInt(v) or CFG.Sniper.MaxMatchesShown or 20
+end)
+local sPerPet = sniperCtrl:AddInput("Per Pet", tostring(CFG.Sniper.MaxMatchesPerPet or 5), function(v)
+    CFG.Sniper.MaxMatchesPerPet = toInt(v) or CFG.Sniper.MaxMatchesPerPet or 5
+end)
+local sPerOwner = sniperCtrl:AddInput("Per Owner", tostring(CFG.Sniper.MaxMatchesPerOwner or 2), function(v)
+    CFG.Sniper.MaxMatchesPerOwner = toInt(v) or CFG.Sniper.MaxMatchesPerOwner or 2
+end)
+
+local sniperLog = sniperResultSec:AddLog(315)
+
+local function applySniperLimits()
+    CFG.Sniper.BuyCooldown = toNumber(sBuyCooldown:Get()) or CFG.Sniper.BuyCooldown or 8
+    CFG.Sniper.MaxMatchesShown = toInt(sShow:Get()) or CFG.Sniper.MaxMatchesShown or 20
+    CFG.Sniper.MaxMatchesPerPet = toInt(sPerPet:Get()) or CFG.Sniper.MaxMatchesPerPet or 5
+    CFG.Sniper.MaxMatchesPerOwner = toInt(sPerOwner:Get()) or CFG.Sniper.MaxMatchesPerOwner or 2
+end
+
+local function refreshSniperLog()
+    local lines = {
+        "Safety: exact pet " .. tostring(CFG.Sniper.RequireExactPetName) .. " | max price required " .. tostring(not CFG.Sniper.AllowNoMaxPrice),
+        "Rescan before buy: " .. tostring(CFG.Sniper.RescanBeforeBuy) .. " | DryRun: " .. tostring(CFG.Sniper.DryRun),
+        "------------------------------",
+        "Watchlist:",
+    }
+
+    for name, cfg in pairs(CFG.Sniper.Watchlist or {}) do
+        table.insert(lines, "- " .. tostring(name) .. " <= " .. tostring(type(cfg) == "table" and cfg.MaxPrice or cfg))
+    end
+
+    table.insert(lines, "------------------------------")
+    table.insert(lines, "Matches: " .. tostring(#State.LastSniperMatches) .. " shown / raw " .. tostring(State.LastSniperRawCount or #State.LastSniperMatches))
+
+    for i, m in ipairs(State.LastSniperMatches) do
+        if i > 18 then
+            table.insert(lines, "... +" .. tostring(#State.LastSniperMatches - 18) .. " more shown")
+            break
+        end
+
+        local l = m.Listing
+        table.insert(lines, string.format(
+            "%02d. %s | price %s | owner %s",
+            i,
+            l.PetType,
+            tostring(l.Price),
+            l.OwnerName
+        ))
+    end
+
+    addLines(sniperLog, lines)
+end
+
+sniperCtrl:AddButton("Add Watch", function()
+    applySniperLimits()
+    addWatch(sPet:Get(), sMax:Get())
+    refreshSniperLog()
+end)
+
+sniperCtrl:AddButton("Dry Run Scan", function()
+    applySniperLimits()
+    snipeDryRun()
+    refreshSniperLog()
+end, "outline")
+
+sniperCtrl:AddButton("Clear Watchlist", function()
+    clearWatch()
+    State.LastSniperMatches = {}
+    State.LastSniperRawCount = 0
+    refreshSniperLog()
+end, "outline")
+
+sniperCtrl:AddButton("BUY FIRST (blocked if DryRun)", function()
+    buyFirstMatch()
+    refreshSniperLog()
+end, "outline")
+
+--// SETTINGS PAGE
+local settingsPage = win:CreatePage("Settings")
+local settingSec = settingsPage:AddSection("Settings")
+local filterPathInput = settingSec:AddInput("Filter Path", getFilterPath(), function(v)
+    CFG.Seller.ListingFilterPath = v
+    reloadFilters()
+end)
+
+settingSec:AddToggle("Compact Booth Data", CFG.UI.CompactBoothData ~= false, function(v)
+    CFG.UI.CompactBoothData = v
+    log("CompactBoothData", tostring(v))
+end)
+
+settingSec:AddToggle("Filter Game Warn Spam", CFG.UI.FilterGameSpam ~= false, function(v)
+    CFG.UI.FilterGameSpam = v
+    if v then
+        local ok = installWarnFilter()
+        log("WarnFilter", tostring(ok))
+    else
+        log("WarnFilter disabled after next reload")
+    end
+end)
+
+settingSec:AddButton("Reload Pet API List", function()
+    loadGamePetList()
+    log("PetList reloaded", tostring(#State.PetList))
+end, "outline")
+
+settingSec:AddButton("Save / Reload Filter Path", function()
+    CFG.Seller.ListingFilterPath = filterPathInput:Get()
+    reloadFilters()
+    log("Filter path set", CFG.Seller.ListingFilterPath)
+end)
+
+settingSec:AddButton("Stop Script", function()
+    State.Stop("settings stop")
+end, "outline")
+
+local activitySec = settingsPage:AddSection("Activity Log")
+local activityLog = activitySec:AddLog(230)
+
+activitySec:AddButton("Refresh Activity", function()
+    addLines(activityLog, State.Logs)
+end)
+
+--// Public helpers
+getgenv().NOMO_V32_REFRESH_BOOTH = refreshBoothLog
+getgenv().NOMO_V32_REFRESH_SELLER = function() refreshSellerLog(true) end
+getgenv().NOMO_V32_REFRESH_LISTINGS = function() refreshMyListingsLog(); refreshMarketSample() end
+getgenv().NOMO_V39_REMOVE_ALL_MY_LISTINGS = removeAllMyListings
+getgenv().NOMO_V40_LIST_ONCE = listOnce
+getgenv().NOMO_V42_LIST_UNTIL_BOOTH_FULL = listOnce
+getgenv().NOMO_V49_REBUILD_BOOTH = rebuildBooth
+getgenv().NOMO_V50_SMART_REBUILD_BOOTH = smartRebuildBooth
+getgenv().NOMO_V61_VERIFY_LISTING = function(petName)
+    petName = norm(petName or "")
+    for _, l in ipairs(getMyListings()) do
+        if petName == "" or norm(l.PetType) == petName then
+            print("[NOMO LISTING]", tostring(l.PetType), "price", tostring(l.Price), "item", tostring(l.ItemId), "uuid", tostring(l.ListingUUID))
+        end
+    end
+end
+
+getgenv().NOMO_V57_MUTATION_LIST = function()
+    for i, name in ipairs(getMutationList()) do print("[NOMO MUTATION]", i, name) end
+    return getMutationList()
+end
+
+getgenv().NOMO_V52_DUMP_PET_TRAITS = function(petName)
+    petName = norm(petName or "")
+    for _, p in ipairs(getInventoryPets()) do
+        if petName == "" or p.NameNorm == petName then
+            print("[NOMO TRAIT]", p.Name, "Base", fmtKg(p.BaseWeight), "Visual", fmtKg(p.VisualWeight), "Age", tostring(p.Age), "RawVariant", tostring(p.Variant), "Mutation", tostring(p.Mutation))
+        end
+    end
+end
+
+getgenv().NOMO_V51_RELOAD_REMOTE_CONFIG = function(url)
+    if url then CFG.Seller.RemoteConfigURL = tostring(url) end
+    return reloadFilters()
+end
+getgenv().NOMO_V46_DIAGNOSE_PET = function(name)
+    local lines = diagnosePetFilter(name)
+    for _, line in ipairs(lines) do print("[NOMO DIAG]", line) end
+    return lines
+end
+
+getgenv().NOMO_V45_SET_WEIGHT_MODE = function(mode)
+    mode = tostring(mode or "Base")
+    if mode ~= "Visual" then mode = "Base" end
+    CFG.Seller.WeightMode = mode
+    log("WeightMode", mode)
+end
+getgenv().NOMO_V40_RESET_SESSION_COUNT = function()
+    State.ListedThisSession = 0
+    log("Session list count reset")
+end
+getgenv().NOMO_V32_REFRESH_SNIPER = refreshSniperLog
+getgenv().NOMO_V32_STOP = function() State.Stop("manual") end
+
+--// startup
 ensureFolder()
 loadGamePetList()
 loadGameMutationList()
 reloadFilters()
 installWarnFilter()
-log("Started", tostring(VERSION or "").." mode="..tostring(NOMO_MODE))
+
+log("Started", VERSION .. " PRIVATE UI")
+refreshPills()
 log("PetList", #State.PetList, "| FilterPath", getFilterPath())
-createStatusOverlay()
+
+refreshBoothLog()
 refreshSellerLog(false)
 refreshMyListingsLog()
 refreshMarketSample()
 refreshSniperLog()
-NOMO_NOTIFY({ Title="NOMO Market", Content=(VERSION or "").." loaded - mode "..tostring(NOMO_MODE), Duration=4 })
-print("[NOMO UI] Done!")
 
+win:SelectPage("Booth")
+
+--// Auto smart rebuild once per server/job after first execution.
 task.spawn(function()
-    task.wait(1.5)
-    local ok, err = pcall(function() autoClaimTick("startup") end)
-    if not ok then log("AutoClaim startup error", tostring(err)) end
+    local autoKey = "__NOMO_MARKET_SMART_REBUILD_DONE_" .. tostring(game.JobId)
+    local runningKey = "__NOMO_MARKET_SMART_REBUILD_RUNNING_" .. tostring(game.JobId)
+    if not CFG.Seller.AutoSmartRebuildOnStart then
+        log("Auto Smart Rebuild", "disabled")
+        return
+    end
+    if getgenv()[autoKey] then
+        log("Auto Smart Rebuild", "already done for this server")
+        return
+    end
+    if getgenv()[runningKey] then
+        log("Auto Smart Rebuild", "already running")
+        return
+    end
+
+    getgenv()[runningKey] = true
+    local delayTime = tonumber(CFG.Seller.StartupSmartRebuildDelay) or 8
+    log("Auto Smart Rebuild scheduled", tostring(delayTime) .. "s")
+    task.wait(delayTime)
+
+    local retries = math.max(1, toInt(CFG.Seller.StartupSmartRebuildRetries) or 5)
+    local retryDelay = tonumber(CFG.Seller.StartupSmartRebuildRetryDelay) or 4
+
+    for attempt = 1, retries do
+        if not State.Running then break end
+
+        local boothReady = ensureBoothForListing()
+        local filtersReady = #(getFilters() or {}) > 0
+        if not boothReady then
+            log("Auto Smart Rebuild waiting", "no booth", "try", tostring(attempt) .. "/" .. tostring(retries))
+        elseif not filtersReady then
+            log("Auto Smart Rebuild waiting", "no filters", "try", tostring(attempt) .. "/" .. tostring(retries))
+        else
+            local ok, result = pcall(smartRebuildBooth)
+            if ok then
+                getgenv()[autoKey] = true
+                getgenv()[runningKey] = nil
+                log("Auto Smart Rebuild complete", "try", tostring(attempt), "listed", tostring(type(result) == "table" and result.Listed or "?"))
+                return
+            end
+            log("Auto Smart Rebuild error", tostring(result), "try", tostring(attempt) .. "/" .. tostring(retries))
+        end
+
+        task.wait(retryDelay)
+    end
+
+    getgenv()[runningKey] = nil
+    log("Auto Smart Rebuild gave up", "will retry next reload/server")
 end)
 
--- ── Public helpers ────────────────────────────────────────
-getgenv().NOMO_V32_REFRESH_SELLER    = function() refreshSellerLog(true) end
-getgenv().NOMO_V32_REFRESH_LISTINGS  = function() refreshMyListingsLog(); refreshMarketSample() end
-getgenv().NOMO_V39_REMOVE_ALL_MY_LISTINGS = removeAllMyListings
-getgenv().NOMO_V40_LIST_ONCE              = listOnce
-getgenv().NOMO_V42_LIST_UNTIL_BOOTH_FULL  = listOnce
-getgenv().NOMO_V49_REBUILD_BOOTH          = rebuildBooth
-getgenv().NOMO_V50_SMART_REBUILD_BOOTH    = smartRebuildBooth
-getgenv().NOMO_V32_REFRESH_SNIPER         = refreshSniperLog
-getgenv().NOMO_V32_STOP                   = function() State.Stop("manual") end
-
--- ── Main background loop ──────────────────────────────────
+--// Main background loops
 task.spawn(function()
     while State.Running do
         local now = os.clock()
-        if CFG.Booth.AutoClaim and now-(State.LastAutoClaimAt or 0) >= (tonumber(CFG.Booth.ClaimInterval) or 10) then
+
+        if CFG.Booth.AutoClaim and now - (State.LastAutoClaimAt or 0) >= (tonumber(CFG.Booth.ClaimInterval) or 10) then
             State.LastAutoClaimAt = now
-            local ok, err = pcall(function() autoClaimTick("loop") end)
-            if not ok then log("AutoClaim error", tostring(err)) end
+            local ok, err = pcall(function()
+                local target, status = findBestBooth()
+                if status == "MINE" then
+                    State.LastBooth = target
+                elseif status == "FREE" then
+                    log("AutoClaim attempting best free booth")
+                    claimBestFreeBooth()
+                end
+            end)
+            if not ok then
+                log("AutoClaim error", tostring(err))
+            end
         end
-        if CFG.Seller.Enabled and CFG.Seller.AutoList and now-State.LastSellerScanAt >= (tonumber(CFG.Seller.ScanInterval) or 15) then
+
+        if CFG.Seller.Enabled and CFG.Seller.AutoList and now - State.LastSellerScanAt >= (tonumber(CFG.Seller.ScanInterval) or 15) then
             State.LastSellerScanAt = now
             local ok, scan = pcall(buildCandidates)
-            if ok then autoList(scan) else log("Seller scan error", tostring(scan)) end
+            if ok then
+                autoList(scan)
+            else
+                log("Seller scan error", tostring(scan))
+            end
         end
-        if CFG.Sniper.Enabled and now-State.LastSniperScanAt >= (tonumber(CFG.Sniper.ScanInterval) or 10) then
+
+        if CFG.Sniper.Enabled and now - State.LastSniperScanAt >= (tonumber(CFG.Sniper.ScanInterval) or 10) then
             State.LastSniperScanAt = now
-            pcall(function() applySniperLimits(); snipeDryRun() end)
+            local ok, err = pcall(function()
+                applySniperLimits()
+                snipeDryRun()
+            end)
+            if not ok then log("Sniper scan error", tostring(err)) end
         end
-        if now-(State.LastUIRefreshAt or 0) >= 3 then
-            State.LastUIRefreshAt = now
-            pcall(refreshMyListingsLog)
-            pcall(refreshMarketSample)
-            pcall(function() refreshSellerLog(false) end)
-            pcall(refreshSniperLog)
-        end
-        updateStatusOverlay()
+
+        refreshPills()
         task.wait(1)
     end
 end)
