@@ -4,7 +4,7 @@
 --// Seller focused. Sniper dry-run only by default.
 --//====================================================--
 
-local VERSION = "V7.1 SAFETY HARDENED"
+local VERSION = "V7.3 CONFIG COMPAT"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -33,7 +33,7 @@ CFG.Seller = CFG.Seller or {
     MinPetCountKeep = 0,
     SkipFavorited = true,
     SkipLocked = true,
-    ListingFilterPath = "Nomo/listing_filters.json",
+    ListingFilterPath = "Nomo",
 }
 
 CFG.Listings = CFG.Listings or {
@@ -50,7 +50,7 @@ CFG.Sniper = CFG.Sniper or {
     -- V3.1 display/safety limits
     MaxMatchesShown = 20,      -- UI display cap
     MaxMatchesPerPet = 5,      -- prevent 70 same-pet rows
-    MaxMatchesPerOwner = 2,    -- prevent one seller filling the list
+    MaxMatchesPerOwner = 0,    -- dev: disabled; per-pet cap is enough
 
     Watchlist = {},
 }
@@ -63,15 +63,14 @@ CFG.Booth.ClaimInterval = CFG.Booth.ClaimInterval or 10
 CFG.Booth.DataCacheSeconds = CFG.Booth.DataCacheSeconds or 0.25
 CFG.Booth.ClaimVerifyAttempts = CFG.Booth.ClaimVerifyAttempts or 6
 CFG.Booth.ClaimVerifyDelay = CFG.Booth.ClaimVerifyDelay or 0.35
-CFG.Seller.BoothCap = CFG.Seller.BoothCap or 50
+CFG.Seller.BoothCap = 50
 CFG.Seller.WeightMode = CFG.Seller.WeightMode or "Base"
 CFG.Seller.ShowSkipReasons = CFG.Seller.ShowSkipReasons ~= false
 CFG.Seller.RequireBoothBeforeList = CFG.Seller.RequireBoothBeforeList ~= false
 CFG.Seller.ScanInterval = tonumber(CFG.Seller.ScanInterval) or 0.25
 if CFG.Seller.ScanInterval > 1 then CFG.Seller.ScanInterval = 0.25 end
-CFG.Seller.ListCooldown = tonumber(CFG.Seller.ListCooldown) or 0
-if CFG.Seller.ListCooldown > 1 then CFG.Seller.ListCooldown = 0 end
-CFG.Seller.ListOnceMax = CFG.Seller.ListOnceMax or 50
+CFG.Seller.ListCooldown = 0
+CFG.Seller.ListOnceMax = 50
 CFG.Seller.AutoSmartRebuildOnStart = CFG.Seller.AutoSmartRebuildOnStart ~= false
 CFG.Seller.StartupSmartRebuildDelay = CFG.Seller.StartupSmartRebuildDelay or 8
 CFG.Seller.StartupSmartRebuildRetries = CFG.Seller.StartupSmartRebuildRetries or 5
@@ -93,7 +92,7 @@ CFG.Seller.CreateWaitMax = math.max(CFG.Seller.CreateWaitMin, tonumber(CFG.Selle
 CFG.Seller.CreateWaitBackoff = math.clamp(tonumber(CFG.Seller.CreateWaitBackoff) or 5, CFG.Seller.CreateWaitMin, CFG.Seller.CreateWaitMax)
 CFG.Seller.MinPetCountKeep = 0
 CFG.Seller.MaxListPerMinute = 999
-CFG.Seller.MaxAutoListSession = CFG.Seller.BoothCap
+CFG.Seller.MaxAutoListSession = 50
 CFG.Listings.RemoveCooldown = CFG.Listings.RemoveCooldown or 1.2
 CFG.Listings.RemoveAllMax = CFG.Listings.RemoveAllMax or 50
 CFG.Listings.VerifyRemoveDelay = CFG.Listings.VerifyRemoveDelay or 0.45
@@ -105,8 +104,10 @@ CFG.Sniper.AllowNoMaxPrice = CFG.Sniper.AllowNoMaxPrice == true
 CFG.Sniper.MinTokensAfterBuy = CFG.Sniper.MinTokensAfterBuy or 0
 CFG.Sniper.ScanInterval = tonumber(CFG.Sniper.ScanInterval) or 0.25
 if CFG.Sniper.ScanInterval > 1 then CFG.Sniper.ScanInterval = 0.25 end
-CFG.Sniper.BuyCooldown = tonumber(CFG.Sniper.BuyCooldown) or 0
-if CFG.Sniper.BuyCooldown > 1 then CFG.Sniper.BuyCooldown = 0 end
+CFG.Sniper.BuyCooldown = 0
+CFG.Sniper.WatchlistId = tostring(CFG.Sniper.WatchlistId or "1")
+CFG.Sniper.WeightMode = CFG.Sniper.WeightMode or "Base"
+CFG.Sniper.MaxMatchesPerOwner = 0
 CFG.UI = CFG.UI or {
     CompactBoothData = true,
     FilterGameSpam = true,
@@ -428,8 +429,36 @@ local function saveJson(path, data)
     return true
 end
 
+local function cleanConfigPath(path)
+    path = tostring(path or ""):gsub("\\", "/"):gsub("^%s+", ""):gsub("%s+$", "")
+    path = path:gsub("/+$", "")
+    if path == "" then path = "Nomo" end
+    return path
+end
+
+local function joinConfigPath(folder, fileName)
+    folder = cleanConfigPath(folder)
+    return folder .. "/" .. tostring(fileName or "")
+end
+
+local function getConfigFolder()
+    local path = cleanConfigPath(CFG.Seller.ListingFilterPath or "Nomo")
+    local folder = path:match("^(.*)/[^/]+%.json$")
+    if folder and folder ~= "" then
+        return cleanConfigPath(folder)
+    end
+    if path:match("%.json$") then
+        return "Nomo"
+    end
+    return path
+end
+
 local function getFilterPath()
-    return CFG.Seller.ListingFilterPath or "Nomo/listing_filters.json"
+    local path = cleanConfigPath(CFG.Seller.ListingFilterPath or "Nomo")
+    if path:match("%.json$") then
+        return path
+    end
+    return joinConfigPath(path, "listing_filters.json")
 end
 
 --//====================================================--
@@ -1184,13 +1213,25 @@ local function reloadFilters()
     return State.FilterData
 end
 
+State.LoadLocalFilters = function()
+    State.FilterData = readJson(getFilterPath())
+    return State.FilterData
+end
+
 saveFilters = function()
     return saveJson(getFilterPath(), State.FilterData)
 end
 
 local function traitWantedAny(v)
     v = norm(v or "Any")
-    return v == "" or v == "any" or v == "all" or v == "off" or v == "none" or v == "normal"
+    return v == "" or v == "---" or v == "any" or v == "all" or v == "off" or v == "none" or v == "normal"
+end
+
+local function normalizeMutationConfig(v)
+    if traitWantedAny(v) then
+        return "Any"
+    end
+    return tostring(v or "Any")
 end
 
 local function addFilter(pet, price, minW, maxW, minAge, maxAge, mutation, maxListed, variant)
@@ -1278,11 +1319,11 @@ local function getFilters()
                     MaxWeight = toNumber(row.MaxWeight or row.maxWeight or row.MaxKG or row.MaxBaseWeight),
                     MinLevel = toInt(row.MinLevel or row.minLevel or row.MinAge),
                     MaxLevel = toInt(row.MaxLevel or row.maxLevel or row.MaxAge),
-                    Mutation = row.Mutation or row.mutation or "Any",
+                    Mutation = normalizeMutationConfig(row.Mutation or row.mutation or "Any"),
                     -- Hatch types like GIANT/Rainbow-hatched pets appear as different Pet names in the game API.
                     -- Keep Variant fields only for backward compatibility, but do not require them by default.
                     Variant = "Any",
-                    ExcludeMutations = splitList(row.ExcludeMutations or row.excludeMutations),
+                    ExcludeMutations = splitList(row.ExcludeMutations or row.ExcludedMutations or row.excludeMutations or row.excludedMutations),
                     ExcludeVariants = {},
                     MaxListedPet = toInt(row.MaxListedPet or row.maxListedPet or row.MaxListed) or 0,
                     Raw = row,
@@ -2096,14 +2137,135 @@ local function addWatch(pet, maxPrice)
     end
 
     CFG.Sniper.Watchlist = CFG.Sniper.Watchlist or {}
-    CFG.Sniper.Watchlist[tostring(exactPet or pet)] = {MaxPrice = price or 0}
-    log("Added sniper watch", tostring(exactPet or pet), "max", tostring(price or 0))
+    CFG.Sniper.Watchlist[tostring(exactPet or pet)] = {
+        MaxPrice = price or 0,
+        MinWeight = toNumber(CFG.Sniper.MinWeight) or 0,
+        MaxWeight = toNumber(CFG.Sniper.MaxWeight),
+        WeightMode = CFG.Sniper.WeightMode or "Base",
+    }
+    local ok = State.SaveSniperWatchlist()
+    log("Added sniper watch", tostring(exactPet or pet), "max", tostring(price or 0), "saved=" .. tostring(ok))
     return true
 end
 
 local function clearWatch()
     CFG.Sniper.Watchlist = {}
-    log("Cleared sniper watchlist")
+    local ok = State.SaveSniperWatchlist()
+    log("Cleared sniper watchlist", "saved=" .. tostring(ok))
+end
+
+local function getSniperFilterPath()
+    return joinConfigPath(getConfigFolder(), "sniper_filters.json")
+end
+
+State.SaveSniperWatchlist = function()
+    local id = tostring(CFG.Sniper.WatchlistId or "1")
+    local data = readJson(getSniperFilterPath())
+    data.Watchlists = type(data.Watchlists) == "table" and data.Watchlists or {}
+    data.Watchlists[id] = CFG.Sniper.Watchlist or {}
+    return saveJson(getSniperFilterPath(), data)
+end
+
+local function extractSniperWatchSource(data)
+    if type(data) ~= "table" then
+        return nil
+    end
+
+    local watchlists = data.Watchlists or data.watchlists
+    if type(watchlists) == "table" then
+        local id = tostring(CFG.Sniper.WatchlistId or "1")
+        if type(watchlists[id]) == "table" then
+            return watchlists[id]
+        end
+        if type(watchlists[tonumber(id)]) == "table" then
+            return watchlists[tonumber(id)]
+        end
+    end
+
+    if type(data.Watchlist) == "table" then
+        return data.Watchlist
+    end
+    if type(data.watchlist) == "table" then
+        return data.watchlist
+    end
+    if type(data.Sniper) == "table" and type(data.Sniper.Watchlist) == "table" then
+        return data.Sniper.Watchlist
+    end
+
+    return nil
+end
+
+local function importSniperWatchlist(path)
+    path = tostring(path or getSniperFilterPath())
+    local data = readJson(path)
+    local source = extractSniperWatchSource(data)
+    if type(source) ~= "table" then
+        log("Sniper config import failed", "no Watchlists[" .. tostring(CFG.Sniper.WatchlistId or "1") .. "]", path)
+        return false
+    end
+
+    local imported, skipped = 0, 0
+    local nextWatch = {}
+
+    local function addImportedWatch(name, cfg)
+        name = tostring(name or "")
+        if name == "" then
+            skipped += 1
+            return
+        end
+
+        local exactPet = resolveExactPetName(name)
+        if CFG.Sniper.RequireExactPetName and not exactPet then
+            skipped += 1
+            log("Sniper config skipped", "unknown pet:", name)
+            return
+        end
+
+        local maxPrice = cfg
+        if type(cfg) == "table" then
+            maxPrice = cfg.MaxPrice or cfg.maxPrice or cfg.Price or cfg.price
+        end
+
+        local price = clampPrice(maxPrice)
+        if (not price or price <= 0) and not CFG.Sniper.AllowNoMaxPrice then
+            skipped += 1
+            log("Sniper config skipped", tostring(exactPet or name), "bad max price")
+            return
+        end
+
+        local minWeight, maxWeight, weightMode
+        if type(cfg) == "table" then
+            minWeight = toNumber(cfg.MinWeight or cfg.minWeight or cfg.MinKG or cfg.minKG)
+            maxWeight = toNumber(cfg.MaxWeight or cfg.maxWeight or cfg.MaxKG or cfg.maxKG)
+            weightMode = tostring(cfg.WeightMode or cfg.weightMode or CFG.Sniper.WeightMode or "Base")
+        end
+        weightMode = weightMode:gsub("%s+", "")
+        if weightMode == "BaseWeight" or weightMode == "BaseKG" then weightMode = "Base" end
+        if weightMode == "VisualWeight" or weightMode == "DisplayWeight" or weightMode == "VisualKG" then weightMode = "Visual" end
+        if weightMode ~= "Visual" then weightMode = "Base" end
+
+        nextWatch[tostring(exactPet or name)] = {
+            MaxPrice = price or 0,
+            MinWeight = minWeight or 0,
+            MaxWeight = maxWeight,
+            WeightMode = weightMode,
+            Priority = type(cfg) == "table" and toInt(cfg.Priority or cfg.priority) or nil,
+        }
+        imported += 1
+    end
+
+    for key, cfg in pairs(source) do
+        if type(key) == "number" and type(cfg) == "table" then
+            addImportedWatch(cfg.Pet or cfg.pet or cfg.Name or cfg.name, cfg)
+        else
+            addImportedWatch(key, cfg)
+        end
+    end
+
+    CFG.Sniper.Watchlist = nextWatch
+    State.SaveSniperWatchlist()
+    log("Sniper config imported", tostring(imported), "watch(es)", "skipped", tostring(skipped), path)
+    return true
 end
 
 local function removeWatch(name)
@@ -2112,7 +2274,8 @@ local function removeWatch(name)
     for watchName in pairs(CFG.Sniper.Watchlist) do
         if norm(watchName) == target then
             CFG.Sniper.Watchlist[watchName] = nil
-            log("Removed sniper watch", tostring(watchName))
+            local ok = State.SaveSniperWatchlist()
+            log("Removed sniper watch", tostring(watchName), "saved=" .. tostring(ok))
             return true
         end
     end
@@ -2122,6 +2285,36 @@ end
 
 local validateSniperMatch
 
+local function normalizeSniperWeightMode(mode)
+    mode = tostring(mode or CFG.Sniper.WeightMode or "Base"):gsub("%s+", "")
+    if mode == "BaseWeight" or mode == "BaseKG" then return "Base" end
+    if mode == "VisualWeight" or mode == "DisplayWeight" or mode == "VisualKG" then return "Visual" end
+    if mode == "Visual" then return "Visual" end
+    return "Base"
+end
+
+local function formatSniperMax(price)
+    price = tonumber(price) or 0
+    if price <= 0 then
+        return "Any"
+    end
+    return tostring(price)
+end
+
+State.FormatSniperKgRange = function(mode, minKg, maxKg)
+    local upper = tonumber(maxKg)
+    return tostring(mode or "Base") .. " KG " .. tostring(tonumber(minKg) or 0) .. "-" .. (upper and tostring(upper) or "unli")
+end
+
+local function getSniperWeightForListing(l, watch)
+    local pseudo = listingToPseudoPet(l)
+    local mode = normalizeSniperWeightMode(type(watch) == "table" and watch.WeightMode or CFG.Sniper.WeightMode)
+    if mode == "Visual" then
+        return pseudo.VisualWeight or pseudo.BaseWeight, pseudo, mode
+    end
+    return pseudo.BaseWeight or pseudo.VisualWeight, pseudo, mode
+end
+
 local function snipeDryRun(force)
     local myId = tostring(getPlayerId())
     local watchNorm = {}
@@ -2130,6 +2323,9 @@ local function snipeDryRun(force)
         watchNorm[norm(name)] = {
             Name = name,
             MaxPrice = tonumber(type(cfg) == "table" and cfg.MaxPrice or cfg) or 0,
+            MinWeight = type(cfg) == "table" and toNumber(cfg.MinWeight or cfg.minWeight) or 0,
+            MaxWeight = type(cfg) == "table" and toNumber(cfg.MaxWeight or cfg.maxWeight) or nil,
+            WeightMode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode or cfg.weightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode),
         }
     end
 
@@ -2179,26 +2375,20 @@ local function snipeDryRun(force)
 
     local maxShown = tonumber(CFG.Sniper.MaxMatchesShown) or 20
     local maxPerPet = tonumber(CFG.Sniper.MaxMatchesPerPet) or 5
-    local maxPerOwner = tonumber(CFG.Sniper.MaxMatchesPerOwner) or 2
 
     local petCounts = {}
-    local ownerCounts = {}
     local filtered = {}
 
     for _, m in ipairs(raw) do
         local petKey = norm(m.Listing.PetType)
-        local ownerKey = tostring(m.Listing.OwnerId)
 
         petCounts[petKey] = petCounts[petKey] or 0
-        ownerCounts[ownerKey] = ownerCounts[ownerKey] or 0
 
         local petOk = maxPerPet <= 0 or petCounts[petKey] < maxPerPet
-        local ownerOk = maxPerOwner <= 0 or ownerCounts[ownerKey] < maxPerOwner
 
-        if petOk and ownerOk then
+        if petOk then
             table.insert(filtered, m)
             petCounts[petKey] += 1
-            ownerCounts[ownerKey] += 1
         end
 
         if maxShown > 0 and #filtered >= maxShown then
@@ -2287,6 +2477,20 @@ validateSniperMatch = function(m)
     if watch.MaxPrice <= 0 and not CFG.Sniper.AllowNoMaxPrice then
         return false, "no max price"
     end
+
+    local weight, pseudo, weightMode = getSniperWeightForListing(l, watch)
+    local minWeight = toNumber(watch.MinWeight) or 0
+    local maxWeight = toNumber(watch.MaxWeight)
+    if minWeight > 0 and (not weight or weight < minWeight) then
+        return false, "below min kg"
+    end
+    if maxWeight and (not weight or weight > maxWeight) then
+        return false, "above max kg"
+    end
+
+    m.SniperWeight = weight
+    m.SniperWeightMode = weightMode
+    m.SniperPseudo = pseudo
 
     return true, watch
 end
@@ -3191,8 +3395,8 @@ function Library:CreateWindow(cfg)
 				function log:Add(text)
 					make("TextLabel", {
 						Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1,
-						RichText = true,
-						Text = ('<font color="#5a8dee">%s</font>  <font color="#a8b6cc">%s</font>'):format(os.date("%H:%M:%S"), text),
+						RichText = false,
+						Text = ("%s  %s"):format(os.date("%H:%M:%S"), tostring(text or ""):gsub("<.->", "")),
 						Font = Enum.Font.Code, TextSize = 11, TextColor3 = T.Sub,
 						TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
 					}, logFrame)
@@ -3209,12 +3413,13 @@ function Library:CreateWindow(cfg)
 			return sec
 		end
 
-		function page:AddSection(title) return newSection(frame, title) end
-		function page:AddSectionInRow(row, title, widthScale) return newSection(row, title, widthScale) end
+	function page:AddSection(title) return newSection(frame, title) end
+	function page:AddSectionInRow(row, title, widthScale) return newSection(row, title, widthScale) end
 
-		return page
+	return page
 	end
 
+    window.Gui = gui
 	return window
 end
 
@@ -3398,28 +3603,12 @@ sellerCtrl:AddInput("Scan Interval", tostring(CFG.Seller.ScanInterval), function
     CFG.Seller.ScanInterval = toNumber(v) or CFG.Seller.ScanInterval
 end)
 
-sellerCtrl:AddInput("List Cooldown", tostring(CFG.Seller.ListCooldown), function(v)
-    CFG.Seller.ListCooldown = toNumber(v) or CFG.Seller.ListCooldown
-end)
-
-sellerCtrl:AddInput("Booth Cap", tostring(CFG.Seller.BoothCap or 50), function(v)
-    CFG.Seller.BoothCap = toNumber(v) or CFG.Seller.BoothCap or 50
-    CFG.Seller.MaxAutoListSession = CFG.Seller.BoothCap
-end)
-
-sellerCtrl:AddDropdown("Weight Filter", {"Base", "Visual"}, CFG.Seller.WeightMode or "Base", function(v)
-    CFG.Seller.WeightMode = tostring(v or "Base")
-    log("WeightMode", CFG.Seller.WeightMode)
-end)
-
-local listOnceMaxInput = sellerCtrl:AddInput("List Max", tostring(CFG.Seller.ListOnceMax or 50), function(v)
-    CFG.Seller.ListOnceMax = toNumber(v) or CFG.Seller.ListOnceMax or 50
-end)
-
 sellerCtrl:AddButton("LIST UNTIL BOOTH FULL", function()
-    CFG.Seller.ListOnceMax = toNumber(listOnceMaxInput:Get()) or CFG.Seller.ListOnceMax or 50
+    CFG.Seller.BoothCap = 50
+    CFG.Seller.ListOnceMax = 50
+    CFG.Seller.MaxAutoListSession = 50
     task.spawn(function()
-        listOnce(CFG.Seller.ListOnceMax)
+        listOnce(50)
     end)
 end)
 
@@ -3466,6 +3655,11 @@ end, "outline")
 local sellerLog
 local diagnosePetFilter
 
+filterSec:AddDropdown("Listing Weight Mode", {"Base", "Visual"}, CFG.Seller.WeightMode or "Base", function(v)
+    CFG.Seller.WeightMode = tostring(v or "Base")
+    log("ListingWeightMode", CFG.Seller.WeightMode)
+end)
+
 local petInput = filterSec:AddSearchDropdown("Pet", getPetList(), "Ankylosaurus")
 filterSec:AddButton("Diagnose This Pet", function()
     if sellerLog and diagnosePetFilter then
@@ -3473,13 +3667,289 @@ filterSec:AddButton("Diagnose This Pet", function()
     end
 end, "outline")
 local priceInput = filterSec:AddInput("Price", "111")
-local minKgInput = filterSec:AddInput("Min Base KG", "1")
+local minKgInput = filterSec:AddInput("Min Base KG", "0")
 local maxKgInput = filterSec:AddInput("Max Base KG", "3")
 local minAgeInput = filterSec:AddInput("Min Age", "1")
 local maxAgeInput = filterSec:AddInput("Max Age", "100")
 local mutationInput = filterSec:AddSearchDropdown("Mutation", getMutationList(), "Any")
 local variantInput = { Get = function() return "Any" end } -- hatch type is part of Pet name, e.g. GIANT Barn Owl
 local maxListedInput = filterSec:AddInput("Per Filter Cap", "5")
+
+State.OpenFilterEditPopup = function(index, managerOverlay)
+    State.LoadLocalFilters()
+    index = toInt(index)
+    local f = index and State.FilterData.Filters and State.FilterData.Filters[index]
+    if not f then
+        log("Edit filter failed", "bad index", tostring(index))
+        return
+    end
+
+    local overlay = make("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.3,
+        BorderSizePixel = 0,
+        ZIndex = 100,
+    }, win.Gui)
+    local modal = make("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.fromOffset(420, 260),
+        BackgroundColor3 = T.Card,
+        BorderSizePixel = 0,
+        ZIndex = 101,
+    }, overlay)
+    corner(modal, 10); stroke(modal); pad(modal, 12)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 28),
+        BackgroundTransparency = 1,
+        Text = "Edit Filter - " .. tostring(f.Pet or "?"),
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 102,
+    }, modal)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 50),
+        Position = UDim2.fromOffset(0, 34),
+        BackgroundTransparency = 1,
+        Text = string.format("Base KG %s-%s | Age %s-%s | Mutation %s",
+            tostring(f.MinWeight or 0),
+            tostring(f.MaxWeight or "?"),
+            tostring(f.MinLevel or 1),
+            tostring(f.MaxLevel or 100),
+            tostring(f.Mutation or "Any")
+        ),
+        TextColor3 = T.Sub,
+        Font = Enum.Font.Code,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextWrapped = true,
+        ZIndex = 102,
+    }, modal)
+
+    make("TextLabel", {
+        Size = UDim2.new(0, 120, 0, 26),
+        Position = UDim2.fromOffset(0, 92),
+        BackgroundTransparency = 1,
+        Text = "Price",
+        TextColor3 = T.Sub,
+        Font = Enum.Font.Gotham,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 102,
+    }, modal)
+    local priceBox = make("TextBox", {
+        Size = UDim2.new(1, -130, 0, 26),
+        Position = UDim2.fromOffset(130, 92),
+        BackgroundColor3 = T.Card2,
+        Text = tostring(f.Price or ""),
+        TextColor3 = T.Text,
+        Font = Enum.Font.Gotham,
+        TextSize = 12,
+        ClearTextOnFocus = false,
+        BorderSizePixel = 0,
+        ZIndex = 102,
+    }, modal)
+    corner(priceBox, 6); stroke(priceBox); pad(priceBox, 0, 0, 6, 6)
+
+    make("TextLabel", {
+        Size = UDim2.new(0, 120, 0, 26),
+        Position = UDim2.fromOffset(0, 126),
+        BackgroundTransparency = 1,
+        Text = "Max Listing",
+        TextColor3 = T.Sub,
+        Font = Enum.Font.Gotham,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 102,
+    }, modal)
+    local maxBox = make("TextBox", {
+        Size = UDim2.new(1, -130, 0, 26),
+        Position = UDim2.fromOffset(130, 126),
+        BackgroundColor3 = T.Card2,
+        Text = tostring(f.MaxListedPet or 5),
+        TextColor3 = T.Text,
+        Font = Enum.Font.Gotham,
+        TextSize = 12,
+        ClearTextOnFocus = false,
+        BorderSizePixel = 0,
+        ZIndex = 102,
+    }, modal)
+    corner(maxBox, 6); stroke(maxBox); pad(maxBox, 0, 0, 6, 6)
+
+    local saveBtn = make("TextButton", {
+        Size = UDim2.fromOffset(130, 30),
+        Position = UDim2.new(1, -272, 1, -34),
+        BackgroundColor3 = T.Accent,
+        Text = "Save",
+        TextColor3 = Color3.new(1, 1, 1),
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 102,
+    }, modal)
+    corner(saveBtn, 7)
+    local cancelBtn = make("TextButton", {
+        Size = UDim2.fromOffset(130, 30),
+        Position = UDim2.new(1, -134, 1, -34),
+        BackgroundColor3 = T.Card2,
+        Text = "Cancel",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 102,
+    }, modal)
+    corner(cancelBtn, 7); stroke(cancelBtn)
+
+    cancelBtn.Activated:Connect(function()
+        overlay:Destroy()
+    end)
+    saveBtn.Activated:Connect(function()
+        State.LoadLocalFilters()
+        local row = State.FilterData.Filters and State.FilterData.Filters[index]
+        if row then
+            row.Price = clampPrice(priceBox.Text) or row.Price
+            row.MaxListedPet = toInt(maxBox.Text) or row.MaxListedPet or 5
+            local ok = saveFilters()
+            if CFG.Seller.RemoteConfigEnabled and tostring(CFG.Seller.RemoteConfigURL or "") ~= "" then
+                CFG.Seller.RemoteConfigEnabled = false
+                log("Remote config disabled after local filter edit")
+            end
+            log("Updated filter", tostring(index), tostring(row.Pet or "?"), "price", tostring(row.Price), "max", tostring(row.MaxListedPet), "saved=" .. tostring(ok), getFilterPath())
+            refreshSellerLog(true)
+        end
+        overlay:Destroy()
+        if managerOverlay then managerOverlay:Destroy() end
+        State.OpenFilterManager()
+    end)
+end
+
+State.OpenFilterManager = function()
+    local overlay = make("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.35,
+        BorderSizePixel = 0,
+        ZIndex = 90,
+    }, win.Gui)
+    local modal = make("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.fromOffset(560, 390),
+        BackgroundColor3 = T.Card,
+        BorderSizePixel = 0,
+        ZIndex = 91,
+    }, overlay)
+    corner(modal, 10); stroke(modal); pad(modal, 10)
+
+    local title = make("TextLabel", {
+        Size = UDim2.new(1, -74, 0, 26),
+        BackgroundTransparency = 1,
+        Text = "Manage Listing Filters",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 92,
+    }, modal)
+    local closeBtn = make("TextButton", {
+        Size = UDim2.fromOffset(64, 24),
+        Position = UDim2.new(1, -64, 0, 0),
+        BackgroundColor3 = T.Card2,
+        Text = "Done",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 92,
+    }, modal)
+    corner(closeBtn, 7); stroke(closeBtn)
+
+    local list = make("ScrollingFrame", {
+        Size = UDim2.new(1, 0, 1, -36),
+        Position = UDim2.fromOffset(0, 34),
+        BackgroundColor3 = T.Card2,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 4,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = UDim2.new(),
+        ZIndex = 92,
+    }, modal)
+    corner(list, 8); pad(list, 5); vlist(list, 4)
+
+    closeBtn.Activated:Connect(function() overlay:Destroy() end)
+
+    for i, f in ipairs(getFilters()) do
+        local row = make("Frame", {
+            Size = UDim2.new(1, 0, 0, 34),
+            BackgroundColor3 = T.Card,
+            BorderSizePixel = 0,
+            ZIndex = 93,
+        }, list)
+        corner(row, 7); stroke(row)
+        make("TextLabel", {
+            Size = UDim2.new(1, -116, 1, 0),
+            Position = UDim2.fromOffset(8, 0),
+            BackgroundTransparency = 1,
+            Text = string.format("%02d. %s | Price %s | Base KG %s-%s | Age %s-%s | Max %s | %s",
+                i,
+                tostring(f.Pet or "?"),
+                tostring(f.Price or "?"),
+                tostring(f.MinWeight or 0),
+                tostring(f.MaxWeight or "?"),
+                tostring(f.MinLevel or 1),
+                tostring(f.MaxLevel or 100),
+                tostring(f.MaxListedPet or 5),
+                tostring(f.Mutation or "Any")
+            ),
+            TextColor3 = T.Text,
+            Font = Enum.Font.Code,
+            TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 94,
+        }, row)
+        local editBtn = make("TextButton", {
+            Size = UDim2.fromOffset(50, 24),
+            Position = UDim2.new(1, -104, 0.5, -12),
+            BackgroundColor3 = T.Card2,
+            Text = "Edit",
+            TextColor3 = T.Accent,
+            Font = Enum.Font.GothamBold,
+            TextSize = 11,
+            BorderSizePixel = 0,
+            ZIndex = 94,
+        }, row)
+        corner(editBtn, 6); stroke(editBtn)
+        local delBtn = make("TextButton", {
+            Size = UDim2.fromOffset(36, 24),
+            Position = UDim2.new(1, -44, 0.5, -12),
+            BackgroundColor3 = Color3.fromRGB(255, 72, 86),
+            Text = "X",
+            TextColor3 = Color3.new(1, 1, 1),
+            Font = Enum.Font.GothamBold,
+            TextSize = 12,
+            BorderSizePixel = 0,
+            ZIndex = 94,
+        }, row)
+        corner(delBtn, 6)
+
+        editBtn.Activated:Connect(function()
+            State.OpenFilterEditPopup(f.Row or i, overlay)
+        end)
+        delBtn.Activated:Connect(function()
+            deleteFilter(f.Row or i)
+            refreshSellerLog(true)
+            overlay:Destroy()
+            State.OpenFilterManager()
+        end)
+    end
+end
 
 local logRow = sellerPage:AddRow()
 local filterLogSec = sellerPage:AddSectionInRow(logRow, "Active Filters / Candidates", 1)
@@ -3494,7 +3964,7 @@ diagnosePetFilter = function(petName)
 
     local lines = {
         "Diagnose: " .. petName,
-        "WeightMode: " .. tostring(CFG.Seller.WeightMode or "Base"),
+        "Listing Weight Mode: " .. tostring(CFG.Seller.WeightMode or "Base"),
         "Already in booth: " .. tostring(myCounts[target] or 0),
         "------------------------------",
         "Owned matching name:",
@@ -3563,7 +4033,7 @@ refreshSellerLog = function(showCandidates)
         "Filters: " .. tostring(#filters),
         "Booth listings: " .. tostring(#myListings) .. " / " .. tostring(CFG.Seller.BoothCap or 50),
         "Listed this run: " .. tostring(State.ListedThisSession or 0),
-        "Weight filter: " .. tostring(CFG.Seller.WeightMode or "Base") .. " KG",
+        "Listing weight mode: " .. tostring(CFG.Seller.WeightMode or "Base") .. " KG",
         "Per filter cap: enabled",
         "Auto smart rebuild: " .. tostring(CFG.Seller.AutoSmartRebuildOnStart),
         "Remote config: " .. tostring(CFG.Seller.RemoteConfigEnabled) .. " | " .. tostring((CFG.Seller.RemoteConfigURL ~= "" and "URL set") or "no URL"),
@@ -3577,7 +4047,7 @@ refreshSellerLog = function(showCandidates)
             break
         end
         table.insert(lines, string.format(
-            "%02d. %s | price %s | BaseKG %s-%s | Age %s-%s | Mut %s | Cap %s",
+            "%02d. %s | Price %s | Base KG %s-%s | Age %s-%s | Mut %s | Max %s",
             i,
             f.Pet,
             tostring(f.Price),
@@ -3586,7 +4056,7 @@ refreshSellerLog = function(showCandidates)
             tostring(f.MinLevel),
             tostring(f.MaxLevel),
             tostring(f.Mutation or "Any"),
-            tostring(f.MaxListedPet or 0)
+            tostring(f.MaxListedPet or 5)
         ))
     end
 
@@ -3664,6 +4134,10 @@ filterSec:AddButton("Preview Candidates", function()
 end, "outline")
 
 local delFilterInput = filterLogSec:AddInput("Remove Filter #", "1")
+filterLogSec:AddButton("Manage Filters", function()
+    State.OpenFilterManager()
+end)
+
 filterLogSec:AddButton("Remove Selected Filter", function()
     deleteFilter(delFilterInput:Get())
     refreshSellerLog(true)
@@ -3838,8 +4312,15 @@ end)
 
 local sPet = sniperCtrl:AddSearchDropdown("Pet", getPetList(), "Red Fox")
 local sMax = sniperCtrl:AddInput("Max Price", "6")
-local sBuyCooldown = sniperCtrl:AddInput("Buy Cooldown", tostring(CFG.Sniper.BuyCooldown or 8), function(v)
-    CFG.Sniper.BuyCooldown = toNumber(v) or CFG.Sniper.BuyCooldown or 8
+State.SniperWeightModeInput = sniperCtrl:AddDropdown("Weight Mode", {"Base", "Visual"}, CFG.Sniper.WeightMode or "Base", function(v)
+    CFG.Sniper.WeightMode = normalizeSniperWeightMode(v)
+    log("SniperWeightMode", CFG.Sniper.WeightMode)
+end)
+State.SniperMinKgInput = sniperCtrl:AddInput("Min KG", "0", function(v)
+    CFG.Sniper.MinWeight = toNumber(v) or 0
+end)
+State.SniperMaxKgInput = sniperCtrl:AddInput("Max KG", "", function(v)
+    CFG.Sniper.MaxWeight = toNumber(v)
 end)
 local sShow = sniperCtrl:AddInput("Show", tostring(CFG.Sniper.MaxMatchesShown or 20), function(v)
     CFG.Sniper.MaxMatchesShown = toInt(v) or CFG.Sniper.MaxMatchesShown or 20
@@ -3847,20 +4328,279 @@ end)
 local sPerPet = sniperCtrl:AddInput("Per Pet", tostring(CFG.Sniper.MaxMatchesPerPet or 5), function(v)
     CFG.Sniper.MaxMatchesPerPet = toInt(v) or CFG.Sniper.MaxMatchesPerPet or 5
 end)
-local sPerOwner = sniperCtrl:AddInput("Per Owner", tostring(CFG.Sniper.MaxMatchesPerOwner or 2), function(v)
-    CFG.Sniper.MaxMatchesPerOwner = toInt(v) or CFG.Sniper.MaxMatchesPerOwner or 2
+State.SniperWatchlistIdInput = sniperCtrl:AddInput("Watchlist ID", tostring(CFG.Sniper.WatchlistId or "1"), function(v)
+    CFG.Sniper.WatchlistId = tostring(v or "1")
 end)
 
 local sniperLog = sniperResultSec:AddLog(315)
 
-local function applySniperLimits()
-    CFG.Sniper.BuyCooldown = toNumber(sBuyCooldown:Get()) or CFG.Sniper.BuyCooldown or 8
+State.ApplySniperLimits = function()
+    CFG.Sniper.BuyCooldown = 0
+    CFG.Sniper.WeightMode = normalizeSniperWeightMode(State.SniperWeightModeInput:Get())
+    CFG.Sniper.MinWeight = toNumber(State.SniperMinKgInput:Get()) or 0
+    CFG.Sniper.MaxWeight = toNumber(State.SniperMaxKgInput:Get())
     CFG.Sniper.MaxMatchesShown = toInt(sShow:Get()) or CFG.Sniper.MaxMatchesShown or 20
     CFG.Sniper.MaxMatchesPerPet = toInt(sPerPet:Get()) or CFG.Sniper.MaxMatchesPerPet or 5
-    CFG.Sniper.MaxMatchesPerOwner = toInt(sPerOwner:Get()) or CFG.Sniper.MaxMatchesPerOwner or 2
 end
 
-local function refreshSniperLog()
+State.OpenSniperWatchEditPopup = function(name, managerOverlay)
+    local cfg = CFG.Sniper.Watchlist and CFG.Sniper.Watchlist[name]
+    if not cfg then
+        log("Edit watch failed", tostring(name))
+        return
+    end
+    local maxPrice = type(cfg) == "table" and cfg.MaxPrice or cfg
+    local minKg = type(cfg) == "table" and cfg.MinWeight or 0
+    local maxKg = type(cfg) == "table" and cfg.MaxWeight or nil
+    local mode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode)
+
+    local overlay = make("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.3,
+        BorderSizePixel = 0,
+        ZIndex = 100,
+    }, win.Gui)
+    local modal = make("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.fromOffset(420, 290),
+        BackgroundColor3 = T.Card,
+        BorderSizePixel = 0,
+        ZIndex = 101,
+    }, overlay)
+    corner(modal, 10); stroke(modal); pad(modal, 12)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 28),
+        BackgroundTransparency = 1,
+        Text = "Edit Watch - " .. tostring(name),
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 102,
+    }, modal)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 24),
+        Position = UDim2.fromOffset(0, 34),
+        BackgroundTransparency = 1,
+        Text = tostring(mode) .. " weight mode",
+        TextColor3 = T.Sub,
+        Font = Enum.Font.Code,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 102,
+    }, modal)
+
+    local function label(text, y)
+        make("TextLabel", {
+            Size = UDim2.new(0, 120, 0, 26),
+            Position = UDim2.fromOffset(0, y),
+            BackgroundTransparency = 1,
+            Text = text,
+            TextColor3 = T.Sub,
+            Font = Enum.Font.Gotham,
+            TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 102,
+        }, modal)
+    end
+    local function box(text, y)
+        local b = make("TextBox", {
+            Size = UDim2.new(1, -130, 0, 26),
+            Position = UDim2.fromOffset(130, y),
+            BackgroundColor3 = T.Card2,
+            Text = tostring(text or ""),
+            TextColor3 = T.Text,
+            Font = Enum.Font.Gotham,
+            TextSize = 12,
+            ClearTextOnFocus = false,
+            BorderSizePixel = 0,
+            ZIndex = 102,
+        }, modal)
+        corner(b, 6); stroke(b); pad(b, 0, 0, 6, 6)
+        return b
+    end
+
+    label("Price", 70)
+    local priceBox = box(maxPrice, 70)
+    label("Min KG", 104)
+    local minBox = box(minKg, 104)
+    label("Max KG", 138)
+    local maxBox = box(maxKg or "", 138)
+
+    local saveBtn = make("TextButton", {
+        Size = UDim2.fromOffset(130, 30),
+        Position = UDim2.new(1, -272, 1, -34),
+        BackgroundColor3 = T.Accent,
+        Text = "Save",
+        TextColor3 = Color3.new(1, 1, 1),
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 102,
+    }, modal)
+    corner(saveBtn, 7)
+    local cancelBtn = make("TextButton", {
+        Size = UDim2.fromOffset(130, 30),
+        Position = UDim2.new(1, -134, 1, -34),
+        BackgroundColor3 = T.Card2,
+        Text = "Cancel",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 102,
+    }, modal)
+    corner(cancelBtn, 7); stroke(cancelBtn)
+
+    cancelBtn.Activated:Connect(function()
+        overlay:Destroy()
+    end)
+    saveBtn.Activated:Connect(function()
+        CFG.Sniper.Watchlist = CFG.Sniper.Watchlist or {}
+        CFG.Sniper.Watchlist[name] = {
+            MaxPrice = clampPrice(priceBox.Text) or maxPrice or 0,
+            MinWeight = toNumber(minBox.Text) or 0,
+            MaxWeight = toNumber(maxBox.Text),
+            WeightMode = mode,
+        }
+        local ok = State.SaveSniperWatchlist()
+        log("Updated watch", tostring(name), "price", tostring(CFG.Sniper.Watchlist[name].MaxPrice), "saved=" .. tostring(ok), getSniperFilterPath())
+        State.RefreshSniperLog()
+        overlay:Destroy()
+        if managerOverlay then managerOverlay:Destroy() end
+        State.OpenSniperWatchlistManager()
+    end)
+end
+
+State.OpenSniperWatchlistManager = function()
+    local overlay = make("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.35,
+        BorderSizePixel = 0,
+        ZIndex = 90,
+    }, win.Gui)
+    local modal = make("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.fromOffset(560, 390),
+        BackgroundColor3 = T.Card,
+        BorderSizePixel = 0,
+        ZIndex = 91,
+    }, overlay)
+    corner(modal, 10); stroke(modal); pad(modal, 10)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, -74, 0, 26),
+        BackgroundTransparency = 1,
+        Text = "Manage Sniper Watchlist",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 92,
+    }, modal)
+    local closeBtn = make("TextButton", {
+        Size = UDim2.fromOffset(64, 24),
+        Position = UDim2.new(1, -64, 0, 0),
+        BackgroundColor3 = T.Card2,
+        Text = "Done",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 92,
+    }, modal)
+    corner(closeBtn, 7); stroke(closeBtn)
+
+    local list = make("ScrollingFrame", {
+        Size = UDim2.new(1, 0, 1, -36),
+        Position = UDim2.fromOffset(0, 34),
+        BackgroundColor3 = T.Card2,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 4,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = UDim2.new(),
+        ZIndex = 92,
+    }, modal)
+    corner(list, 8); pad(list, 5); vlist(list, 4)
+
+    closeBtn.Activated:Connect(function() overlay:Destroy() end)
+
+    local idx = 0
+    for name, cfg in pairs(CFG.Sniper.Watchlist or {}) do
+        idx += 1
+        local maxPrice = type(cfg) == "table" and cfg.MaxPrice or cfg
+        local minKg = type(cfg) == "table" and cfg.MinWeight or 0
+        local maxKg = type(cfg) == "table" and cfg.MaxWeight or nil
+        local mode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode)
+        local row = make("Frame", {
+            Size = UDim2.new(1, 0, 0, 34),
+            BackgroundColor3 = T.Card,
+            BorderSizePixel = 0,
+            ZIndex = 93,
+        }, list)
+        corner(row, 7); stroke(row)
+        make("TextLabel", {
+            Size = UDim2.new(1, -116, 1, 0),
+            Position = UDim2.fromOffset(8, 0),
+            BackgroundTransparency = 1,
+            Text = string.format("%02d. %s | Price %s | %s | Max %s per pet",
+                idx,
+                tostring(name),
+                formatSniperMax(maxPrice),
+                State.FormatSniperKgRange(mode, minKg, maxKg),
+                tostring(CFG.Sniper.MaxMatchesPerPet or 5)
+            ),
+            TextColor3 = T.Text,
+            Font = Enum.Font.Code,
+            TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 94,
+        }, row)
+        local editBtn = make("TextButton", {
+            Size = UDim2.fromOffset(50, 24),
+            Position = UDim2.new(1, -104, 0.5, -12),
+            BackgroundColor3 = T.Card2,
+            Text = "Edit",
+            TextColor3 = T.Accent,
+            Font = Enum.Font.GothamBold,
+            TextSize = 11,
+            BorderSizePixel = 0,
+            ZIndex = 94,
+        }, row)
+        corner(editBtn, 6); stroke(editBtn)
+        local delBtn = make("TextButton", {
+            Size = UDim2.fromOffset(36, 24),
+            Position = UDim2.new(1, -44, 0.5, -12),
+            BackgroundColor3 = Color3.fromRGB(255, 72, 86),
+            Text = "X",
+            TextColor3 = Color3.new(1, 1, 1),
+            Font = Enum.Font.GothamBold,
+            TextSize = 12,
+            BorderSizePixel = 0,
+            ZIndex = 94,
+        }, row)
+        corner(delBtn, 6)
+
+        editBtn.Activated:Connect(function()
+            State.OpenSniperWatchEditPopup(name, overlay)
+        end)
+        delBtn.Activated:Connect(function()
+            removeWatch(name)
+            State.RefreshSniperLog()
+            overlay:Destroy()
+            State.OpenSniperWatchlistManager()
+        end)
+    end
+end
+
+State.RefreshSniperLog = function()
     local lines = {
         "Safety: exact pet " .. tostring(CFG.Sniper.RequireExactPetName) .. " | max price required " .. tostring(not CFG.Sniper.AllowNoMaxPrice),
         "Rescan before buy: " .. tostring(CFG.Sniper.RescanBeforeBuy) .. " | DryRun: " .. tostring(CFG.Sniper.DryRun),
@@ -3868,8 +4608,19 @@ local function refreshSniperLog()
         "Watchlist:",
     }
 
+    local watchCount = 0
     for name, cfg in pairs(CFG.Sniper.Watchlist or {}) do
-        table.insert(lines, "- " .. tostring(name) .. " <= " .. tostring(type(cfg) == "table" and cfg.MaxPrice or cfg))
+        watchCount += 1
+        local maxPrice = type(cfg) == "table" and cfg.MaxPrice or cfg
+        local minKg = type(cfg) == "table" and cfg.MinWeight or 0
+        local maxKg = type(cfg) == "table" and cfg.MaxWeight or nil
+        local mode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode)
+        if watchCount <= 8 then
+            table.insert(lines, "- " .. tostring(name) .. " | Price " .. formatSniperMax(maxPrice) .. " | " .. State.FormatSniperKgRange(mode, minKg, maxKg) .. " | Max " .. tostring(CFG.Sniper.MaxMatchesPerPet or 5) .. " per pet")
+        end
+    end
+    if watchCount > 8 then
+        table.insert(lines, "... +" .. tostring(watchCount - 8) .. " more watches")
     end
 
     table.insert(lines, "------------------------------")
@@ -3883,10 +4634,12 @@ local function refreshSniperLog()
 
         local l = m.Listing
         table.insert(lines, string.format(
-            "%02d. %s | price %s | owner %s",
+            "%02d. %s | Price %s | %s KG %.2f | owner %s",
             i,
             l.PetType,
             tostring(l.Price),
+            tostring(m.SniperWeightMode or ""),
+            tonumber(m.SniperWeight) or 0,
             l.OwnerName
         ))
     end
@@ -3895,43 +4648,53 @@ local function refreshSniperLog()
 end
 
 sniperCtrl:AddButton("Add Watch", function()
-    applySniperLimits()
+    State.ApplySniperLimits()
     addWatch(sPet:Get(), sMax:Get())
-    refreshSniperLog()
+    State.RefreshSniperLog()
 end)
 
+sniperCtrl:AddButton("Import Config Watchlist", function()
+    CFG.Sniper.WatchlistId = tostring(State.SniperWatchlistIdInput:Get() or "1")
+    importSniperWatchlist(getSniperFilterPath())
+    State.RefreshSniperLog()
+end, "outline")
+
+sniperCtrl:AddButton("Manage Watchlist", function()
+    State.OpenSniperWatchlistManager()
+end, "outline")
+
 sniperCtrl:AddButton("Dry Run Scan", function()
-    applySniperLimits()
+    State.ApplySniperLimits()
     snipeDryRun()
-    refreshSniperLog()
+    State.RefreshSniperLog()
 end, "outline")
 
 sniperCtrl:AddButton("Clear Watchlist", function()
     clearWatch()
     State.LastSniperMatches = {}
     State.LastSniperRawCount = 0
-    refreshSniperLog()
+    State.RefreshSniperLog()
 end, "outline")
 
 sniperCtrl:AddButton("BUY FIRST (blocked if DryRun)", function()
     buyFirstMatch()
-    refreshSniperLog()
+    State.RefreshSniperLog()
 end, "outline")
 
 --// SETTINGS PAGE
-local settingsPage = win:CreatePage("Settings")
-local settingSec = settingsPage:AddSection("Settings")
-local filterPathInput = settingSec:AddInput("Filter Path", getFilterPath(), function(v)
+State.SettingsPage = win:CreatePage("Settings")
+State.SettingSec = State.SettingsPage:AddSection("Settings")
+State.FilterPathInput = State.SettingSec:AddInput("Filter Path", getConfigFolder(), function(v)
     CFG.Seller.ListingFilterPath = v
     reloadFilters()
 end)
 
-settingSec:AddToggle("Compact Booth Data", CFG.UI.CompactBoothData ~= false, function(v)
+State.SettingSec:AddToggle("Compact Booth Data", CFG.UI.CompactBoothData ~= false, function(v)
     CFG.UI.CompactBoothData = v
     log("CompactBoothData", tostring(v))
 end)
 
-settingSec:AddToggle("Filter Game Warn Spam", CFG.UI.FilterGameSpam ~= false, function(v)
+State.SettingSec:AddToggle("Filter Game Warn Spam", CFG.UI.FilterGameSpam ~= false, function(v)
     CFG.UI.FilterGameSpam = v
     if v then
         local ok = installWarnFilter()
@@ -3941,26 +4704,26 @@ settingSec:AddToggle("Filter Game Warn Spam", CFG.UI.FilterGameSpam ~= false, fu
     end
 end)
 
-settingSec:AddButton("Reload Pet API List", function()
+State.SettingSec:AddButton("Reload Pet API List", function()
     loadGamePetList()
     log("PetList reloaded", tostring(#State.PetList))
 end, "outline")
 
-settingSec:AddButton("Save / Reload Filter Path", function()
-    CFG.Seller.ListingFilterPath = filterPathInput:Get()
+State.SettingSec:AddButton("Save / Reload Filter Path", function()
+    CFG.Seller.ListingFilterPath = State.FilterPathInput:Get()
     reloadFilters()
-    log("Filter path set", CFG.Seller.ListingFilterPath)
+    log("Config path set", tostring(CFG.Seller.ListingFilterPath), "listing", getFilterPath(), "sniper", getSniperFilterPath())
 end)
 
-settingSec:AddButton("Stop Script", function()
+State.SettingSec:AddButton("Stop Script", function()
     State.Stop("settings stop")
 end, "outline")
 
-local activitySec = settingsPage:AddSection("Activity Log")
-local activityLog = activitySec:AddLog(230)
+State.ActivitySec = State.SettingsPage:AddSection("Activity Log")
+State.ActivityLog = State.ActivitySec:AddLog(230)
 
-activitySec:AddButton("Refresh Activity", function()
-    addLines(activityLog, State.Logs)
+State.ActivitySec:AddButton("Refresh Activity", function()
+    addLines(State.ActivityLog, State.Logs)
 end)
 
 --// Public helpers
@@ -4015,7 +4778,7 @@ getgenv().NOMO_V40_RESET_SESSION_COUNT = function()
     State.ListedThisSession = 0
     log("Session list count reset")
 end
-getgenv().NOMO_V32_REFRESH_SNIPER = refreshSniperLog
+getgenv().NOMO_V32_REFRESH_SNIPER = State.RefreshSniperLog
 getgenv().NOMO_V32_STOP = function() State.Stop("manual") end
 
 --// startup
@@ -4027,13 +4790,13 @@ installWarnFilter()
 
 log("Started", VERSION .. " PRIVATE UI")
 refreshPills()
-log("PetList", #State.PetList, "| FilterPath", getFilterPath())
+log("PetList", #State.PetList, "| ConfigFolder", getConfigFolder(), "| Listing", getFilterPath())
 
 refreshBoothLog()
 refreshSellerLog(false)
 refreshMyListingsLog()
 refreshMarketSample()
-refreshSniperLog()
+State.RefreshSniperLog()
 
 win:SelectPage("Booth")
 
@@ -4123,7 +4886,7 @@ task.spawn(function()
         if CFG.Sniper.Enabled and now - State.LastSniperScanAt >= (tonumber(CFG.Sniper.ScanInterval) or 10) then
             State.LastSniperScanAt = now
             local ok, err = pcall(function()
-                applySniperLimits()
+                State.ApplySniperLimits()
                 snipeDryRun()
             end)
             if not ok then log("Sniper scan error", tostring(err)) end
