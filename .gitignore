@@ -1,0 +1,9 @@
+# Ignore everything by default so private/reference scripts are not committed.
+*
+
+# Track NOMO market files.
+!NOMO MARKET SCRIPT.lua
+!Nomo Obsidia UI.lua
+!NOMO_MARKET_UI_TEST.lua
+!.gitignore
+!README.md
