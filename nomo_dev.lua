@@ -1213,6 +1213,11 @@ local function reloadFilters()
     return State.FilterData
 end
 
+State.LoadLocalFilters = function()
+    State.FilterData = readJson(getFilterPath())
+    return State.FilterData
+end
+
 saveFilters = function()
     return saveJson(getFilterPath(), State.FilterData)
 end
@@ -3659,7 +3664,7 @@ local variantInput = { Get = function() return "Any" end } -- hatch type is part
 local maxListedInput = filterSec:AddInput("Per Filter Cap", "5")
 
 State.OpenFilterEditPopup = function(index, managerOverlay)
-    reloadFilters()
+    State.LoadLocalFilters()
     index = toInt(index)
     local f = index and State.FilterData.Filters and State.FilterData.Filters[index]
     if not f then
@@ -3793,13 +3798,17 @@ State.OpenFilterEditPopup = function(index, managerOverlay)
         overlay:Destroy()
     end)
     saveBtn.Activated:Connect(function()
-        reloadFilters()
+        State.LoadLocalFilters()
         local row = State.FilterData.Filters and State.FilterData.Filters[index]
         if row then
             row.Price = clampPrice(priceBox.Text) or row.Price
             row.MaxListedPet = toInt(maxBox.Text) or row.MaxListedPet or 5
-            saveFilters()
-            log("Updated filter", tostring(index), tostring(row.Pet or "?"), "price", tostring(row.Price), "max", tostring(row.MaxListedPet))
+            local ok = saveFilters()
+            if CFG.Seller.RemoteConfigEnabled and tostring(CFG.Seller.RemoteConfigURL or "") ~= "" then
+                CFG.Seller.RemoteConfigEnabled = false
+                log("Remote config disabled after local filter edit")
+            end
+            log("Updated filter", tostring(index), tostring(row.Pet or "?"), "price", tostring(row.Price), "max", tostring(row.MaxListedPet), "saved=" .. tostring(ok), getFilterPath())
             refreshSellerLog(true)
         end
         overlay:Destroy()
@@ -3919,10 +3928,10 @@ State.OpenFilterManager = function()
         corner(delBtn, 6)
 
         editBtn.Activated:Connect(function()
-            State.OpenFilterEditPopup(i, overlay)
+            State.OpenFilterEditPopup(f.Row or i, overlay)
         end)
         delBtn.Activated:Connect(function()
-            deleteFilter(i)
+            deleteFilter(f.Row or i)
             refreshSellerLog(true)
             overlay:Destroy()
             State.OpenFilterManager()
