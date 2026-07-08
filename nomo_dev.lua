@@ -55,6 +55,13 @@ CFG.Sniper = CFG.Sniper or {
     Watchlist = {},
 }
 
+CFG.Webhook = CFG.Webhook or {
+    Enabled = false,
+    Url = "",
+    PetSold = true,
+    SuccessfulSnipe = true,
+}
+
 CFG.Debug = CFG.Debug or false
 if CFG.Booth.MaxMiddleDistance == nil or tonumber(CFG.Booth.MaxMiddleDistance) == 200 then
     CFG.Booth.MaxMiddleDistance = 85
@@ -142,6 +149,7 @@ local State = {
     Logs = {},
     LastSellerScanAt = 0,
     LastSniperScanAt = 0,
+    LastSoldCheckAt = 0,
     LastAutoClaimAt = 0,
     LastListAt = 0,
     ListTimes = {},
@@ -158,6 +166,12 @@ local State = {
     LastBoothDataAt = 0,
     PendingListUUIDs = {},
     PendingRemoveUUIDs = {},
+    ManualRemoveUUIDs = {},
+    KnownMyListings = {},
+    KnownMyListingsReady = false,
+    MissingMyListings = {},
+    WebhookQueue = {},
+    WebhookBusy = false,
     LastCreateWaitSignal = 0,
     CreateBlockedUntil = 0,
     NextCreateAllowedAt = 0,
@@ -484,6 +498,12 @@ State.LoadRuntimeSettings = function()
         if data.Sniper.RescanBeforeBuy ~= nil then CFG.Sniper.RescanBeforeBuy = data.Sniper.RescanBeforeBuy == true end
         if data.Sniper.WatchlistId ~= nil then CFG.Sniper.WatchlistId = tostring(data.Sniper.WatchlistId) end
     end
+    if type(data.Webhook) == "table" then
+        if data.Webhook.Enabled ~= nil then CFG.Webhook.Enabled = data.Webhook.Enabled == true end
+        if type(data.Webhook.Url) == "string" then CFG.Webhook.Url = data.Webhook.Url end
+        if data.Webhook.PetSold ~= nil then CFG.Webhook.PetSold = data.Webhook.PetSold == true end
+        if data.Webhook.SuccessfulSnipe ~= nil then CFG.Webhook.SuccessfulSnipe = data.Webhook.SuccessfulSnipe == true end
+    end
     if CFG.Seller.AutoList then
         CFG.Seller.PreviewOnly = false
     end
@@ -506,6 +526,12 @@ State.SaveRuntimeSettings = function()
             DryRun = CFG.Sniper.DryRun == true,
             RescanBeforeBuy = CFG.Sniper.RescanBeforeBuy == true,
             WatchlistId = tostring(CFG.Sniper.WatchlistId or "1"),
+        },
+        Webhook = {
+            Enabled = CFG.Webhook.Enabled == true,
+            Url = tostring(CFG.Webhook.Url or ""),
+            PetSold = CFG.Webhook.PetSold == true,
+            SuccessfulSnipe = CFG.Webhook.SuccessfulSnipe == true,
         },
     }
     return saveJson(State.GetSettingsPath(), data)
@@ -1043,6 +1069,7 @@ local function removeListingUUID(id)
     if id == "" then log("Remove skipped: empty id") return false end
 
     markPendingRemove(id)
+    State.ManualRemoveUUIDs[id] = os.clock() + 45
     local ok, result = pcall(function()
         return RemoveListing:InvokeServer(id)
     end)
@@ -1761,6 +1788,140 @@ local function listingToPseudoPet(l)
         VariantNorm = traits.VariantNorm,
         Listing = l,
     }
+end
+
+State.WebhookPost = function(payload)
+    if not CFG.Webhook or CFG.Webhook.Enabled ~= true then return false end
+    local url = tostring(CFG.Webhook.Url or "")
+    if url == "" then return false end
+
+    table.insert(State.WebhookQueue, payload)
+    if State.WebhookBusy then return true end
+    State.WebhookBusy = true
+
+    task.spawn(function()
+        while #State.WebhookQueue > 0 and State.Running do
+            local item = table.remove(State.WebhookQueue, 1)
+            local ok, body = pcall(function()
+                return HttpService:JSONEncode(item)
+            end)
+            if ok then
+                local req = (type(request) == "function" and request)
+                    or (type(http_request) == "function" and http_request)
+                    or (syn and type(syn.request) == "function" and syn.request)
+                    or (http and type(http.request) == "function" and http.request)
+                if req then
+                    local sent, err = pcall(function()
+                        return req({
+                            Url = url,
+                            Method = "POST",
+                            Headers = {["Content-Type"] = "application/json"},
+                            Body = body,
+                        })
+                    end)
+                    if not sent then log("Webhook failed", tostring(err)) end
+                else
+                    local sent, err = pcall(function()
+                        return HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
+                    end)
+                    if not sent then log("Webhook failed", tostring(err)) end
+                end
+            else
+                log("Webhook JSON failed", tostring(body))
+            end
+            task.wait(0.4)
+        end
+        State.WebhookBusy = false
+    end)
+
+    return true
+end
+
+State.WebhookEmbedForListing = function(kind, l, extra)
+    local pet = listingToPseudoPet(l or {})
+    extra = type(extra) == "table" and extra or {}
+
+    local titlePrefix = kind == "snipe" and "SNIPED" or "SOLD"
+    local color = kind == "snipe" and 16731389 or 16766720
+    local priceLabel = kind == "snipe" and "Bought For" or "Sold For"
+    local userLabel = kind == "snipe" and "Seller" or "By User"
+    local userValue = tostring(extra.User or l.OwnerName or "Unknown")
+    if kind == "sold" then userValue = tostring(extra.User or "Unknown") end
+
+    return {
+        username = "NOMO Market",
+        embeds = {{
+            title = string.format("%s - %s [Age %s] [%.2f KG]", titlePrefix, tostring(pet.Name or "?"), tostring(pet.Age or "?"), tonumber(pet.VisualWeight or pet.BaseWeight) or 0),
+            color = color,
+            fields = {
+                {name = userLabel, value = userValue, inline = false},
+                {name = priceLabel, value = commaNumber(l.Price) .. " Tokens", inline = true},
+                {name = "Mutation", value = tostring(pet.Mutation or "Normal"), inline = true},
+                {name = "BaseWeight", value = fmtKg(pet.BaseWeight), inline = true},
+                {name = "Age", value = tostring(pet.Age or "?"), inline = true},
+                {name = "Token Balance", value = commaNumber(getTokenBalance()) .. " Tokens", inline = true},
+                {name = "Pet Inventory", value = tostring(#getOwnPetsFromData()) .. " pets", inline = true},
+                {name = "Server", value = tostring(game.PlaceId) .. ":" .. tostring(game.JobId), inline = false},
+            },
+            footer = {text = "NOMO " .. VERSION .. " - " .. os.date("%m/%d/%Y %I:%M %p")},
+        }},
+    }
+end
+
+State.SendSoldWebhook = function(l)
+    if not CFG.Webhook or CFG.Webhook.Enabled ~= true or CFG.Webhook.PetSold ~= true then return false end
+    return State.WebhookPost(State.WebhookEmbedForListing("sold", l, {}))
+end
+
+State.SendSnipeWebhook = function(match)
+    if not CFG.Webhook or CFG.Webhook.Enabled ~= true or CFG.Webhook.SuccessfulSnipe ~= true then return false end
+    if type(match) ~= "table" or type(match.Listing) ~= "table" then return false end
+    return State.WebhookPost(State.WebhookEmbedForListing("snipe", match.Listing, {User = match.Listing.OwnerName}))
+end
+
+State.TrackSoldListings = function(myListings)
+    local now = os.clock()
+    local current = {}
+    for _, l in ipairs(myListings or {}) do
+        local id = tostring(l.ListingUUID or "")
+        if id ~= "" then current[id] = l end
+    end
+
+    for id, expires in pairs(State.ManualRemoveUUIDs or {}) do
+        if tonumber(expires) and expires < now then
+            State.ManualRemoveUUIDs[id] = nil
+        end
+    end
+
+    if State.KnownMyListingsReady then
+        for id, oldListing in pairs(State.KnownMyListings or {}) do
+            if not current[id] and not State.ManualRemoveUUIDs[id] then
+                local missing = State.MissingMyListings[id]
+                if missing and now - (tonumber(missing.At) or now) >= 8 then
+                    State.SendSoldWebhook(missing.Listing or oldListing)
+                    State.MissingMyListings[id] = nil
+                    log("Webhook sold detected", tostring(oldListing.PetType), tostring(oldListing.Price), id)
+                else
+                    State.MissingMyListings[id] = {At = now, Listing = oldListing}
+                end
+            end
+        end
+    end
+
+    for id in pairs(current) do
+        State.MissingMyListings[id] = nil
+    end
+
+    for id, missing in pairs(State.MissingMyListings or {}) do
+        if tonumber(missing.At) and now - missing.At > 45 then
+            State.MissingMyListings[id] = nil
+        elseif missing.Listing and not current[id] then
+            current[id] = missing.Listing
+        end
+    end
+
+    State.KnownMyListings = current
+    State.KnownMyListingsReady = true
 end
 
 local function findFilterForListing(l, filters, requirePrice)
@@ -2631,6 +2792,9 @@ local function buyFirstMatch()
         State.LastBuyAt = os.clock()
         table.insert(State.BuyTimes, os.clock())
         log("Buy sent", l.PetType, l.Price, l.ListingUUID, tostring(a), tostring(b))
+        if a ~= false then
+            State.SendSnipeWebhook(m)
+        end
         return a, b
     end
     log("Buy failed", tostring(a))
@@ -4302,6 +4466,7 @@ end
 
 function refreshMyListingsLog()
     local my = getMyListings()
+    State.TrackSoldListings(my)
     clearListingRows()
 
     make("TextLabel", {
@@ -4788,6 +4953,45 @@ State.SettingSec:AddToggle("Filter Game Warn Spam", CFG.UI.FilterGameSpam ~= fal
     end
 end)
 
+State.SettingSec:AddToggle("Enable Webhook", CFG.Webhook.Enabled == true, function(v)
+    CFG.Webhook.Enabled = v
+    State.SaveRuntimeSettings()
+    log("Webhook", tostring(v))
+end)
+
+State.WebhookUrlInput = State.SettingSec:AddInput("Webhook URL", tostring(CFG.Webhook.Url or ""), function(v)
+    CFG.Webhook.Url = tostring(v or "")
+    State.SaveRuntimeSettings()
+end)
+
+State.SettingSec:AddToggle("Webhook Pet Sold", CFG.Webhook.PetSold ~= false, function(v)
+    CFG.Webhook.PetSold = v
+    State.SaveRuntimeSettings()
+end)
+
+State.SettingSec:AddToggle("Webhook Snipes", CFG.Webhook.SuccessfulSnipe ~= false, function(v)
+    CFG.Webhook.SuccessfulSnipe = v
+    State.SaveRuntimeSettings()
+end)
+
+State.SettingSec:AddButton("Test Webhook", function()
+    CFG.Webhook.Url = State.WebhookUrlInput:Get()
+    State.SaveRuntimeSettings()
+    local wasEnabled = CFG.Webhook.Enabled
+    CFG.Webhook.Enabled = true
+    local sent = State.WebhookPost({
+        username = "NOMO Market",
+        embeds = {{
+            title = "NOMO webhook test",
+            color = 3447003,
+            description = "Webhook is connected.",
+            footer = {text = "NOMO " .. VERSION},
+        }},
+    })
+    CFG.Webhook.Enabled = wasEnabled
+    log("Webhook test sent", tostring(sent))
+end, "outline")
+
 State.SettingSec:AddButton("Reload Pet API List", function()
     loadGamePetList()
     log("PetList reloaded", tostring(#State.PetList))
@@ -4977,6 +5181,14 @@ task.spawn(function()
                 snipeDryRun()
             end)
             if not ok then log("Sniper scan error", tostring(err)) end
+        end
+
+        if CFG.Webhook.Enabled and CFG.Webhook.PetSold and now - (State.LastSoldCheckAt or 0) >= 10 then
+            State.LastSoldCheckAt = now
+            local ok, err = pcall(function()
+                State.TrackSoldListings(getMyListings(true))
+            end)
+            if not ok then log("Sold webhook check error", tostring(err)) end
         end
 
         refreshPills()
