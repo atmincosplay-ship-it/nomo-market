@@ -825,6 +825,22 @@ local function claimBestFreeBooth()
     return false
 end
 
+local function autoClaimTick(reason)
+    if not CFG.Booth.AutoClaim then
+        return false
+    end
+
+    local target, status = findBestBooth(true)
+    log("AutoClaim check", tostring(reason or "loop"), tostring(status), target and target.Id or "none")
+
+    if status == "MINE" then
+        State.LastBooth = target
+        return true
+    end
+
+    return claimBestFreeBooth()
+end
+
 local function hasOwnBooth(force)
     local target, status = findBestBooth(force)
     if status == "MINE" and target then
@@ -2984,6 +3000,12 @@ refreshSniperLog()
 NOMO_NOTIFY({ Title="NOMO Market", Content=(VERSION or "").." loaded - mode "..tostring(NOMO_MODE), Duration=4 })
 print("[NOMO UI] Done!")
 
+task.spawn(function()
+    task.wait(1.5)
+    local ok, err = pcall(function() autoClaimTick("startup") end)
+    if not ok then log("AutoClaim startup error", tostring(err)) end
+end)
+
 -- ── Public helpers ────────────────────────────────────────
 getgenv().NOMO_V32_REFRESH_SELLER    = function() refreshSellerLog(true) end
 getgenv().NOMO_V32_REFRESH_LISTINGS  = function() refreshMyListingsLog(); refreshMarketSample() end
@@ -3001,11 +3023,7 @@ task.spawn(function()
         local now = os.clock()
         if CFG.Booth.AutoClaim and now-(State.LastAutoClaimAt or 0) >= (tonumber(CFG.Booth.ClaimInterval) or 10) then
             State.LastAutoClaimAt = now
-            local ok, err = pcall(function()
-                local target, status = findBestBooth(true)
-                if status=="MINE" then State.LastBooth=target
-                else claimBestFreeBooth() end
-            end)
+            local ok, err = pcall(function() autoClaimTick("loop") end)
             if not ok then log("AutoClaim error", tostring(err)) end
         end
         if CFG.Seller.Enabled and CFG.Seller.AutoList and now-State.LastSellerScanAt >= (tonumber(CFG.Seller.ScanInterval) or 15) then
