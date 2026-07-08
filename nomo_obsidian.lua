@@ -2318,6 +2318,11 @@ local function importSniperWatchlist(path)
     return true
 end
 
+State.ReloadSniperConfig = function()
+    CFG.Sniper.WatchlistId = tostring(CFG.Sniper.WatchlistId or "1")
+    return importSniperWatchlist(getSniperFilterPath())
+end
+
 local function removeWatch(name)
     CFG.Sniper.Watchlist = CFG.Sniper.Watchlist or {}
     local target = norm(name)
@@ -4710,9 +4715,9 @@ sniperCtrl:AddButton("Add Watch", function()
     State.RefreshSniperLog()
 end)
 
-sniperCtrl:AddButton("Import Config Watchlist", function()
+sniperCtrl:AddButton("Reload Watchlist Config", function()
     CFG.Sniper.WatchlistId = tostring(State.SniperWatchlistIdInput:Get() or "1")
-    importSniperWatchlist(getSniperFilterPath())
+    State.ReloadSniperConfig()
     State.RefreshSniperLog()
 end, "outline")
 
@@ -4770,6 +4775,7 @@ State.SettingSec:AddButton("Save / Reload Filter Path", function()
     CFG.Seller.ListingFilterPath = State.FilterPathInput:Get()
     State.SaveRuntimeSettings()
     reloadFilters()
+    State.ReloadSniperConfig()
     log("Config path set", tostring(CFG.Seller.ListingFilterPath), "listing", getFilterPath(), "sniper", getSniperFilterPath())
 end)
 
@@ -4844,6 +4850,7 @@ ensureFolder()
 loadGamePetList()
 loadGameMutationList()
 reloadFilters()
+State.ReloadSniperConfig()
 installWarnFilter()
 
 log("Started", VERSION .. " PRIVATE UI")
