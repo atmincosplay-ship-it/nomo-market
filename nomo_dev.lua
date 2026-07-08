@@ -50,7 +50,7 @@ CFG.Sniper = CFG.Sniper or {
     -- V3.1 display/safety limits
     MaxMatchesShown = 20,      -- UI display cap
     MaxMatchesPerPet = 5,      -- prevent 70 same-pet rows
-    MaxMatchesPerOwner = 2,    -- prevent one seller filling the list
+    MaxMatchesPerOwner = 0,    -- dev: disabled; per-pet cap is enough
 
     Watchlist = {},
 }
@@ -109,6 +109,8 @@ CFG.Sniper.BuyCooldown = tonumber(CFG.Sniper.BuyCooldown) or 0
 if CFG.Sniper.BuyCooldown > 1 then CFG.Sniper.BuyCooldown = 0 end
 CFG.Sniper.FilterPath = CFG.Sniper.FilterPath or "Nomo/sniper_filters.json"
 CFG.Sniper.WatchlistId = tostring(CFG.Sniper.WatchlistId or "1")
+CFG.Sniper.WeightMode = CFG.Sniper.WeightMode or "Base"
+CFG.Sniper.MaxMatchesPerOwner = 0
 CFG.UI = CFG.UI or {
     CompactBoothData = true,
     FilterGameSpam = true,
@@ -2105,7 +2107,12 @@ local function addWatch(pet, maxPrice)
     end
 
     CFG.Sniper.Watchlist = CFG.Sniper.Watchlist or {}
-    CFG.Sniper.Watchlist[tostring(exactPet or pet)] = {MaxPrice = price or 0}
+    CFG.Sniper.Watchlist[tostring(exactPet or pet)] = {
+        MaxPrice = price or 0,
+        MinWeight = toNumber(CFG.Sniper.MinWeight) or 0,
+        MaxWeight = toNumber(CFG.Sniper.MaxWeight),
+        WeightMode = CFG.Sniper.WeightMode or "Base",
+    }
     log("Added sniper watch", tostring(exactPet or pet), "max", tostring(price or 0))
     return true
 end
@@ -2186,7 +2193,24 @@ local function importSniperWatchlist(path)
             return
         end
 
-        nextWatch[tostring(exactPet or name)] = {MaxPrice = price or 0}
+        local minWeight, maxWeight, weightMode
+        if type(cfg) == "table" then
+            minWeight = toNumber(cfg.MinWeight or cfg.minWeight or cfg.MinKG or cfg.minKG)
+            maxWeight = toNumber(cfg.MaxWeight or cfg.maxWeight or cfg.MaxKG or cfg.maxKG)
+            weightMode = tostring(cfg.WeightMode or cfg.weightMode or CFG.Sniper.WeightMode or "Base")
+        end
+        weightMode = weightMode:gsub("%s+", "")
+        if weightMode == "BaseWeight" or weightMode == "BaseKG" then weightMode = "Base" end
+        if weightMode == "VisualWeight" or weightMode == "DisplayWeight" or weightMode == "VisualKG" then weightMode = "Visual" end
+        if weightMode ~= "Visual" then weightMode = "Base" end
+
+        nextWatch[tostring(exactPet or name)] = {
+            MaxPrice = price or 0,
+            MinWeight = minWeight or 0,
+            MaxWeight = maxWeight,
+            WeightMode = weightMode,
+            Priority = type(cfg) == "table" and toInt(cfg.Priority or cfg.priority) or nil,
+        }
         imported += 1
     end
 
@@ -2219,6 +2243,23 @@ end
 
 local validateSniperMatch
 
+local function normalizeSniperWeightMode(mode)
+    mode = tostring(mode or CFG.Sniper.WeightMode or "Base"):gsub("%s+", "")
+    if mode == "BaseWeight" or mode == "BaseKG" then return "Base" end
+    if mode == "VisualWeight" or mode == "DisplayWeight" or mode == "VisualKG" then return "Visual" end
+    if mode == "Visual" then return "Visual" end
+    return "Base"
+end
+
+local function getSniperWeightForListing(l, watch)
+    local pseudo = listingToPseudoPet(l)
+    local mode = normalizeSniperWeightMode(type(watch) == "table" and watch.WeightMode or CFG.Sniper.WeightMode)
+    if mode == "Visual" then
+        return pseudo.VisualWeight or pseudo.Weight or pseudo.BaseWeight, pseudo, mode
+    end
+    return pseudo.BaseWeight or pseudo.Weight or pseudo.VisualWeight, pseudo, mode
+end
+
 local function snipeDryRun(force)
     local myId = tostring(getPlayerId())
     local watchNorm = {}
@@ -2227,6 +2268,9 @@ local function snipeDryRun(force)
         watchNorm[norm(name)] = {
             Name = name,
             MaxPrice = tonumber(type(cfg) == "table" and cfg.MaxPrice or cfg) or 0,
+            MinWeight = type(cfg) == "table" and toNumber(cfg.MinWeight or cfg.minWeight) or 0,
+            MaxWeight = type(cfg) == "table" and toNumber(cfg.MaxWeight or cfg.maxWeight) or nil,
+            WeightMode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode or cfg.weightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode),
         }
     end
 
@@ -2276,26 +2320,20 @@ local function snipeDryRun(force)
 
     local maxShown = tonumber(CFG.Sniper.MaxMatchesShown) or 20
     local maxPerPet = tonumber(CFG.Sniper.MaxMatchesPerPet) or 5
-    local maxPerOwner = tonumber(CFG.Sniper.MaxMatchesPerOwner) or 2
 
     local petCounts = {}
-    local ownerCounts = {}
     local filtered = {}
 
     for _, m in ipairs(raw) do
         local petKey = norm(m.Listing.PetType)
-        local ownerKey = tostring(m.Listing.OwnerId)
 
         petCounts[petKey] = petCounts[petKey] or 0
-        ownerCounts[ownerKey] = ownerCounts[ownerKey] or 0
 
         local petOk = maxPerPet <= 0 or petCounts[petKey] < maxPerPet
-        local ownerOk = maxPerOwner <= 0 or ownerCounts[ownerKey] < maxPerOwner
 
-        if petOk and ownerOk then
+        if petOk then
             table.insert(filtered, m)
             petCounts[petKey] += 1
-            ownerCounts[ownerKey] += 1
         end
 
         if maxShown > 0 and #filtered >= maxShown then
@@ -2384,6 +2422,20 @@ validateSniperMatch = function(m)
     if watch.MaxPrice <= 0 and not CFG.Sniper.AllowNoMaxPrice then
         return false, "no max price"
     end
+
+    local weight, pseudo, weightMode = getSniperWeightForListing(l, watch)
+    local minWeight = toNumber(watch.MinWeight) or 0
+    local maxWeight = toNumber(watch.MaxWeight)
+    if minWeight > 0 and (not weight or weight < minWeight) then
+        return false, "below min kg"
+    end
+    if maxWeight and (not weight or weight > maxWeight) then
+        return false, "above max kg"
+    end
+
+    m.SniperWeight = weight
+    m.SniperWeightMode = weightMode
+    m.SniperPseudo = pseudo
 
     return true, watch
 end
@@ -3935,6 +3987,16 @@ end)
 
 local sPet = sniperCtrl:AddSearchDropdown("Pet", getPetList(), "Red Fox")
 local sMax = sniperCtrl:AddInput("Max Price", "6")
+local sWeightMode = sniperCtrl:AddDropdown("Weight Mode", {"Base", "Visual"}, CFG.Sniper.WeightMode or "Base", function(v)
+    CFG.Sniper.WeightMode = normalizeSniperWeightMode(v)
+    log("SniperWeightMode", CFG.Sniper.WeightMode)
+end)
+local sMinKg = sniperCtrl:AddInput("Min KG", "0", function(v)
+    CFG.Sniper.MinWeight = toNumber(v) or 0
+end)
+local sMaxKg = sniperCtrl:AddInput("Max KG", "", function(v)
+    CFG.Sniper.MaxWeight = toNumber(v)
+end)
 local sBuyCooldown = sniperCtrl:AddInput("Buy Cooldown", tostring(CFG.Sniper.BuyCooldown or 8), function(v)
     CFG.Sniper.BuyCooldown = toNumber(v) or CFG.Sniper.BuyCooldown or 8
 end)
@@ -3943,9 +4005,6 @@ local sShow = sniperCtrl:AddInput("Show", tostring(CFG.Sniper.MaxMatchesShown or
 end)
 local sPerPet = sniperCtrl:AddInput("Per Pet", tostring(CFG.Sniper.MaxMatchesPerPet or 5), function(v)
     CFG.Sniper.MaxMatchesPerPet = toInt(v) or CFG.Sniper.MaxMatchesPerPet or 5
-end)
-local sPerOwner = sniperCtrl:AddInput("Per Owner", tostring(CFG.Sniper.MaxMatchesPerOwner or 2), function(v)
-    CFG.Sniper.MaxMatchesPerOwner = toInt(v) or CFG.Sniper.MaxMatchesPerOwner or 2
 end)
 local sConfigPath = sniperCtrl:AddInput("Config Path", getSniperFilterPath(), function(v)
     CFG.Sniper.FilterPath = tostring(v or "")
@@ -3958,9 +4017,11 @@ local sniperLog = sniperResultSec:AddLog(315)
 
 local function applySniperLimits()
     CFG.Sniper.BuyCooldown = toNumber(sBuyCooldown:Get()) or CFG.Sniper.BuyCooldown or 8
+    CFG.Sniper.WeightMode = normalizeSniperWeightMode(sWeightMode:Get())
+    CFG.Sniper.MinWeight = toNumber(sMinKg:Get()) or 0
+    CFG.Sniper.MaxWeight = toNumber(sMaxKg:Get())
     CFG.Sniper.MaxMatchesShown = toInt(sShow:Get()) or CFG.Sniper.MaxMatchesShown or 20
     CFG.Sniper.MaxMatchesPerPet = toInt(sPerPet:Get()) or CFG.Sniper.MaxMatchesPerPet or 5
-    CFG.Sniper.MaxMatchesPerOwner = toInt(sPerOwner:Get()) or CFG.Sniper.MaxMatchesPerOwner or 2
 end
 
 local function refreshSniperLog()
@@ -3972,7 +4033,13 @@ local function refreshSniperLog()
     }
 
     for name, cfg in pairs(CFG.Sniper.Watchlist or {}) do
-        table.insert(lines, "- " .. tostring(name) .. " <= " .. tostring(type(cfg) == "table" and cfg.MaxPrice or cfg))
+        local maxPrice = type(cfg) == "table" and cfg.MaxPrice or cfg
+        local minKg = type(cfg) == "table" and cfg.MinWeight or 0
+        local maxKg = type(cfg) == "table" and cfg.MaxWeight or nil
+        local mode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode)
+        local kgText = tostring(mode) .. " KG >= " .. tostring(minKg or 0)
+        if maxKg then kgText = kgText .. " <= " .. tostring(maxKg) end
+        table.insert(lines, "- " .. tostring(name) .. " <= " .. tostring(maxPrice) .. " | " .. kgText)
     end
 
     table.insert(lines, "------------------------------")
@@ -3986,10 +4053,12 @@ local function refreshSniperLog()
 
         local l = m.Listing
         table.insert(lines, string.format(
-            "%02d. %s | price %s | owner %s",
+            "%02d. %s | price %s | %sKG %.2f | owner %s",
             i,
             l.PetType,
             tostring(l.Price),
+            tostring(m.SniperWeightMode or ""),
+            tonumber(m.SniperWeight) or 0,
             l.OwnerName
         ))
     end
