@@ -4098,19 +4098,19 @@ sniperCtrl:AddButton("BUY FIRST (blocked if DryRun)", function()
 end, "outline")
 
 --// SETTINGS PAGE
-local settingsPage = win:CreatePage("Settings")
-local settingSec = settingsPage:AddSection("Settings")
-local filterPathInput = settingSec:AddInput("Filter Path", getFilterPath(), function(v)
+State.SettingsPage = win:CreatePage("Settings")
+State.SettingSec = State.SettingsPage:AddSection("Settings")
+State.FilterPathInput = State.SettingSec:AddInput("Filter Path", getFilterPath(), function(v)
     CFG.Seller.ListingFilterPath = v
     reloadFilters()
 end)
 
-settingSec:AddToggle("Compact Booth Data", CFG.UI.CompactBoothData ~= false, function(v)
+State.SettingSec:AddToggle("Compact Booth Data", CFG.UI.CompactBoothData ~= false, function(v)
     CFG.UI.CompactBoothData = v
     log("CompactBoothData", tostring(v))
 end)
 
-settingSec:AddToggle("Filter Game Warn Spam", CFG.UI.FilterGameSpam ~= false, function(v)
+State.SettingSec:AddToggle("Filter Game Warn Spam", CFG.UI.FilterGameSpam ~= false, function(v)
     CFG.UI.FilterGameSpam = v
     if v then
         local ok = installWarnFilter()
@@ -4120,26 +4120,26 @@ settingSec:AddToggle("Filter Game Warn Spam", CFG.UI.FilterGameSpam ~= false, fu
     end
 end)
 
-settingSec:AddButton("Reload Pet API List", function()
+State.SettingSec:AddButton("Reload Pet API List", function()
     loadGamePetList()
     log("PetList reloaded", tostring(#State.PetList))
 end, "outline")
 
-settingSec:AddButton("Save / Reload Filter Path", function()
-    CFG.Seller.ListingFilterPath = filterPathInput:Get()
+State.SettingSec:AddButton("Save / Reload Filter Path", function()
+    CFG.Seller.ListingFilterPath = State.FilterPathInput:Get()
     reloadFilters()
     log("Filter path set", CFG.Seller.ListingFilterPath)
 end)
 
-settingSec:AddButton("Stop Script", function()
+State.SettingSec:AddButton("Stop Script", function()
     State.Stop("settings stop")
 end, "outline")
 
-local activitySec = settingsPage:AddSection("Activity Log")
-local activityLog = activitySec:AddLog(230)
+State.ActivitySec = State.SettingsPage:AddSection("Activity Log")
+State.ActivityLog = State.ActivitySec:AddLog(230)
 
-activitySec:AddButton("Refresh Activity", function()
-    addLines(activityLog, State.Logs)
+State.ActivitySec:AddButton("Refresh Activity", function()
+    addLines(State.ActivityLog, State.Logs)
 end)
 
 --// Public helpers
