@@ -2143,17 +2143,27 @@ local function addWatch(pet, maxPrice)
         MaxWeight = toNumber(CFG.Sniper.MaxWeight),
         WeightMode = CFG.Sniper.WeightMode or "Base",
     }
-    log("Added sniper watch", tostring(exactPet or pet), "max", tostring(price or 0))
+    local ok = State.SaveSniperWatchlist()
+    log("Added sniper watch", tostring(exactPet or pet), "max", tostring(price or 0), "saved=" .. tostring(ok))
     return true
 end
 
 local function clearWatch()
     CFG.Sniper.Watchlist = {}
-    log("Cleared sniper watchlist")
+    local ok = State.SaveSniperWatchlist()
+    log("Cleared sniper watchlist", "saved=" .. tostring(ok))
 end
 
 local function getSniperFilterPath()
     return joinConfigPath(getConfigFolder(), "sniper_filters.json")
+end
+
+State.SaveSniperWatchlist = function()
+    local id = tostring(CFG.Sniper.WatchlistId or "1")
+    local data = readJson(getSniperFilterPath())
+    data.Watchlists = type(data.Watchlists) == "table" and data.Watchlists or {}
+    data.Watchlists[id] = CFG.Sniper.Watchlist or {}
+    return saveJson(getSniperFilterPath(), data)
 end
 
 local function extractSniperWatchSource(data)
@@ -2253,6 +2263,7 @@ local function importSniperWatchlist(path)
     end
 
     CFG.Sniper.Watchlist = nextWatch
+    State.SaveSniperWatchlist()
     log("Sniper config imported", tostring(imported), "watch(es)", "skipped", tostring(skipped), path)
     return true
 end
@@ -2263,7 +2274,8 @@ local function removeWatch(name)
     for watchName in pairs(CFG.Sniper.Watchlist) do
         if norm(watchName) == target then
             CFG.Sniper.Watchlist[watchName] = nil
-            log("Removed sniper watch", tostring(watchName))
+            local ok = State.SaveSniperWatchlist()
+            log("Removed sniper watch", tostring(watchName), "saved=" .. tostring(ok))
             return true
         end
     end
@@ -4331,6 +4343,139 @@ State.ApplySniperLimits = function()
     CFG.Sniper.MaxMatchesPerPet = toInt(sPerPet:Get()) or CFG.Sniper.MaxMatchesPerPet or 5
 end
 
+State.OpenSniperWatchEditPopup = function(name, managerOverlay)
+    local cfg = CFG.Sniper.Watchlist and CFG.Sniper.Watchlist[name]
+    if not cfg then
+        log("Edit watch failed", tostring(name))
+        return
+    end
+    local maxPrice = type(cfg) == "table" and cfg.MaxPrice or cfg
+    local minKg = type(cfg) == "table" and cfg.MinWeight or 0
+    local maxKg = type(cfg) == "table" and cfg.MaxWeight or nil
+    local mode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode)
+
+    local overlay = make("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.3,
+        BorderSizePixel = 0,
+        ZIndex = 100,
+    }, win.Gui)
+    local modal = make("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.fromOffset(420, 290),
+        BackgroundColor3 = T.Card,
+        BorderSizePixel = 0,
+        ZIndex = 101,
+    }, overlay)
+    corner(modal, 10); stroke(modal); pad(modal, 12)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 28),
+        BackgroundTransparency = 1,
+        Text = "Edit Watch - " .. tostring(name),
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 102,
+    }, modal)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 24),
+        Position = UDim2.fromOffset(0, 34),
+        BackgroundTransparency = 1,
+        Text = tostring(mode) .. " weight mode",
+        TextColor3 = T.Sub,
+        Font = Enum.Font.Code,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 102,
+    }, modal)
+
+    local function label(text, y)
+        make("TextLabel", {
+            Size = UDim2.new(0, 120, 0, 26),
+            Position = UDim2.fromOffset(0, y),
+            BackgroundTransparency = 1,
+            Text = text,
+            TextColor3 = T.Sub,
+            Font = Enum.Font.Gotham,
+            TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 102,
+        }, modal)
+    end
+    local function box(text, y)
+        local b = make("TextBox", {
+            Size = UDim2.new(1, -130, 0, 26),
+            Position = UDim2.fromOffset(130, y),
+            BackgroundColor3 = T.Card2,
+            Text = tostring(text or ""),
+            TextColor3 = T.Text,
+            Font = Enum.Font.Gotham,
+            TextSize = 12,
+            ClearTextOnFocus = false,
+            BorderSizePixel = 0,
+            ZIndex = 102,
+        }, modal)
+        corner(b, 6); stroke(b); pad(b, 0, 0, 6, 6)
+        return b
+    end
+
+    label("Price", 70)
+    local priceBox = box(maxPrice, 70)
+    label("Min KG", 104)
+    local minBox = box(minKg, 104)
+    label("Max KG", 138)
+    local maxBox = box(maxKg or "", 138)
+
+    local saveBtn = make("TextButton", {
+        Size = UDim2.fromOffset(130, 30),
+        Position = UDim2.new(1, -272, 1, -34),
+        BackgroundColor3 = T.Accent,
+        Text = "Save",
+        TextColor3 = Color3.new(1, 1, 1),
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 102,
+    }, modal)
+    corner(saveBtn, 7)
+    local cancelBtn = make("TextButton", {
+        Size = UDim2.fromOffset(130, 30),
+        Position = UDim2.new(1, -134, 1, -34),
+        BackgroundColor3 = T.Card2,
+        Text = "Cancel",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 102,
+    }, modal)
+    corner(cancelBtn, 7); stroke(cancelBtn)
+
+    cancelBtn.Activated:Connect(function()
+        overlay:Destroy()
+    end)
+    saveBtn.Activated:Connect(function()
+        CFG.Sniper.Watchlist = CFG.Sniper.Watchlist or {}
+        CFG.Sniper.Watchlist[name] = {
+            MaxPrice = clampPrice(priceBox.Text) or maxPrice or 0,
+            MinWeight = toNumber(minBox.Text) or 0,
+            MaxWeight = toNumber(maxBox.Text),
+            WeightMode = mode,
+        }
+        local ok = State.SaveSniperWatchlist()
+        log("Updated watch", tostring(name), "price", tostring(CFG.Sniper.Watchlist[name].MaxPrice), "saved=" .. tostring(ok), getSniperFilterPath())
+        State.RefreshSniperLog()
+        overlay:Destroy()
+        if managerOverlay then managerOverlay:Destroy() end
+        State.OpenSniperWatchlistManager()
+    end)
+end
+
 State.OpenSniperWatchlistManager = function()
     local overlay = make("Frame", {
         Size = UDim2.new(1, 0, 1, 0),
@@ -4444,13 +4589,7 @@ State.OpenSniperWatchlistManager = function()
         corner(delBtn, 6)
 
         editBtn.Activated:Connect(function()
-            sPet:Set(name)
-            sMax:Set(maxPrice or "")
-            State.SniperWeightModeInput:Set(mode)
-            State.SniperMinKgInput:Set(minKg or 0)
-            State.SniperMaxKgInput:Set(maxKg or "")
-            log("Loaded watch for edit", tostring(name))
-            overlay:Destroy()
+            State.OpenSniperWatchEditPopup(name, overlay)
         end)
         delBtn.Activated:Connect(function()
             removeWatch(name)
