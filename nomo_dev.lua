@@ -3366,7 +3366,7 @@ function Library:CreateWindow(cfg)
 					make("TextLabel", {
 						Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1,
 						RichText = false,
-						Text = ("%s  %s"):format(os.date("%H:%M:%S"), tostring(text or "")),
+						Text = ("%s  %s"):format(os.date("%H:%M:%S"), tostring(text or ""):gsub("<.->", "")),
 						Font = Enum.Font.Code, TextSize = 11, TextColor3 = T.Sub,
 						TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
 					}, logFrame)
@@ -3644,6 +3644,136 @@ local mutationInput = filterSec:AddSearchDropdown("Mutation", getMutationList(),
 local variantInput = { Get = function() return "Any" end } -- hatch type is part of Pet name, e.g. GIANT Barn Owl
 local maxListedInput = filterSec:AddInput("Per Filter Cap", "5")
 
+State.OpenFilterManager = function()
+    local overlay = make("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.35,
+        BorderSizePixel = 0,
+        ZIndex = 90,
+    }, gui)
+    local modal = make("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.fromOffset(560, 390),
+        BackgroundColor3 = T.Card,
+        BorderSizePixel = 0,
+        ZIndex = 91,
+    }, overlay)
+    corner(modal, 10); stroke(modal); pad(modal, 10)
+
+    local title = make("TextLabel", {
+        Size = UDim2.new(1, -74, 0, 26),
+        BackgroundTransparency = 1,
+        Text = "Manage Listing Filters",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 92,
+    }, modal)
+    local closeBtn = make("TextButton", {
+        Size = UDim2.fromOffset(64, 24),
+        Position = UDim2.new(1, -64, 0, 0),
+        BackgroundColor3 = T.Card2,
+        Text = "Done",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 92,
+    }, modal)
+    corner(closeBtn, 7); stroke(closeBtn)
+
+    local list = make("ScrollingFrame", {
+        Size = UDim2.new(1, 0, 1, -36),
+        Position = UDim2.fromOffset(0, 34),
+        BackgroundColor3 = T.Card2,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 4,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = UDim2.new(),
+        ZIndex = 92,
+    }, modal)
+    corner(list, 8); pad(list, 5); vlist(list, 4)
+
+    closeBtn.Activated:Connect(function() overlay:Destroy() end)
+
+    for i, f in ipairs(getFilters()) do
+        local row = make("Frame", {
+            Size = UDim2.new(1, 0, 0, 34),
+            BackgroundColor3 = T.Card,
+            BorderSizePixel = 0,
+            ZIndex = 93,
+        }, list)
+        corner(row, 7); stroke(row)
+        make("TextLabel", {
+            Size = UDim2.new(1, -116, 1, 0),
+            Position = UDim2.fromOffset(8, 0),
+            BackgroundTransparency = 1,
+            Text = string.format("%02d. %s | %s | Base %s-%s | Age %s-%s | %s",
+                i,
+                tostring(f.Pet or "?"),
+                tostring(f.Price or "?"),
+                tostring(f.MinWeight or 0),
+                tostring(f.MaxWeight or "?"),
+                tostring(f.MinAge or 0),
+                tostring(f.MaxAge or "?"),
+                tostring(f.Mutation or "Any")
+            ),
+            TextColor3 = T.Text,
+            Font = Enum.Font.Code,
+            TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 94,
+        }, row)
+        local editBtn = make("TextButton", {
+            Size = UDim2.fromOffset(50, 24),
+            Position = UDim2.new(1, -104, 0.5, -12),
+            BackgroundColor3 = T.Card2,
+            Text = "Edit",
+            TextColor3 = T.Accent,
+            Font = Enum.Font.GothamBold,
+            TextSize = 11,
+            BorderSizePixel = 0,
+            ZIndex = 94,
+        }, row)
+        corner(editBtn, 6); stroke(editBtn)
+        local delBtn = make("TextButton", {
+            Size = UDim2.fromOffset(36, 24),
+            Position = UDim2.new(1, -44, 0.5, -12),
+            BackgroundColor3 = Color3.fromRGB(255, 72, 86),
+            Text = "X",
+            TextColor3 = Color3.new(1, 1, 1),
+            Font = Enum.Font.GothamBold,
+            TextSize = 12,
+            BorderSizePixel = 0,
+            ZIndex = 94,
+        }, row)
+        corner(delBtn, 6)
+
+        editBtn.Activated:Connect(function()
+            petInput:Set(f.Pet or "")
+            priceInput:Set(f.Price or "")
+            minKgInput:Set(f.MinWeight or "")
+            maxKgInput:Set(f.MaxWeight or "")
+            minAgeInput:Set(f.MinAge or "")
+            maxAgeInput:Set(f.MaxAge or "")
+            mutationInput:Set(f.Mutation or "Any")
+            maxListedInput:Set(f.MaxListed or f.PerFilterCap or "")
+            log("Loaded filter for edit", tostring(f.Pet or "?"), "index", tostring(i))
+            overlay:Destroy()
+        end)
+        delBtn.Activated:Connect(function()
+            deleteFilter(i)
+            refreshSellerLog(true)
+            overlay:Destroy()
+            State.OpenFilterManager()
+        end)
+    end
+end
+
 local logRow = sellerPage:AddRow()
 local filterLogSec = sellerPage:AddSectionInRow(logRow, "Active Filters / Candidates", 1)
 sellerLog = filterLogSec:AddLog(210)
@@ -3827,6 +3957,10 @@ filterSec:AddButton("Preview Candidates", function()
 end, "outline")
 
 local delFilterInput = filterLogSec:AddInput("Remove Filter #", "1")
+filterLogSec:AddButton("Manage Filters", function()
+    State.OpenFilterManager()
+end)
+
 filterLogSec:AddButton("Remove Selected Filter", function()
     deleteFilter(delFilterInput:Get())
     refreshSellerLog(true)
@@ -4032,6 +4166,137 @@ local function applySniperLimits()
     CFG.Sniper.MaxMatchesPerPet = toInt(sPerPet:Get()) or CFG.Sniper.MaxMatchesPerPet or 5
 end
 
+State.OpenSniperWatchlistManager = function()
+    local overlay = make("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.35,
+        BorderSizePixel = 0,
+        ZIndex = 90,
+    }, gui)
+    local modal = make("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.fromOffset(560, 390),
+        BackgroundColor3 = T.Card,
+        BorderSizePixel = 0,
+        ZIndex = 91,
+    }, overlay)
+    corner(modal, 10); stroke(modal); pad(modal, 10)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, -74, 0, 26),
+        BackgroundTransparency = 1,
+        Text = "Manage Sniper Watchlist",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 92,
+    }, modal)
+    local closeBtn = make("TextButton", {
+        Size = UDim2.fromOffset(64, 24),
+        Position = UDim2.new(1, -64, 0, 0),
+        BackgroundColor3 = T.Card2,
+        Text = "Done",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 92,
+    }, modal)
+    corner(closeBtn, 7); stroke(closeBtn)
+
+    local list = make("ScrollingFrame", {
+        Size = UDim2.new(1, 0, 1, -36),
+        Position = UDim2.fromOffset(0, 34),
+        BackgroundColor3 = T.Card2,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 4,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = UDim2.new(),
+        ZIndex = 92,
+    }, modal)
+    corner(list, 8); pad(list, 5); vlist(list, 4)
+
+    closeBtn.Activated:Connect(function() overlay:Destroy() end)
+
+    local idx = 0
+    for name, cfg in pairs(CFG.Sniper.Watchlist or {}) do
+        idx += 1
+        local maxPrice = type(cfg) == "table" and cfg.MaxPrice or cfg
+        local minKg = type(cfg) == "table" and cfg.MinWeight or 0
+        local maxKg = type(cfg) == "table" and cfg.MaxWeight or nil
+        local mode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode)
+        local row = make("Frame", {
+            Size = UDim2.new(1, 0, 0, 34),
+            BackgroundColor3 = T.Card,
+            BorderSizePixel = 0,
+            ZIndex = 93,
+        }, list)
+        corner(row, 7); stroke(row)
+        make("TextLabel", {
+            Size = UDim2.new(1, -116, 1, 0),
+            Position = UDim2.fromOffset(8, 0),
+            BackgroundTransparency = 1,
+            Text = string.format("%02d. %s | max %s | %s KG %s-%s",
+                idx,
+                tostring(name),
+                tostring(maxPrice or "?"),
+                tostring(mode),
+                tostring(minKg or 0),
+                tostring(maxKg or "?")
+            ),
+            TextColor3 = T.Text,
+            Font = Enum.Font.Code,
+            TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 94,
+        }, row)
+        local editBtn = make("TextButton", {
+            Size = UDim2.fromOffset(50, 24),
+            Position = UDim2.new(1, -104, 0.5, -12),
+            BackgroundColor3 = T.Card2,
+            Text = "Edit",
+            TextColor3 = T.Accent,
+            Font = Enum.Font.GothamBold,
+            TextSize = 11,
+            BorderSizePixel = 0,
+            ZIndex = 94,
+        }, row)
+        corner(editBtn, 6); stroke(editBtn)
+        local delBtn = make("TextButton", {
+            Size = UDim2.fromOffset(36, 24),
+            Position = UDim2.new(1, -44, 0.5, -12),
+            BackgroundColor3 = Color3.fromRGB(255, 72, 86),
+            Text = "X",
+            TextColor3 = Color3.new(1, 1, 1),
+            Font = Enum.Font.GothamBold,
+            TextSize = 12,
+            BorderSizePixel = 0,
+            ZIndex = 94,
+        }, row)
+        corner(delBtn, 6)
+
+        editBtn.Activated:Connect(function()
+            sPet:Set(name)
+            sMax:Set(maxPrice or "")
+            State.SniperWeightModeInput:Set(mode)
+            State.SniperMinKgInput:Set(minKg or 0)
+            State.SniperMaxKgInput:Set(maxKg or "")
+            log("Loaded watch for edit", tostring(name))
+            overlay:Destroy()
+        end)
+        delBtn.Activated:Connect(function()
+            removeWatch(name)
+            State.RefreshSniperLog()
+            overlay:Destroy()
+            State.OpenSniperWatchlistManager()
+        end)
+    end
+end
+
 State.RefreshSniperLog = function()
     local lines = {
         "Safety: exact pet " .. tostring(CFG.Sniper.RequireExactPetName) .. " | max price required " .. tostring(not CFG.Sniper.AllowNoMaxPrice),
@@ -4040,14 +4305,21 @@ State.RefreshSniperLog = function()
         "Watchlist:",
     }
 
+    local watchCount = 0
     for name, cfg in pairs(CFG.Sniper.Watchlist or {}) do
+        watchCount += 1
         local maxPrice = type(cfg) == "table" and cfg.MaxPrice or cfg
         local minKg = type(cfg) == "table" and cfg.MinWeight or 0
         local maxKg = type(cfg) == "table" and cfg.MaxWeight or nil
         local mode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode)
         local kgText = tostring(mode) .. " KG >= " .. tostring(minKg or 0)
         if maxKg then kgText = kgText .. " <= " .. tostring(maxKg) end
-        table.insert(lines, "- " .. tostring(name) .. " <= " .. tostring(maxPrice) .. " | " .. kgText)
+        if watchCount <= 8 then
+            table.insert(lines, "- " .. tostring(name) .. " <= " .. tostring(maxPrice) .. " | " .. kgText)
+        end
+    end
+    if watchCount > 8 then
+        table.insert(lines, "... +" .. tostring(watchCount - 8) .. " more watches")
     end
 
     table.insert(lines, "------------------------------")
@@ -4084,6 +4356,10 @@ sniperCtrl:AddButton("Import Config Watchlist", function()
     CFG.Sniper.WatchlistId = tostring(State.SniperWatchlistIdInput:Get() or "1")
     importSniperWatchlist(getSniperFilterPath())
     State.RefreshSniperLog()
+end, "outline")
+
+sniperCtrl:AddButton("Manage Watchlist", function()
+    State.OpenSniperWatchlistManager()
 end, "outline")
 
 sniperCtrl:AddButton("Dry Run Scan", function()
