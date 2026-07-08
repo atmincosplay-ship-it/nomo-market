@@ -2284,6 +2284,11 @@ local function formatSniperMax(price)
     return tostring(price)
 end
 
+State.FormatSniperKgRange = function(mode, minKg, maxKg)
+    local upper = tonumber(maxKg)
+    return tostring(mode or "Base") .. " KG " .. tostring(tonumber(minKg) or 0) .. "-" .. (upper and tostring(upper) or "unli")
+end
+
 local function getSniperWeightForListing(l, watch)
     local pseudo = listingToPseudoPet(l)
     local mode = normalizeSniperWeightMode(type(watch) == "table" and watch.WeightMode or CFG.Sniper.WeightMode)
@@ -3645,7 +3650,7 @@ filterSec:AddButton("Diagnose This Pet", function()
     end
 end, "outline")
 local priceInput = filterSec:AddInput("Price", "111")
-local minKgInput = filterSec:AddInput("Min Base KG", "1")
+local minKgInput = filterSec:AddInput("Min Base KG", "0")
 local maxKgInput = filterSec:AddInput("Max Base KG", "3")
 local minAgeInput = filterSec:AddInput("Min Age", "1")
 local maxAgeInput = filterSec:AddInput("Max Age", "100")
@@ -4248,13 +4253,12 @@ State.OpenSniperWatchlistManager = function()
             Size = UDim2.new(1, -116, 1, 0),
             Position = UDim2.fromOffset(8, 0),
             BackgroundTransparency = 1,
-            Text = string.format("%02d. %s | max %s | %s KG %s-%s",
+            Text = string.format("%02d. %s | Price %s | %s | Max %s per pet",
                 idx,
                 tostring(name),
                 formatSniperMax(maxPrice),
-                tostring(mode),
-                tostring(minKg or 0),
-                tostring(maxKg or "?")
+                State.FormatSniperKgRange(mode, minKg, maxKg),
+                tostring(CFG.Sniper.MaxMatchesPerPet or 5)
             ),
             TextColor3 = T.Text,
             Font = Enum.Font.Code,
@@ -4321,10 +4325,8 @@ State.RefreshSniperLog = function()
         local minKg = type(cfg) == "table" and cfg.MinWeight or 0
         local maxKg = type(cfg) == "table" and cfg.MaxWeight or nil
         local mode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode)
-        local kgText = tostring(mode) .. " KG >= " .. tostring(minKg or 0)
-        if maxKg then kgText = kgText .. " <= " .. tostring(maxKg) end
         if watchCount <= 8 then
-            table.insert(lines, "- " .. tostring(name) .. " | max " .. formatSniperMax(maxPrice) .. " | " .. kgText)
+            table.insert(lines, "- " .. tostring(name) .. " | Price " .. formatSniperMax(maxPrice) .. " | " .. State.FormatSniperKgRange(mode, minKg, maxKg) .. " | Max " .. tostring(CFG.Sniper.MaxMatchesPerPet or 5) .. " per pet")
         end
     end
     if watchCount > 8 then
@@ -4342,11 +4344,10 @@ State.RefreshSniperLog = function()
 
         local l = m.Listing
         table.insert(lines, string.format(
-            "%02d. %s | price %s / max %s | %sKG %.2f | owner %s",
+            "%02d. %s | Price %s | %s KG %.2f | owner %s",
             i,
             l.PetType,
             tostring(l.Price),
-            formatSniperMax(m.Watch and m.Watch.MaxPrice),
             tostring(m.SniperWeightMode or ""),
             tonumber(m.SniperWeight) or 0,
             l.OwnerName
