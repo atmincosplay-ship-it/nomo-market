@@ -4987,15 +4987,20 @@ State.WebhookRouteSec:AddButton("Test Snipe Webhook", function()
     State.SaveRuntimeSettings()
     local wasEnabled = CFG.Webhook.Enabled
     CFG.Webhook.Enabled = true
-    local sent = State.WebhookPost({
-        username = "NOMO Market",
-        embeds = {{
-            title = "NOMO snipe webhook test",
-            color = 16731389,
-            description = "Snipe webhook is connected.",
-            footer = {text = "NOMO " .. VERSION},
-        }},
-    }, "snipe")
+    local sample = {
+        PetType = "Golden Mimic Octopus",
+        Price = 6,
+        OwnerName = "sample_seller",
+        ListingUUID = "sample-snipe",
+        ItemId = "sample-pet",
+        Item = {
+            PetType = "Golden Mimic Octopus",
+            BaseWeight = 1.64,
+            PetData = {Level = 19},
+            Mutation = "Golden",
+        },
+    }
+    local sent = State.WebhookPost(State.WebhookEmbedForListing("snipe", sample, {User = "sample_seller"}), "snipe")
     CFG.Webhook.Enabled = wasEnabled
     log("Snipe webhook test sent", tostring(sent))
 end, "outline")
@@ -5006,15 +5011,19 @@ State.WebhookRouteSec:AddButton("Test Sale Webhook", function()
     State.SaveRuntimeSettings()
     local wasEnabled = CFG.Webhook.Enabled
     CFG.Webhook.Enabled = true
-    local sent = State.WebhookPost({
-        username = "NOMO Market",
-        embeds = {{
-            title = "NOMO booth sale webhook test",
-            color = 16766720,
-            description = "Booth sale webhook is connected.",
-            footer = {text = "NOMO " .. VERSION},
-        }},
-    }, "sold")
+    local sample = {
+        PetType = "Mimic Octopus",
+        Price = 26,
+        ListingUUID = "sample-sale",
+        ItemId = "sample-pet",
+        Item = {
+            PetType = "Mimic Octopus",
+            BaseWeight = 1.88,
+            PetData = {Level = 1},
+            Mutation = "Normal",
+        },
+    }
+    local sent = State.WebhookPost(State.WebhookEmbedForListing("sold", sample, {User = "sample_buyer"}), "sold")
     CFG.Webhook.Enabled = wasEnabled
     log("Sale webhook test sent", tostring(sent))
 end, "outline")
