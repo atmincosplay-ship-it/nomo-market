@@ -4,7 +4,7 @@
 --// Seller focused. Sniper dry-run only by default.
 --//====================================================--
 
-local VERSION = "V7.1 SAFETY HARDENED"
+local VERSION = "V7.2 PROTECTED LISTINGS"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -87,6 +87,8 @@ CFG.Seller.VerifyAfterListAttempts = CFG.Seller.VerifyAfterListAttempts or 8
 CFG.Seller.PendingListCooldown = CFG.Seller.PendingListCooldown or 6
 CFG.Seller.RequireExactPetName = CFG.Seller.RequireExactPetName ~= false
 CFG.Seller.StrictListGuard = CFG.Seller.StrictListGuard ~= false
+CFG.Seller.ProtectManualListings = CFG.Seller.ProtectManualListings ~= false
+CFG.Seller.ManagedListingsPath = CFG.Seller.ManagedListingsPath or "Nomo/managed_listings.json"
 CFG.Seller.AdaptiveCreateWait = CFG.Seller.AdaptiveCreateWait ~= false
 CFG.Seller.CreateWaitMin = math.max(5, tonumber(CFG.Seller.CreateWaitMin) or 5)
 CFG.Seller.CreateWaitMax = math.max(CFG.Seller.CreateWaitMin, tonumber(CFG.Seller.CreateWaitMax) or 10)
@@ -157,6 +159,7 @@ local State = {
     LastBoothDataAt = 0,
     PendingListUUIDs = {},
     PendingRemoveUUIDs = {},
+    ManagedListings = nil,
     LastCreateWaitSignal = 0,
     CreateBlockedUntil = 0,
     NextCreateAllowedAt = 0,
@@ -413,7 +416,7 @@ local function readJson(path)
 end
 
 local function saveJson(path, data)
-    data.Filters = data.Filters or {}
+    data = data or {}
     if type(writefile) ~= "function" then
         log("writefile unsupported")
         return false
@@ -430,6 +433,96 @@ end
 
 local function getFilterPath()
     return CFG.Seller.ListingFilterPath or "Nomo/listing_filter.json"
+end
+
+local getMyListings
+
+local function getManagedListingsPath()
+    return CFG.Seller.ManagedListingsPath or "Nomo/managed_listings.json"
+end
+
+local function normalizeManagedData(data)
+    if type(data) ~= "table" then data = {} end
+    data.ManagedItems = data.ManagedItems or {}
+    data.ProtectedItems = data.ProtectedItems or {}
+    return data
+end
+
+local function loadManagedListings()
+    if State.ManagedListings then
+        return State.ManagedListings
+    end
+
+    local data = normalizeManagedData(readJson(getManagedListingsPath()))
+    State.ManagedListings = data
+    return data
+end
+
+local function saveManagedListings()
+    return saveJson(getManagedListingsPath(), normalizeManagedData(State.ManagedListings or {}))
+end
+
+local function markManagedListing(itemId, meta)
+    itemId = tostring(itemId or "")
+    if itemId == "" then return false end
+
+    local data = loadManagedListings()
+    data.ManagedItems[itemId] = meta or true
+    data.ProtectedItems[itemId] = nil
+    State.ManagedListings = data
+    return saveManagedListings()
+end
+
+local function markProtectedListing(itemId, meta)
+    itemId = tostring(itemId or "")
+    if itemId == "" then return false end
+
+    local data = loadManagedListings()
+    data.ProtectedItems[itemId] = meta or true
+    data.ManagedItems[itemId] = nil
+    State.ManagedListings = data
+    return saveManagedListings()
+end
+
+local function isManagedListing(l)
+    local itemId = tostring(l and (l.ItemId or l.ItemID or l.itemId) or "")
+    if itemId == "" then return false end
+
+    local data = loadManagedListings()
+    return data.ManagedItems[itemId] ~= nil
+end
+
+local function isProtectedListing(l)
+    local itemId = tostring(l and (l.ItemId or l.ItemID or l.itemId) or "")
+    if itemId == "" then return false end
+
+    local data = loadManagedListings()
+    return data.ProtectedItems[itemId] ~= nil
+end
+
+local function protectCurrentBoothListings()
+    local count = 0
+    for _, l in ipairs(getMyListings(true, true)) do
+        local itemId = tostring(l.ItemId or l.ItemID or l.itemId or "")
+        if itemId ~= "" then
+            markProtectedListing(itemId, {
+                Pet = tostring(l.PetType or ""),
+                Price = tonumber(l.Price) or 0,
+                At = os.time(),
+            })
+            count += 1
+        end
+    end
+    log("Protected current booth listings", tostring(count))
+    return count
+end
+
+local function clearListingProtection()
+    local data = loadManagedListings()
+    data.ProtectedItems = {}
+    State.ManagedListings = data
+    saveManagedListings()
+    log("Cleared protected listing marks")
 end
 
 --//====================================================--
@@ -887,7 +980,7 @@ local function getAllListings(force, includePendingRemoves)
     return out
 end
 
-local function getMyListings(force, includePendingRemoves)
+function getMyListings(force, includePendingRemoves)
     local myId = tostring(getPlayerId())
     local out = {}
     for _, l in ipairs(getAllListings(force, includePendingRemoves)) do
@@ -1181,6 +1274,7 @@ local function reloadFilters()
     end
 
     State.FilterData = readJson(getFilterPath())
+    State.FilterData.Filters = State.FilterData.Filters or {}
     return State.FilterData
 end
 
@@ -1869,6 +1963,11 @@ local function listPet(pet, price, boothReady, f)
         local verified, verifyInfo = verifyListingAfterList(pet, price, f)
         if verified then
             registerCreateSuccess()
+            markManagedListing(pet.UUID, {
+                Pet = tostring(pet.Name or ""),
+                Price = clampPrice(price) or 0,
+                At = os.time(),
+            })
             log("Listed OK + verified", pet.Name, "price", tostring(price), "session", tostring(State.ListedThisSession))
             return true
         else
@@ -2011,6 +2110,12 @@ local function smartRebuildBooth()
     log("Smart Rebuild started", "my=" .. tostring(#my), "filters=" .. tostring(#filters))
 
     for _, l in ipairs(my) do
+        if CFG.Seller.ProtectManualListings and (isProtectedListing(l) or not isManagedListing(l)) then
+            kept += 1
+            log("Smart keep protected/manual", tostring(l.PetType), "price", tostring(l.Price))
+            continue
+        end
+
         local f, pseudo, why = findFilterForListing(l, filters, true)
         local removeReason = why
 
@@ -3454,6 +3559,19 @@ end)
 sellerCtrl:AddToggle("Remote Config", CFG.Seller.RemoteConfigEnabled, function(v)
     CFG.Seller.RemoteConfigEnabled = v
 end)
+
+sellerCtrl:AddToggle("Protect Manual Listings", CFG.Seller.ProtectManualListings, function(v)
+    CFG.Seller.ProtectManualListings = v
+    log("ProtectManualListings", tostring(v))
+end)
+
+sellerCtrl:AddButton("PROTECT CURRENT BOOTH", function()
+    protectCurrentBoothListings()
+end, "outline")
+
+sellerCtrl:AddButton("CLEAR PROTECTED MARKS", function()
+    clearListingProtection()
+end, "outline")
 
 sellerCtrl:AddButton("Reload Remote Config", function()
     task.spawn(function()
