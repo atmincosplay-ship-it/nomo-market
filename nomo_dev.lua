@@ -2276,6 +2276,14 @@ local function normalizeSniperWeightMode(mode)
     return "Base"
 end
 
+local function formatSniperMax(price)
+    price = tonumber(price) or 0
+    if price <= 0 then
+        return "Any"
+    end
+    return tostring(price)
+end
+
 local function getSniperWeightForListing(l, watch)
     local pseudo = listingToPseudoPet(l)
     local mode = normalizeSniperWeightMode(type(watch) == "table" and watch.WeightMode or CFG.Sniper.WeightMode)
@@ -3383,12 +3391,13 @@ function Library:CreateWindow(cfg)
 			return sec
 		end
 
-		function page:AddSection(title) return newSection(frame, title) end
-		function page:AddSectionInRow(row, title, widthScale) return newSection(row, title, widthScale) end
+	function page:AddSection(title) return newSection(frame, title) end
+	function page:AddSectionInRow(row, title, widthScale) return newSection(row, title, widthScale) end
 
-		return page
+	return page
 	end
 
+    window.Gui = gui
 	return window
 end
 
@@ -3651,7 +3660,7 @@ State.OpenFilterManager = function()
         BackgroundTransparency = 0.35,
         BorderSizePixel = 0,
         ZIndex = 90,
-    }, gui)
+    }, win.Gui)
     local modal = make("Frame", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.new(0.5, 0, 0.5, 0),
@@ -4157,7 +4166,7 @@ end)
 
 local sniperLog = sniperResultSec:AddLog(315)
 
-local function applySniperLimits()
+State.ApplySniperLimits = function()
     CFG.Sniper.BuyCooldown = 0
     CFG.Sniper.WeightMode = normalizeSniperWeightMode(State.SniperWeightModeInput:Get())
     CFG.Sniper.MinWeight = toNumber(State.SniperMinKgInput:Get()) or 0
@@ -4173,7 +4182,7 @@ State.OpenSniperWatchlistManager = function()
         BackgroundTransparency = 0.35,
         BorderSizePixel = 0,
         ZIndex = 90,
-    }, gui)
+    }, win.Gui)
     local modal = make("Frame", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.new(0.5, 0, 0.5, 0),
@@ -4242,7 +4251,7 @@ State.OpenSniperWatchlistManager = function()
             Text = string.format("%02d. %s | max %s | %s KG %s-%s",
                 idx,
                 tostring(name),
-                tostring(maxPrice or "?"),
+                formatSniperMax(maxPrice),
                 tostring(mode),
                 tostring(minKg or 0),
                 tostring(maxKg or "?")
@@ -4315,7 +4324,7 @@ State.RefreshSniperLog = function()
         local kgText = tostring(mode) .. " KG >= " .. tostring(minKg or 0)
         if maxKg then kgText = kgText .. " <= " .. tostring(maxKg) end
         if watchCount <= 8 then
-            table.insert(lines, "- " .. tostring(name) .. " <= " .. tostring(maxPrice) .. " | " .. kgText)
+            table.insert(lines, "- " .. tostring(name) .. " | max " .. formatSniperMax(maxPrice) .. " | " .. kgText)
         end
     end
     if watchCount > 8 then
@@ -4333,10 +4342,11 @@ State.RefreshSniperLog = function()
 
         local l = m.Listing
         table.insert(lines, string.format(
-            "%02d. %s | price %s | %sKG %.2f | owner %s",
+            "%02d. %s | price %s / max %s | %sKG %.2f | owner %s",
             i,
             l.PetType,
             tostring(l.Price),
+            formatSniperMax(m.Watch and m.Watch.MaxPrice),
             tostring(m.SniperWeightMode or ""),
             tonumber(m.SniperWeight) or 0,
             l.OwnerName
@@ -4347,7 +4357,7 @@ State.RefreshSniperLog = function()
 end
 
 sniperCtrl:AddButton("Add Watch", function()
-    applySniperLimits()
+    State.ApplySniperLimits()
     addWatch(sPet:Get(), sMax:Get())
     State.RefreshSniperLog()
 end)
@@ -4363,7 +4373,7 @@ sniperCtrl:AddButton("Manage Watchlist", function()
 end, "outline")
 
 sniperCtrl:AddButton("Dry Run Scan", function()
-    applySniperLimits()
+    State.ApplySniperLimits()
     snipeDryRun()
     State.RefreshSniperLog()
 end, "outline")
@@ -4585,7 +4595,7 @@ task.spawn(function()
         if CFG.Sniper.Enabled and now - State.LastSniperScanAt >= (tonumber(CFG.Sniper.ScanInterval) or 10) then
             State.LastSniperScanAt = now
             local ok, err = pcall(function()
-                applySniperLimits()
+                State.ApplySniperLimits()
                 snipeDryRun()
             end)
             if not ok then log("Sniper scan error", tostring(err)) end
