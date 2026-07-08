@@ -27,7 +27,7 @@ CFG.Seller = CFG.Seller or {
     Enabled = true,
     PreviewOnly = true,
     AutoList = false,
-    ScanInterval = 0.25,
+    ScanInterval = 1,
     ListCooldown = 0,
     MaxListPerMinute = 999,
     MinPetCountKeep = 0,
@@ -43,7 +43,7 @@ CFG.Listings = CFG.Listings or {
 CFG.Sniper = CFG.Sniper or {
     Enabled = false,
     DryRun = true,
-    ScanInterval = 0.25,
+    ScanInterval = 0.75,
     BuyCooldown = 0,
     MaxBuyPerMinute = 999,
 
@@ -70,15 +70,16 @@ if CFG.Booth.MaxMiddleDistance == nil or tonumber(CFG.Booth.MaxMiddleDistance) =
     CFG.Booth.MaxMiddleDistance = 85
 end
 CFG.Booth.ClaimInterval = CFG.Booth.ClaimInterval or 10
-CFG.Booth.DataCacheSeconds = CFG.Booth.DataCacheSeconds or 0.25
+CFG.Booth.DataCacheSeconds = tonumber(CFG.Booth.DataCacheSeconds) or 1
+if CFG.Booth.DataCacheSeconds < 1 then CFG.Booth.DataCacheSeconds = 1 end
 CFG.Booth.ClaimVerifyAttempts = CFG.Booth.ClaimVerifyAttempts or 6
 CFG.Booth.ClaimVerifyDelay = CFG.Booth.ClaimVerifyDelay or 0.35
 CFG.Seller.BoothCap = 50
 CFG.Seller.WeightMode = CFG.Seller.WeightMode or "Base"
 CFG.Seller.ShowSkipReasons = CFG.Seller.ShowSkipReasons ~= false
 CFG.Seller.RequireBoothBeforeList = CFG.Seller.RequireBoothBeforeList ~= false
-CFG.Seller.ScanInterval = tonumber(CFG.Seller.ScanInterval) or 0.25
-if CFG.Seller.ScanInterval > 1 then CFG.Seller.ScanInterval = 0.25 end
+CFG.Seller.ScanInterval = tonumber(CFG.Seller.ScanInterval) or 1
+if CFG.Seller.ScanInterval < 0.75 then CFG.Seller.ScanInterval = 0.75 end
 CFG.Seller.ListCooldown = 0
 CFG.Seller.ListOnceMax = 50
 CFG.Seller.AutoSmartRebuildOnStart = CFG.Seller.AutoSmartRebuildOnStart ~= false
@@ -112,8 +113,11 @@ CFG.Sniper.SkipOwnListings = CFG.Sniper.SkipOwnListings ~= false
 CFG.Sniper.RequireExactPetName = CFG.Sniper.RequireExactPetName ~= false
 CFG.Sniper.AllowNoMaxPrice = CFG.Sniper.AllowNoMaxPrice == true
 CFG.Sniper.MinTokensAfterBuy = CFG.Sniper.MinTokensAfterBuy or 0
-CFG.Sniper.ScanInterval = tonumber(CFG.Sniper.ScanInterval) or 0.25
-if CFG.Sniper.ScanInterval > 1 then CFG.Sniper.ScanInterval = 0.25 end
+CFG.Sniper.ScanInterval = tonumber(CFG.Sniper.ScanInterval) or 0.75
+if CFG.Sniper.ScanInterval < 0.5 then CFG.Sniper.ScanInterval = 0.5 end
+CFG.Performance = CFG.Performance or {}
+CFG.Performance.ListingCacheSeconds = tonumber(CFG.Performance.ListingCacheSeconds) or 0.75
+if CFG.Performance.ListingCacheSeconds < 0.25 then CFG.Performance.ListingCacheSeconds = 0.25 end
 CFG.Sniper.BuyCooldown = 0
 CFG.Sniper.WatchlistId = tostring(CFG.Sniper.WatchlistId or "1")
 CFG.Sniper.WeightMode = CFG.Sniper.WeightMode or "Base"
@@ -165,6 +169,8 @@ local State = {
     LastListings = {},
     LastMyListings = {},
     LastSniperMatches = {},
+    ListingsCache = nil,
+    LastListingsCacheAt = 0,
     BoothDataCache = nil,
     LastBoothDataAt = 0,
     PendingListUUIDs = {},
@@ -705,6 +711,11 @@ local function expireMap(map)
     end
 end
 
+State.InvalidateListingCache = function()
+    State.ListingsCache = nil
+    State.LastListingsCacheAt = 0
+end
+
 local function markPendingList(uuid)
     uuid = tostring(uuid or "")
     if uuid == "" then return end
@@ -963,6 +974,24 @@ local function getAllListings(force, includePendingRemoves)
     expireMap(State.PendingRemoveUUIDs)
     expireMap(State.PendingListUUIDs)
 
+    local now = os.clock()
+    local cached = State.ListingsCache
+    if not force and type(cached) == "table" and (now - (State.LastListingsCacheAt or 0)) <= (tonumber(CFG.Performance.ListingCacheSeconds) or 0.75) then
+        if includePendingRemoves then
+            State.LastListings = cached
+            return cached
+        end
+
+        local filtered = {}
+        for _, l in ipairs(cached) do
+            if not State.PendingRemoveUUIDs[tostring(l.ListingUUID or "")] then
+                table.insert(filtered, l)
+            end
+        end
+        State.LastListings = filtered
+        return filtered
+    end
+
     local data = fetchBoothData(force)
     local out = {}
     if not data then return out end
@@ -973,9 +1002,6 @@ local function getAllListings(force, includePendingRemoves)
         if type(pd) == "table" and type(pd.Listings) == "table" and type(pd.Items) == "table" then
             for listingUUID, listing in pairs(pd.Listings) do
                 listingUUID = tostring(listingUUID)
-                if State.PendingRemoveUUIDs[listingUUID] and not includePendingRemoves then
-                    continue
-                end
 
                 local item = pd.Items[listing.ItemId]
                 if item then
@@ -1000,6 +1026,20 @@ local function getAllListings(force, includePendingRemoves)
     table.sort(out, function(a,b)
         return (tonumber(a.Price) or 999999999) < (tonumber(b.Price) or 999999999)
     end)
+
+    State.ListingsCache = out
+    State.LastListingsCacheAt = now
+
+    if not includePendingRemoves then
+        local filtered = {}
+        for _, l in ipairs(out) do
+            if not State.PendingRemoveUUIDs[tostring(l.ListingUUID or "")] then
+                table.insert(filtered, l)
+            end
+        end
+        State.LastListings = filtered
+        return filtered
+    end
 
     State.LastListings = out
     return out
@@ -1085,6 +1125,7 @@ local function removeListingUUID(id)
         return RemoveListing:InvokeServer(id)
     end)
     if ok and result ~= false then
+        State.InvalidateListingCache()
         local attempts = math.max(1, toInt(CFG.Listings.VerifyRemoveAttempts) or 4)
         local delay = tonumber(CFG.Listings.VerifyRemoveDelay) or 0.45
 
@@ -1092,6 +1133,7 @@ local function removeListingUUID(id)
             task.wait(delay)
             if not listingStillExists(id) then
                 State.PendingRemoveUUIDs[id] = nil
+                State.InvalidateListingCache()
                 log("RemoveListing verified", id, "try", tostring(attempt))
                 return true
             end
@@ -1969,11 +2011,11 @@ local function findFilterForListing(l, filters, requirePrice)
     return f, pseudo, nil
 end
 
-local function countMyGoodListingsByFilter(filters)
+local function countMyGoodListingsByFilter(filters, myListings)
     filters = filters or getFilters()
     local counts = {}
 
-    for _, l in ipairs(getMyListings()) do
+    for _, l in ipairs(myListings or getMyListings()) do
         local f = findFilterForListing(l, filters, true)
         if f then
             local key = filterKey(f)
@@ -1988,7 +2030,9 @@ local function buildCandidates()
     local pets = getOwnPetsFromData()
     local filters = getFilters()
     local counts, chosenName, chosenFilter = {}, {}, {}
-    local alreadyListedByFilter = countMyGoodListingsByFilter(filters)
+    local myListings = getMyListings()
+    local currentBoothListings = #myListings
+    local alreadyListedByFilter = countMyGoodListingsByFilter(filters, myListings)
     for _, p in ipairs(pets) do counts[p.NameNorm] = (counts[p.NameNorm] or 0) + 1 end
 
     local candidates, skipped = {}, {}
@@ -2010,7 +2054,6 @@ local function buildCandidates()
 
         if not reason then
             local boothCap = tonumber(CFG.Seller.BoothCap) or 50
-            local currentBoothListings = #getMyListings()
             local remainingBoothSlots = math.max(0, boothCap - currentBoothListings)
 
             local key = filterKey(f)
@@ -2145,6 +2188,7 @@ local function listPet(pet, price, boothReady, f)
         return CreateListing:InvokeServer("Pet", petUUID, clampPrice(price))
     end)
     if ok and result ~= false then
+        State.InvalidateListingCache()
         State.LastListAt = os.clock()
         State.ListedThisSession = (State.ListedThisSession or 0) + 1
         table.insert(State.ListTimes, os.clock())
@@ -2822,6 +2866,7 @@ local function buyFirstMatch()
         table.insert(State.BuyTimes, os.clock())
         log("Buy sent", l.PetType, l.Price, l.ListingUUID, tostring(a), tostring(b))
         if a ~= false then
+            State.InvalidateListingCache()
             State.SendSnipeWebhook(m)
         end
         return a, b
