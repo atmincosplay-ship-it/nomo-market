@@ -1857,28 +1857,33 @@ State.WebhookEmbedForListing = function(kind, l, extra)
     extra = type(extra) == "table" and extra or {}
 
     local titlePrefix = kind == "snipe" and "SNIPED" or "SOLD"
-    local color = kind == "snipe" and 16731389 or 16766720
+    local color = kind == "snipe" and 16711910 or 16766720
     local priceLabel = kind == "snipe" and "Bought For" or "Sold For"
     local userLabel = kind == "snipe" and "Seller" or "By User"
-    local userValue = tostring(extra.User or l.OwnerName or "Unknown")
-    if kind == "sold" then userValue = tostring(extra.User or "Unknown") end
+    local userValue = tostring(extra.User or l.OwnerName or "")
+    if kind == "sold" then userValue = tostring(extra.User or "") end
+    local displayKg = tonumber(pet.VisualWeight or pet.BaseWeight) or 0
+    local fields = {}
+
+    if userValue ~= "" and userValue ~= "Unknown" then
+        table.insert(fields, {name = userLabel, value = userValue, inline = false})
+    end
+    table.insert(fields, {name = priceLabel, value = commaNumber(l.Price) .. " Tokens", inline = true})
+    table.insert(fields, {name = "Mutation", value = tostring(pet.Mutation or "Normal"), inline = true})
+    table.insert(fields, {name = "BaseWeight", value = fmtKg(pet.BaseWeight), inline = true})
+    table.insert(fields, {name = "Age", value = tostring(pet.Age or "?"), inline = true})
+    table.insert(fields, {name = "Token Balance", value = commaNumber(getTokenBalance()) .. " Tokens", inline = true})
+    table.insert(fields, {name = "Pet Inventory", value = tostring(#getOwnPetsFromData()) .. " pets", inline = true})
+    table.insert(fields, {name = "Server", value = "`" .. tostring(game.PlaceId) .. ":" .. tostring(game.JobId) .. "`", inline = false})
 
     return {
         username = "NOMO Market",
         embeds = {{
-            title = string.format("%s - %s [Age %s] [%.2f KG]", titlePrefix, tostring(pet.Name or "?"), tostring(pet.Age or "?"), tonumber(pet.VisualWeight or pet.BaseWeight) or 0),
+            title = string.format("%s - %s [Age %s] [%.2f KG]", titlePrefix, tostring(pet.Name or "?"), tostring(pet.Age or "?"), displayKg),
             color = color,
-            fields = {
-                {name = userLabel, value = userValue, inline = false},
-                {name = priceLabel, value = commaNumber(l.Price) .. " Tokens", inline = true},
-                {name = "Mutation", value = tostring(pet.Mutation or "Normal"), inline = true},
-                {name = "BaseWeight", value = fmtKg(pet.BaseWeight), inline = true},
-                {name = "Age", value = tostring(pet.Age or "?"), inline = true},
-                {name = "Token Balance", value = commaNumber(getTokenBalance()) .. " Tokens", inline = true},
-                {name = "Pet Inventory", value = tostring(#getOwnPetsFromData()) .. " pets", inline = true},
-                {name = "Server", value = tostring(game.PlaceId) .. ":" .. tostring(game.JobId), inline = false},
-            },
-            footer = {text = "NOMO " .. VERSION .. " - " .. os.date("%m/%d/%Y %I:%M %p")},
+            fields = fields,
+            footer = {text = "NOMO Market - " .. VERSION},
+            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
         }},
     }
 end
