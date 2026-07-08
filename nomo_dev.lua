@@ -60,6 +60,7 @@ CFG.Webhook = CFG.Webhook or {
     Url = "",
     SnipeUrl = "",
     SoldUrl = "",
+    IconUrl = "",
     PetSold = true,
     SuccessfulSnipe = true,
 }
@@ -505,6 +506,7 @@ State.LoadRuntimeSettings = function()
         if type(data.Webhook.Url) == "string" then CFG.Webhook.Url = data.Webhook.Url end
         if type(data.Webhook.SnipeUrl) == "string" then CFG.Webhook.SnipeUrl = data.Webhook.SnipeUrl end
         if type(data.Webhook.SoldUrl) == "string" then CFG.Webhook.SoldUrl = data.Webhook.SoldUrl end
+        if type(data.Webhook.IconUrl) == "string" then CFG.Webhook.IconUrl = data.Webhook.IconUrl end
         if data.Webhook.PetSold ~= nil then CFG.Webhook.PetSold = data.Webhook.PetSold == true end
         if data.Webhook.SuccessfulSnipe ~= nil then CFG.Webhook.SuccessfulSnipe = data.Webhook.SuccessfulSnipe == true end
     end
@@ -538,6 +540,7 @@ State.SaveRuntimeSettings = function()
             Url = tostring(CFG.Webhook.Url or ""),
             SnipeUrl = tostring(CFG.Webhook.SnipeUrl or ""),
             SoldUrl = tostring(CFG.Webhook.SoldUrl or ""),
+            IconUrl = tostring(CFG.Webhook.IconUrl or ""),
             PetSold = CFG.Webhook.PetSold == true,
             SuccessfulSnipe = CFG.Webhook.SuccessfulSnipe == true,
         },
@@ -1863,7 +1866,9 @@ State.WebhookEmbedForListing = function(kind, l, extra)
     local userValue = tostring(extra.User or l.OwnerName or "")
     if kind == "sold" then userValue = tostring(extra.User or "") end
     local displayKg = tonumber(pet.VisualWeight or pet.BaseWeight) or 0
-    local iconUrl = "https://www.roblox.com/asset-thumbnail/image?assetId=" .. tostring(game.PlaceId) .. "&width=150&height=150&format=png"
+    local fallbackIconUrl = "https://www.roblox.com/asset-thumbnail/image?assetId=" .. tostring(game.PlaceId) .. "&width=150&height=150&format=png"
+    local iconUrl = tostring(CFG.Webhook.IconUrl or "")
+    if iconUrl == "" then iconUrl = fallbackIconUrl end
     local fields = {}
 
     if userValue ~= "" and userValue ~= "Unknown" then
@@ -1883,6 +1888,7 @@ State.WebhookEmbedForListing = function(kind, l, extra)
         embeds = {{
             title = string.format("%s - %s [Age %s] [%.2f KG]", titlePrefix, tostring(pet.Name or "?"), tostring(pet.Age or "?"), displayKg),
             color = color,
+            author = {name = "NOMO Market", icon_url = iconUrl},
             fields = fields,
             thumbnail = {url = iconUrl},
             footer = {text = "NOMO Market - " .. VERSION},
@@ -4984,9 +4990,15 @@ State.SoldWebhookUrlInput = State.WebhookRouteSec:AddInput("Booth Sale Webhook U
     State.SaveRuntimeSettings()
 end)
 
+State.WebhookIconUrlInput = State.WebhookRouteSec:AddInput("Icon URL", tostring(CFG.Webhook.IconUrl or ""), function(v)
+    CFG.Webhook.IconUrl = tostring(v or "")
+    State.SaveRuntimeSettings()
+end)
+
 State.WebhookRouteSec:AddButton("Test Snipe Webhook", function()
     CFG.Webhook.SnipeUrl = State.SnipeWebhookUrlInput:Get()
     CFG.Webhook.SoldUrl = State.SoldWebhookUrlInput:Get()
+    CFG.Webhook.IconUrl = State.WebhookIconUrlInput:Get()
     State.SaveRuntimeSettings()
     local wasEnabled = CFG.Webhook.Enabled
     CFG.Webhook.Enabled = true
@@ -5011,6 +5023,7 @@ end, "outline")
 State.WebhookRouteSec:AddButton("Test Sale Webhook", function()
     CFG.Webhook.SnipeUrl = State.SnipeWebhookUrlInput:Get()
     CFG.Webhook.SoldUrl = State.SoldWebhookUrlInput:Get()
+    CFG.Webhook.IconUrl = State.WebhookIconUrlInput:Get()
     State.SaveRuntimeSettings()
     local wasEnabled = CFG.Webhook.Enabled
     CFG.Webhook.Enabled = true
