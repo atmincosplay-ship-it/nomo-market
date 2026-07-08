@@ -33,7 +33,7 @@ CFG.Seller = CFG.Seller or {
     MinPetCountKeep = 0,
     SkipFavorited = true,
     SkipLocked = true,
-    ListingFilterPath = "Nomo/listing_filters.json",
+    ListingFilterPath = "Nomo",
 }
 
 CFG.Listings = CFG.Listings or {
@@ -63,15 +63,14 @@ CFG.Booth.ClaimInterval = CFG.Booth.ClaimInterval or 10
 CFG.Booth.DataCacheSeconds = CFG.Booth.DataCacheSeconds or 0.25
 CFG.Booth.ClaimVerifyAttempts = CFG.Booth.ClaimVerifyAttempts or 6
 CFG.Booth.ClaimVerifyDelay = CFG.Booth.ClaimVerifyDelay or 0.35
-CFG.Seller.BoothCap = CFG.Seller.BoothCap or 50
+CFG.Seller.BoothCap = 50
 CFG.Seller.WeightMode = CFG.Seller.WeightMode or "Base"
 CFG.Seller.ShowSkipReasons = CFG.Seller.ShowSkipReasons ~= false
 CFG.Seller.RequireBoothBeforeList = CFG.Seller.RequireBoothBeforeList ~= false
 CFG.Seller.ScanInterval = tonumber(CFG.Seller.ScanInterval) or 0.25
 if CFG.Seller.ScanInterval > 1 then CFG.Seller.ScanInterval = 0.25 end
-CFG.Seller.ListCooldown = tonumber(CFG.Seller.ListCooldown) or 0
-if CFG.Seller.ListCooldown > 1 then CFG.Seller.ListCooldown = 0 end
-CFG.Seller.ListOnceMax = CFG.Seller.ListOnceMax or 50
+CFG.Seller.ListCooldown = 0
+CFG.Seller.ListOnceMax = 50
 CFG.Seller.AutoSmartRebuildOnStart = CFG.Seller.AutoSmartRebuildOnStart ~= false
 CFG.Seller.StartupSmartRebuildDelay = CFG.Seller.StartupSmartRebuildDelay or 8
 CFG.Seller.StartupSmartRebuildRetries = CFG.Seller.StartupSmartRebuildRetries or 5
@@ -93,7 +92,7 @@ CFG.Seller.CreateWaitMax = math.max(CFG.Seller.CreateWaitMin, tonumber(CFG.Selle
 CFG.Seller.CreateWaitBackoff = math.clamp(tonumber(CFG.Seller.CreateWaitBackoff) or 5, CFG.Seller.CreateWaitMin, CFG.Seller.CreateWaitMax)
 CFG.Seller.MinPetCountKeep = 0
 CFG.Seller.MaxListPerMinute = 999
-CFG.Seller.MaxAutoListSession = CFG.Seller.BoothCap
+CFG.Seller.MaxAutoListSession = 50
 CFG.Listings.RemoveCooldown = CFG.Listings.RemoveCooldown or 1.2
 CFG.Listings.RemoveAllMax = CFG.Listings.RemoveAllMax or 50
 CFG.Listings.VerifyRemoveDelay = CFG.Listings.VerifyRemoveDelay or 0.45
@@ -105,9 +104,7 @@ CFG.Sniper.AllowNoMaxPrice = CFG.Sniper.AllowNoMaxPrice == true
 CFG.Sniper.MinTokensAfterBuy = CFG.Sniper.MinTokensAfterBuy or 0
 CFG.Sniper.ScanInterval = tonumber(CFG.Sniper.ScanInterval) or 0.25
 if CFG.Sniper.ScanInterval > 1 then CFG.Sniper.ScanInterval = 0.25 end
-CFG.Sniper.BuyCooldown = tonumber(CFG.Sniper.BuyCooldown) or 0
-if CFG.Sniper.BuyCooldown > 1 then CFG.Sniper.BuyCooldown = 0 end
-CFG.Sniper.FilterPath = CFG.Sniper.FilterPath or "Nomo/sniper_filters.json"
+CFG.Sniper.BuyCooldown = 0
 CFG.Sniper.WatchlistId = tostring(CFG.Sniper.WatchlistId or "1")
 CFG.Sniper.WeightMode = CFG.Sniper.WeightMode or "Base"
 CFG.Sniper.MaxMatchesPerOwner = 0
@@ -432,8 +429,36 @@ local function saveJson(path, data)
     return true
 end
 
+local function cleanConfigPath(path)
+    path = tostring(path or ""):gsub("\\", "/"):gsub("^%s+", ""):gsub("%s+$", "")
+    path = path:gsub("/+$", "")
+    if path == "" then path = "Nomo" end
+    return path
+end
+
+local function joinConfigPath(folder, fileName)
+    folder = cleanConfigPath(folder)
+    return folder .. "/" .. tostring(fileName or "")
+end
+
+local function getConfigFolder()
+    local path = cleanConfigPath(CFG.Seller.ListingFilterPath or "Nomo")
+    local folder = path:match("^(.*)/[^/]+%.json$")
+    if folder and folder ~= "" then
+        return cleanConfigPath(folder)
+    end
+    if path:match("%.json$") then
+        return "Nomo"
+    end
+    return path
+end
+
 local function getFilterPath()
-    return CFG.Seller.ListingFilterPath or "Nomo/listing_filters.json"
+    local path = cleanConfigPath(CFG.Seller.ListingFilterPath or "Nomo")
+    if path:match("%.json$") then
+        return path
+    end
+    return joinConfigPath(path, "listing_filters.json")
 end
 
 --//====================================================--
@@ -2123,7 +2148,7 @@ local function clearWatch()
 end
 
 local function getSniperFilterPath()
-    return CFG.Sniper.FilterPath or "Nomo/sniper_filters.json"
+    return joinConfigPath(getConfigFolder(), "sniper_filters.json")
 end
 
 local function extractSniperWatchSource(data)
@@ -2255,9 +2280,9 @@ local function getSniperWeightForListing(l, watch)
     local pseudo = listingToPseudoPet(l)
     local mode = normalizeSniperWeightMode(type(watch) == "table" and watch.WeightMode or CFG.Sniper.WeightMode)
     if mode == "Visual" then
-        return pseudo.VisualWeight or pseudo.Weight or pseudo.BaseWeight, pseudo, mode
+        return pseudo.VisualWeight or pseudo.BaseWeight, pseudo, mode
     end
-    return pseudo.BaseWeight or pseudo.Weight or pseudo.VisualWeight, pseudo, mode
+    return pseudo.BaseWeight or pseudo.VisualWeight, pseudo, mode
 end
 
 local function snipeDryRun(force)
@@ -3547,28 +3572,17 @@ sellerCtrl:AddInput("Scan Interval", tostring(CFG.Seller.ScanInterval), function
     CFG.Seller.ScanInterval = toNumber(v) or CFG.Seller.ScanInterval
 end)
 
-sellerCtrl:AddInput("List Cooldown", tostring(CFG.Seller.ListCooldown), function(v)
-    CFG.Seller.ListCooldown = toNumber(v) or CFG.Seller.ListCooldown
-end)
-
-sellerCtrl:AddInput("Booth Cap", tostring(CFG.Seller.BoothCap or 50), function(v)
-    CFG.Seller.BoothCap = toNumber(v) or CFG.Seller.BoothCap or 50
-    CFG.Seller.MaxAutoListSession = CFG.Seller.BoothCap
-end)
-
 sellerCtrl:AddDropdown("Weight Filter", {"Base", "Visual"}, CFG.Seller.WeightMode or "Base", function(v)
     CFG.Seller.WeightMode = tostring(v or "Base")
     log("WeightMode", CFG.Seller.WeightMode)
 end)
 
-local listOnceMaxInput = sellerCtrl:AddInput("List Max", tostring(CFG.Seller.ListOnceMax or 50), function(v)
-    CFG.Seller.ListOnceMax = toNumber(v) or CFG.Seller.ListOnceMax or 50
-end)
-
 sellerCtrl:AddButton("LIST UNTIL BOOTH FULL", function()
-    CFG.Seller.ListOnceMax = toNumber(listOnceMaxInput:Get()) or CFG.Seller.ListOnceMax or 50
+    CFG.Seller.BoothCap = 50
+    CFG.Seller.ListOnceMax = 50
+    CFG.Seller.MaxAutoListSession = 50
     task.spawn(function()
-        listOnce(CFG.Seller.ListOnceMax)
+        listOnce(50)
     end)
 end)
 
@@ -3997,17 +4011,11 @@ end)
 State.SniperMaxKgInput = sniperCtrl:AddInput("Max KG", "", function(v)
     CFG.Sniper.MaxWeight = toNumber(v)
 end)
-local sBuyCooldown = sniperCtrl:AddInput("Buy Cooldown", tostring(CFG.Sniper.BuyCooldown or 8), function(v)
-    CFG.Sniper.BuyCooldown = toNumber(v) or CFG.Sniper.BuyCooldown or 8
-end)
 local sShow = sniperCtrl:AddInput("Show", tostring(CFG.Sniper.MaxMatchesShown or 20), function(v)
     CFG.Sniper.MaxMatchesShown = toInt(v) or CFG.Sniper.MaxMatchesShown or 20
 end)
 local sPerPet = sniperCtrl:AddInput("Per Pet", tostring(CFG.Sniper.MaxMatchesPerPet or 5), function(v)
     CFG.Sniper.MaxMatchesPerPet = toInt(v) or CFG.Sniper.MaxMatchesPerPet or 5
-end)
-State.SniperConfigPathInput = sniperCtrl:AddInput("Config Path", getSniperFilterPath(), function(v)
-    CFG.Sniper.FilterPath = tostring(v or "")
 end)
 State.SniperWatchlistIdInput = sniperCtrl:AddInput("Watchlist ID", tostring(CFG.Sniper.WatchlistId or "1"), function(v)
     CFG.Sniper.WatchlistId = tostring(v or "1")
@@ -4016,7 +4024,7 @@ end)
 local sniperLog = sniperResultSec:AddLog(315)
 
 local function applySniperLimits()
-    CFG.Sniper.BuyCooldown = toNumber(sBuyCooldown:Get()) or CFG.Sniper.BuyCooldown or 8
+    CFG.Sniper.BuyCooldown = 0
     CFG.Sniper.WeightMode = normalizeSniperWeightMode(State.SniperWeightModeInput:Get())
     CFG.Sniper.MinWeight = toNumber(State.SniperMinKgInput:Get()) or 0
     CFG.Sniper.MaxWeight = toNumber(State.SniperMaxKgInput:Get())
@@ -4073,9 +4081,8 @@ sniperCtrl:AddButton("Add Watch", function()
 end)
 
 sniperCtrl:AddButton("Import Config Watchlist", function()
-    CFG.Sniper.FilterPath = tostring(State.SniperConfigPathInput:Get() or getSniperFilterPath())
     CFG.Sniper.WatchlistId = tostring(State.SniperWatchlistIdInput:Get() or "1")
-    importSniperWatchlist(CFG.Sniper.FilterPath)
+    importSniperWatchlist(getSniperFilterPath())
     refreshSniperLog()
 end, "outline")
 
@@ -4100,7 +4107,7 @@ end, "outline")
 --// SETTINGS PAGE
 State.SettingsPage = win:CreatePage("Settings")
 State.SettingSec = State.SettingsPage:AddSection("Settings")
-State.FilterPathInput = State.SettingSec:AddInput("Filter Path", getFilterPath(), function(v)
+State.FilterPathInput = State.SettingSec:AddInput("Filter Path", getConfigFolder(), function(v)
     CFG.Seller.ListingFilterPath = v
     reloadFilters()
 end)
@@ -4128,7 +4135,7 @@ end, "outline")
 State.SettingSec:AddButton("Save / Reload Filter Path", function()
     CFG.Seller.ListingFilterPath = State.FilterPathInput:Get()
     reloadFilters()
-    log("Filter path set", CFG.Seller.ListingFilterPath)
+    log("Config path set", tostring(CFG.Seller.ListingFilterPath), "listing", getFilterPath(), "sniper", getSniperFilterPath())
 end)
 
 State.SettingSec:AddButton("Stop Script", function()
@@ -4206,7 +4213,7 @@ installWarnFilter()
 
 log("Started", VERSION .. " PRIVATE UI")
 refreshPills()
-log("PetList", #State.PetList, "| FilterPath", getFilterPath())
+log("PetList", #State.PetList, "| ConfigFolder", getConfigFolder(), "| Listing", getFilterPath())
 
 refreshBoothLog()
 refreshSellerLog(false)
