@@ -4715,12 +4715,6 @@ sniperCtrl:AddButton("Add Watch", function()
     State.RefreshSniperLog()
 end)
 
-sniperCtrl:AddButton("Reload Watchlist Config", function()
-    CFG.Sniper.WatchlistId = tostring(State.SniperWatchlistIdInput:Get() or "1")
-    State.ReloadSniperConfig()
-    State.RefreshSniperLog()
-end, "outline")
-
 sniperCtrl:AddButton("Manage Watchlist", function()
     State.OpenSniperWatchlistManager()
 end, "outline")
