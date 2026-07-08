@@ -2365,6 +2365,17 @@ State.FormatSniperKgRange = function(mode, minKg, maxKg)
     return tostring(mode or "Base") .. " KG " .. tostring(tonumber(minKg) or 0) .. "-" .. (upper and tostring(upper) or "unli")
 end
 
+State.GetSortedSniperWatches = function()
+    local out = {}
+    for name, cfg in pairs(CFG.Sniper.Watchlist or {}) do
+        table.insert(out, {Name = tostring(name), Config = cfg})
+    end
+    table.sort(out, function(a, b)
+        return a.Name:lower() < b.Name:lower()
+    end)
+    return out
+end
+
 local function getSniperWeightForListing(l, watch)
     local pseudo = listingToPseudoPet(l)
     local mode = normalizeSniperWeightMode(type(watch) == "table" and watch.WeightMode or CFG.Sniper.WeightMode)
@@ -4550,6 +4561,7 @@ State.OpenSniperWatchEditPopup = function(name, managerOverlay)
 end
 
 State.OpenSniperWatchlistManager = function()
+    local watches = State.GetSortedSniperWatches()
     local overlay = make("Frame", {
         Size = UDim2.new(1, 0, 1, 0),
         BackgroundColor3 = Color3.new(0, 0, 0),
@@ -4570,7 +4582,7 @@ State.OpenSniperWatchlistManager = function()
     make("TextLabel", {
         Size = UDim2.new(1, -74, 0, 26),
         BackgroundTransparency = 1,
-        Text = "Manage Sniper Watchlist",
+        Text = "Manage Sniper Watchlist (" .. tostring(#watches) .. ")",
         TextColor3 = T.Text,
         Font = Enum.Font.GothamBold,
         TextSize = 14,
@@ -4605,7 +4617,8 @@ State.OpenSniperWatchlistManager = function()
     closeBtn.Activated:Connect(function() overlay:Destroy() end)
 
     local idx = 0
-    for name, cfg in pairs(CFG.Sniper.Watchlist or {}) do
+    for _, watch in ipairs(watches) do
+        local name, cfg = watch.Name, watch.Config
         idx += 1
         local maxPrice = type(cfg) == "table" and cfg.MaxPrice or cfg
         local minKg = type(cfg) == "table" and cfg.MinWeight or 0
@@ -4683,7 +4696,9 @@ State.RefreshSniperLog = function()
     }
 
     local watchCount = 0
-    for name, cfg in pairs(CFG.Sniper.Watchlist or {}) do
+    local watches = State.GetSortedSniperWatches()
+    for _, watch in ipairs(watches) do
+        local name, cfg = watch.Name, watch.Config
         watchCount += 1
         local maxPrice = type(cfg) == "table" and cfg.MaxPrice or cfg
         local minKg = type(cfg) == "table" and cfg.MinWeight or 0
