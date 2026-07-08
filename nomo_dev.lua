@@ -461,6 +461,56 @@ local function getFilterPath()
     return joinConfigPath(path, "listing_filters.json")
 end
 
+State.GetSettingsPath = function()
+    return joinConfigPath(getConfigFolder(), "settings.json")
+end
+
+State.LoadRuntimeSettings = function()
+    local data = readJson(State.GetSettingsPath())
+    if type(data.Booth) == "table" then
+        if data.Booth.AutoClaim ~= nil then CFG.Booth.AutoClaim = data.Booth.AutoClaim == true end
+        if data.Booth.SmartReclaim ~= nil then CFG.Booth.SmartReclaim = data.Booth.SmartReclaim == true end
+    end
+    if type(data.Seller) == "table" then
+        if data.Seller.AutoList ~= nil then CFG.Seller.AutoList = data.Seller.AutoList == true end
+        if data.Seller.PreviewOnly ~= nil then CFG.Seller.PreviewOnly = data.Seller.PreviewOnly == true end
+        if type(data.Seller.ListingFilterPath) == "string" and data.Seller.ListingFilterPath ~= "" then
+            CFG.Seller.ListingFilterPath = data.Seller.ListingFilterPath
+        end
+    end
+    if type(data.Sniper) == "table" then
+        if data.Sniper.Enabled ~= nil then CFG.Sniper.Enabled = data.Sniper.Enabled == true end
+        if data.Sniper.DryRun ~= nil then CFG.Sniper.DryRun = data.Sniper.DryRun == true end
+        if data.Sniper.RescanBeforeBuy ~= nil then CFG.Sniper.RescanBeforeBuy = data.Sniper.RescanBeforeBuy == true end
+    end
+    if CFG.Seller.AutoList then
+        CFG.Seller.PreviewOnly = false
+    end
+    return data
+end
+
+State.SaveRuntimeSettings = function()
+    local data = {
+        Booth = {
+            AutoClaim = CFG.Booth.AutoClaim == true,
+            SmartReclaim = CFG.Booth.SmartReclaim == true,
+        },
+        Seller = {
+            AutoList = CFG.Seller.AutoList == true,
+            PreviewOnly = CFG.Seller.PreviewOnly == true,
+            ListingFilterPath = CFG.Seller.ListingFilterPath or "Nomo",
+        },
+        Sniper = {
+            Enabled = CFG.Sniper.Enabled == true,
+            DryRun = CFG.Sniper.DryRun == true,
+            RescanBeforeBuy = CFG.Sniper.RescanBeforeBuy == true,
+        },
+    }
+    return saveJson(State.GetSettingsPath(), data)
+end
+
+State.LoadRuntimeSettings()
+
 --//====================================================--
 --// Pet database
 --//====================================================--
@@ -3477,11 +3527,13 @@ local boothDataSec = boothPage:AddSectionInRow(boothRow, "Booth Data", 0.52)
 
 boothCtrl:AddToggle("Auto Claim Booth", CFG.Booth.AutoClaim, function(v)
     CFG.Booth.AutoClaim = v
+    State.SaveRuntimeSettings()
     log("AutoClaim", tostring(v))
 end)
 
 boothCtrl:AddToggle("Smart Reclaim", CFG.Booth.SmartReclaim, function(v)
     CFG.Booth.SmartReclaim = v
+    State.SaveRuntimeSettings()
     log("SmartReclaim", tostring(v))
 end)
 
@@ -3582,12 +3634,14 @@ local filterSec = sellerPage:AddSectionInRow(sellerRow, "Filter Builder", 0.55)
 sellerCtrl:AddToggle("Auto List", CFG.Seller.AutoList, function(v)
     CFG.Seller.AutoList = v
     CFG.Seller.PreviewOnly = not v
+    State.SaveRuntimeSettings()
     log("AutoList", tostring(v))
 end)
 
 sellerCtrl:AddToggle("Preview Only", CFG.Seller.PreviewOnly, function(v)
     CFG.Seller.PreviewOnly = v
     if v then CFG.Seller.AutoList = false end
+    State.SaveRuntimeSettings()
     log("PreviewOnly", tostring(v))
 end)
 
@@ -4297,16 +4351,19 @@ local sniperResultSec = sniperPage:AddSectionInRow(sniperRow, "Sniper Matches", 
 
 sniperCtrl:AddToggle("Enabled", CFG.Sniper.Enabled, function(v)
     CFG.Sniper.Enabled = v
+    State.SaveRuntimeSettings()
     log("Sniper Enabled", tostring(v))
 end)
 
 sniperCtrl:AddToggle("Dry Run", CFG.Sniper.DryRun, function(v)
     CFG.Sniper.DryRun = v
+    State.SaveRuntimeSettings()
     log("Sniper DryRun", tostring(v))
 end)
 
 sniperCtrl:AddToggle("Rescan Before Buy", CFG.Sniper.RescanBeforeBuy, function(v)
     CFG.Sniper.RescanBeforeBuy = v
+    State.SaveRuntimeSettings()
     log("Sniper RescanBeforeBuy", tostring(v))
 end)
 
@@ -4711,6 +4768,7 @@ end, "outline")
 
 State.SettingSec:AddButton("Save / Reload Filter Path", function()
     CFG.Seller.ListingFilterPath = State.FilterPathInput:Get()
+    State.SaveRuntimeSettings()
     reloadFilters()
     log("Config path set", tostring(CFG.Seller.ListingFilterPath), "listing", getFilterPath(), "sniper", getSniperFilterPath())
 end)
