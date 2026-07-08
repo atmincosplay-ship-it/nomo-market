@@ -4032,7 +4032,7 @@ local function applySniperLimits()
     CFG.Sniper.MaxMatchesPerPet = toInt(sPerPet:Get()) or CFG.Sniper.MaxMatchesPerPet or 5
 end
 
-local function refreshSniperLog()
+State.RefreshSniperLog = function()
     local lines = {
         "Safety: exact pet " .. tostring(CFG.Sniper.RequireExactPetName) .. " | max price required " .. tostring(not CFG.Sniper.AllowNoMaxPrice),
         "Rescan before buy: " .. tostring(CFG.Sniper.RescanBeforeBuy) .. " | DryRun: " .. tostring(CFG.Sniper.DryRun),
@@ -4077,31 +4077,31 @@ end
 sniperCtrl:AddButton("Add Watch", function()
     applySniperLimits()
     addWatch(sPet:Get(), sMax:Get())
-    refreshSniperLog()
+    State.RefreshSniperLog()
 end)
 
 sniperCtrl:AddButton("Import Config Watchlist", function()
     CFG.Sniper.WatchlistId = tostring(State.SniperWatchlistIdInput:Get() or "1")
     importSniperWatchlist(getSniperFilterPath())
-    refreshSniperLog()
+    State.RefreshSniperLog()
 end, "outline")
 
 sniperCtrl:AddButton("Dry Run Scan", function()
     applySniperLimits()
     snipeDryRun()
-    refreshSniperLog()
+    State.RefreshSniperLog()
 end, "outline")
 
 sniperCtrl:AddButton("Clear Watchlist", function()
     clearWatch()
     State.LastSniperMatches = {}
     State.LastSniperRawCount = 0
-    refreshSniperLog()
+    State.RefreshSniperLog()
 end, "outline")
 
 sniperCtrl:AddButton("BUY FIRST (blocked if DryRun)", function()
     buyFirstMatch()
-    refreshSniperLog()
+    State.RefreshSniperLog()
 end, "outline")
 
 --// SETTINGS PAGE
@@ -4201,7 +4201,7 @@ getgenv().NOMO_V40_RESET_SESSION_COUNT = function()
     State.ListedThisSession = 0
     log("Session list count reset")
 end
-getgenv().NOMO_V32_REFRESH_SNIPER = refreshSniperLog
+getgenv().NOMO_V32_REFRESH_SNIPER = State.RefreshSniperLog
 getgenv().NOMO_V32_STOP = function() State.Stop("manual") end
 
 --// startup
@@ -4219,7 +4219,7 @@ refreshBoothLog()
 refreshSellerLog(false)
 refreshMyListingsLog()
 refreshMarketSample()
-refreshSniperLog()
+State.RefreshSniperLog()
 
 win:SelectPage("Booth")
 
