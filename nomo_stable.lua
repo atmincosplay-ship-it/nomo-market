@@ -4,7 +4,7 @@
 --// Seller focused. Sniper dry-run only by default.
 --//====================================================--
 
-local VERSION = "V7.0 SNIPER SAFETY"
+local VERSION = "V7.1 SAFETY HARDENED"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -86,6 +86,7 @@ CFG.Seller.VerifyAfterListDelay = CFG.Seller.VerifyAfterListDelay or 0.2
 CFG.Seller.VerifyAfterListAttempts = CFG.Seller.VerifyAfterListAttempts or 8
 CFG.Seller.PendingListCooldown = CFG.Seller.PendingListCooldown or 6
 CFG.Seller.RequireExactPetName = CFG.Seller.RequireExactPetName ~= false
+CFG.Seller.StrictListGuard = CFG.Seller.StrictListGuard ~= false
 CFG.Seller.AdaptiveCreateWait = CFG.Seller.AdaptiveCreateWait ~= false
 CFG.Seller.CreateWaitMin = math.max(5, tonumber(CFG.Seller.CreateWaitMin) or 5)
 CFG.Seller.CreateWaitMax = math.max(CFG.Seller.CreateWaitMin, tonumber(CFG.Seller.CreateWaitMax) or 10)
@@ -913,6 +914,20 @@ local function findMyListingByItemAndPrice(itemId, price, force, includePendingR
     return nil
 end
 
+local function findMyListingByItem(itemId, force, includePendingRemoves)
+    local targetId = tostring(itemId or "")
+    if targetId == "" then return nil end
+
+    for _, l in ipairs(getMyListings(force, includePendingRemoves)) do
+        local listedItemId = tostring(l.ItemId or l.ItemID or l.itemId or "")
+        if listedItemId == targetId then
+            return l
+        end
+    end
+
+    return nil
+end
+
 local function listingStillExists(listingUUID)
     listingUUID = tostring(listingUUID or "")
     if listingUUID == "" then return false end
@@ -1478,6 +1493,19 @@ local function getOwnPetsFromData()
     return out
 end
 
+local function findOwnPetByUUID(uuid)
+    local target = tostring(uuid or "")
+    if target == "" then return nil end
+
+    for _, pet in ipairs(getOwnPetsFromData()) do
+        if tostring(pet.UUID or "") == target then
+            return pet
+        end
+    end
+
+    return nil
+end
+
 local function inRange(v, minV, maxV)
     if minV ~= nil and (v == nil or v < minV) then return false end
     if maxV ~= nil and (v == nil or v > maxV) then return false end
@@ -1549,6 +1577,52 @@ local function findFilter(pet, filters)
         end
     end
     return nil
+end
+
+local function validateListCandidate(pet, f, price)
+    if not CFG.Seller.StrictListGuard then
+        return true, pet
+    end
+
+    if type(pet) ~= "table" or tostring(pet.UUID or "") == "" then
+        return false, nil, "missing pet uuid"
+    end
+
+    local fresh = findOwnPetByUUID(pet.UUID)
+    if not fresh then
+        return false, nil, "pet missing from fresh inventory"
+    end
+
+    if CFG.Seller.SkipFavorited and fresh.Favorited then
+        return false, fresh, "fresh pet is favorited"
+    end
+
+    if CFG.Seller.SkipLocked and fresh.Locked then
+        return false, fresh, "fresh pet is trade locked"
+    end
+
+    if fresh.AlreadyListed then
+        return false, fresh, "fresh pet already listed"
+    end
+
+    if CFG.Seller.RequireExactPetName and not resolveExactPetName(fresh.Name) then
+        return false, fresh, "fresh pet name not exact"
+    end
+
+    if type(f) == "table" then
+        local filterPrice = clampPrice(f.Price)
+        local targetPrice = clampPrice(price)
+        if not targetPrice or not filterPrice or targetPrice ~= filterPrice then
+            return false, fresh, "price changed before list"
+        end
+
+        local matched = findFilter(fresh, {f})
+        if not matched then
+            return false, fresh, "fresh pet no longer matches filter"
+        end
+    end
+
+    return true, fresh
 end
 
 local function filterKey(f)
@@ -1710,7 +1784,7 @@ local function canListNow()
     return true
 end
 
-local function verifyListingAfterList(pet, price)
+local function verifyListingAfterList(pet, price, f)
     if not CFG.Seller.VerifyAfterList then
         return true, "verify off"
     end
@@ -1724,20 +1798,44 @@ local function verifyListingAfterList(pet, price)
         task.wait(delay)
         local listing = findMyListingByItemAndPrice(targetId, targetPrice, true, true)
         if listing then
+            if type(f) == "table" then
+                local matched = findFilterForListing(listing, {f}, true)
+                if not matched then
+                    log("UNSAFE listing verified mismatch, removing", tostring(listing.PetType), "price", tostring(listing.Price), "uuid", tostring(listing.ListingUUID))
+                    removeListingUUID(listing.ListingUUID)
+                    clearPendingList(targetId)
+                    return false, "verified listing failed exact filter check"
+                end
+            end
             clearPendingList(targetId)
             return true, listing
+        end
+
+        local wrongPrice = findMyListingByItem(targetId, true, true)
+        if wrongPrice then
+            log("UNSAFE listing wrong price, removing", tostring(wrongPrice.PetType), "expected", tostring(targetPrice), "got", tostring(wrongPrice.Price), "uuid", tostring(wrongPrice.ListingUUID))
+            removeListingUUID(wrongPrice.ListingUUID)
+            clearPendingList(targetId)
+            return false, "listed at wrong price"
         end
     end
 
     return false, "not found in booth data"
 end
 
-local function listPet(pet, price, boothReady)
+local function listPet(pet, price, boothReady, f)
     if not pet or not pet.UUID then
         return false, "missing pet uuid"
     end
 
     local petUUID = tostring(pet.UUID)
+    local guardOk, freshPet, guardWhy = validateListCandidate(pet, f, price)
+    if not guardOk then
+        log("Listing blocked by safety", tostring(pet.Name or petUUID), tostring(guardWhy))
+        return false, guardWhy
+    end
+    pet = freshPet or pet
+
     expireMap(State.PendingListUUIDs)
     if State.PendingListUUIDs[petUUID] then
         log("Listing blocked", tostring(pet.Name or petUUID), "already pending")
@@ -1768,7 +1866,7 @@ local function listPet(pet, price, boothReady)
         State.ListedThisSession = (State.ListedThisSession or 0) + 1
         table.insert(State.ListTimes, os.clock())
 
-        local verified, verifyInfo = verifyListingAfterList(pet, price)
+        local verified, verifyInfo = verifyListingAfterList(pet, price, f)
         if verified then
             registerCreateSuccess()
             log("Listed OK + verified", pet.Name, "price", tostring(price), "session", tostring(State.ListedThisSession))
@@ -1810,7 +1908,7 @@ local function autoList(scan)
 
         local can, why = canListNow()
         if not can then dlog("list wait", why) break end
-        local ok, whyList = listPet(c.Pet, c.Filter.Price, true)
+        local ok, whyList = listPet(c.Pet, c.Filter.Price, true, c.Filter)
         if ok then
             i += 1
         elseif whyList == "server wait" then
@@ -1854,7 +1952,7 @@ local function listOnce(maxCount)
             break
         end
 
-        local ok, whyList = listPet(c.Pet, c.Filter.Price, true)
+        local ok, whyList = listPet(c.Pet, c.Filter.Price, true, c.Filter)
         if ok then
             done += 1
             i += 1
@@ -2022,6 +2120,8 @@ local function removeWatch(name)
     return false
 end
 
+local validateSniperMatch
+
 local function snipeDryRun(force)
     local myId = tostring(getPlayerId())
     local watchNorm = {}
@@ -2044,10 +2144,16 @@ local function snipeDryRun(force)
                 local price = tonumber(l.Price) or 999999999
 
                 if w.MaxPrice <= 0 or price <= w.MaxPrice then
-                    table.insert(raw, {
+                    local match = {
                         Listing = l,
                         Watch = w,
-                    })
+                    }
+                    local safe, why = validateSniperMatch and validateSniperMatch(match)
+                    if safe then
+                        table.insert(raw, match)
+                    else
+                        dlog("sniper scan skipped", tostring(l.PetType), tostring(why))
+                    end
                 end
             end
         end
@@ -2142,7 +2248,7 @@ local function getCurrentSniperWatch(petType)
     return nil
 end
 
-local function validateSniperMatch(m)
+validateSniperMatch = function(m)
     if type(m) ~= "table" or type(m.Listing) ~= "table" then
         return false, "bad match"
     end
