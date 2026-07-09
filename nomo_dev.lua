@@ -2919,6 +2919,9 @@ local T = {
 }
 
 local function make(class, props, parent)
+	if CFG and CFG.Performance and CFG.Performance.NoUI and State and State.NoopWidget then
+		return State.NoopWidget()
+	end
 	local o = Instance.new(class)
 	for k, v in pairs(props) do o[k] = v end
 	o.Parent = parent
@@ -3761,6 +3764,14 @@ State.NoopWidget = function(default)
                 return function() return default or "" end
             elseif key == "Set" or key == "Add" or key == "Clear" or key == "Refresh" then
                 return function() end
+            elseif key == "GetChildren" then
+                return function() return {} end
+            elseif key == "IsA" then
+                return function() return false end
+            elseif key == "Destroy" then
+                return function() end
+            elseif key == "Activated" or key == "MouseButton1Click" or key == "FocusLost" or key == "InputBegan" or key == "InputChanged" or key == "Changed" then
+                return {Connect = function() end}
             end
             return function() return State.NoopWidget(default) end
         end,
