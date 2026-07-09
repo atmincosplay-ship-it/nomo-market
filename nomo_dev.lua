@@ -2922,6 +2922,12 @@ local function make(class, props, parent)
 	if CFG and CFG.Performance and CFG.Performance.NoUI and State and State.NoopWidget then
 		return State.NoopWidget()
 	end
+	if parent ~= nil and typeof(parent) ~= "Instance" then
+		if State and State.NoopWidget then
+			return State.NoopWidget()
+		end
+		parent = nil
+	end
 	local o = Instance.new(class)
 	for k, v in pairs(props) do o[k] = v end
 	o.Parent = parent
