@@ -118,14 +118,13 @@ if CFG.Sniper.ScanInterval < 0.5 then CFG.Sniper.ScanInterval = 0.5 end
 CFG.Performance = CFG.Performance or {}
 CFG.Performance.ListingCacheSeconds = tonumber(CFG.Performance.ListingCacheSeconds) or 0.75
 if CFG.Performance.ListingCacheSeconds < 0.25 then CFG.Performance.ListingCacheSeconds = 0.25 end
-CFG.Performance.NoUI = CFG.Performance.NoUI == true or tostring(getgenv().mode or ""):lower() == "noui" or getgenv().noui == true
+CFG.Performance.NoUI = false
 CFG.Performance.FpsLimit = tonumber(getgenv().fps_limit) or tonumber(CFG.Performance.FpsLimit) or 0
 CFG.Performance.FpsLimitSet = getgenv().fps_limit ~= nil or CFG.Performance.FpsLimitSet == true
 CFG.Performance.RemovePlants = CFG.Performance.RemovePlants == true or getgenv().remove_plants == true
 CFG.Performance.RemoveWeatherVisuals = CFG.Performance.RemoveWeatherVisuals == true or getgenv().remove_weather_visuals == true
 CFG.Performance.FullPerformanceMode = CFG.Performance.FullPerformanceMode == true or getgenv().full_performance_mode == true
 if CFG.Performance.FullPerformanceMode then
-    CFG.Performance.NoUI = true
     CFG.Performance.RemovePlants = true
     CFG.Performance.RemoveWeatherVisuals = true
 end
