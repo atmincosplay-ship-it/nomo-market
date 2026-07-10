@@ -120,6 +120,8 @@ CFG.Performance.ListingCacheSeconds = tonumber(CFG.Performance.ListingCacheSecon
 if CFG.Performance.ListingCacheSeconds < 0.25 then CFG.Performance.ListingCacheSeconds = 0.25 end
 CFG.Performance.InventoryCacheSeconds = tonumber(CFG.Performance.InventoryCacheSeconds) or 0.75
 if CFG.Performance.InventoryCacheSeconds < 0.25 then CFG.Performance.InventoryCacheSeconds = 0.25 end
+CFG.Performance.BoothChoiceCacheSeconds = tonumber(CFG.Performance.BoothChoiceCacheSeconds) or 1
+if CFG.Performance.BoothChoiceCacheSeconds < 0.25 then CFG.Performance.BoothChoiceCacheSeconds = 0.25 end
 CFG.Performance.NoUI = false
 CFG.Performance.FpsLimit = tonumber(getgenv().fps_limit) or tonumber(CFG.Performance.FpsLimit) or 0
 CFG.Performance.FpsLimitSet = getgenv().fps_limit ~= nil or CFG.Performance.FpsLimitSet == true
@@ -195,6 +197,8 @@ local State = {
     LastInventoryCacheAt = 0,
     TokenBalanceCache = nil,
     LastTokenBalanceAt = 0,
+    BestBoothCache = nil,
+    LastBestBoothCacheAt = 0,
     BoothDataCache = nil,
     LastBoothDataAt = 0,
     PendingListUUIDs = {},
@@ -857,6 +861,11 @@ local function getBoothSnapshot(force)
 end
 
 local function findBestBooth(force)
+    local now = os.clock()
+    if not force and type(State.BestBoothCache) == "table" and (now - (State.LastBestBoothCacheAt or 0)) <= (tonumber(CFG.Performance.BoothChoiceCacheSeconds) or 1) then
+        return State.BestBoothCache.Target, State.BestBoothCache.Status
+    end
+
     local maxDist = tonumber(CFG.Booth.MaxMiddleDistance) or 200
     local mine, free
 
@@ -871,7 +880,13 @@ local function findBestBooth(force)
         end
     end
 
-    return mine or free, mine and "MINE" or (free and "FREE" or "NONE")
+    local target = mine or free
+    local status = mine and "MINE" or (free and "FREE" or "NONE")
+    if not force then
+        State.BestBoothCache = {Target = target, Status = status}
+        State.LastBestBoothCacheAt = now
+    end
+    return target, status
 end
 
 local function getOwnedBoothSkins()
