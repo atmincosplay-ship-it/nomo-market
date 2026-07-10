@@ -132,6 +132,8 @@ if CFG.Performance.FullPerformanceMode then
     CFG.Performance.RemovePlants = true
     CFG.Performance.RemoveWeatherVisuals = true
 end
+CFG.Performance.AntiAfk = CFG.Performance.AntiAfk ~= false
+CFG.Performance.ClearLoadingScreens = CFG.Performance.ClearLoadingScreens ~= false
 CFG.Sniper.BuyCooldown = 0
 CFG.Sniper.WatchlistId = tostring(CFG.Sniper.WatchlistId or "1")
 CFG.Sniper.WeightMode = CFG.Sniper.WeightMode or "Base"
@@ -234,6 +236,58 @@ local HttpService = game:GetService("HttpService")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
+
+State.InstallAntiAfk = function()
+    if not CFG.Performance.AntiAfk or State.AntiAfkInstalled then return end
+    State.AntiAfkInstalled = true
+
+    local ok, virtualUser = pcall(function()
+        return game:GetService("VirtualUser")
+    end)
+    if not ok or not virtualUser then
+        print("[NOMO V3] AntiAFK unavailable")
+        return
+    end
+
+    LocalPlayer.Idled:Connect(function()
+        pcall(function()
+            virtualUser:CaptureController()
+            virtualUser:ClickButton2(Vector2.new())
+        end)
+        print("[NOMO V3] AntiAFK pulse")
+    end)
+end
+
+State.ClearLoadingScreens = function()
+    if not CFG.Performance.ClearLoadingScreens then return end
+
+    pcall(function()
+        game:GetService("ReplicatedFirst"):RemoveDefaultLoadingScreen()
+    end)
+
+    task.spawn(function()
+        local pg = LocalPlayer:WaitForChild("PlayerGui", 15)
+        if not pg then return end
+
+        for _ = 1, 20 do
+            for _, child in ipairs(pg:GetChildren()) do
+                local n = tostring(child.Name or ""):lower()
+                if child.Name ~= "NomoHub" and child.Name ~= "NomoHeadless" and (n:find("loading", 1, true) or n:find("preload", 1, true) or n:find("intro", 1, true)) then
+                    pcall(function()
+                        if child:IsA("ScreenGui") then
+                            child.Enabled = false
+                        end
+                        child:Destroy()
+                    end)
+                end
+            end
+            task.wait(0.5)
+        end
+    end)
+end
+
+State.InstallAntiAfk()
+State.ClearLoadingScreens()
 
 local GameEvents = ReplicatedStorage:WaitForChild("GameEvents")
 local BoothRemotes = GameEvents:WaitForChild("TradeEvents"):WaitForChild("Booths")
