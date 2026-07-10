@@ -189,6 +189,8 @@ local State = {
     LastSniperMatches = {},
     ListingsCache = nil,
     LastListingsCacheAt = 0,
+    MyListingsCache = nil,
+    LastMyListingsCacheAt = 0,
     InventoryCache = nil,
     LastInventoryCacheAt = 0,
     TokenBalanceCache = nil,
@@ -743,6 +745,8 @@ end
 State.InvalidateListingCache = function()
     State.ListingsCache = nil
     State.LastListingsCacheAt = 0
+    State.MyListingsCache = nil
+    State.LastMyListingsCacheAt = 0
     State.InventoryCache = nil
     State.LastInventoryCacheAt = 0
 end
@@ -761,6 +765,7 @@ local function markPendingRemove(listingUUID)
     listingUUID = tostring(listingUUID or "")
     if listingUUID == "" then return end
     State.PendingRemoveUUIDs[listingUUID] = os.clock() + math.max(3, (tonumber(CFG.Listings.VerifyRemoveDelay) or 0.45) * (tonumber(CFG.Listings.VerifyRemoveAttempts) or 4) + 2)
+    State.InvalidateListingCache()
 end
 
 local function getPlayerId()
@@ -1077,12 +1082,22 @@ local function getAllListings(force, includePendingRemoves)
 end
 
 local function getMyListings(force, includePendingRemoves)
+    local now = os.clock()
+    if not force and not includePendingRemoves and type(State.MyListingsCache) == "table" and (now - (State.LastMyListingsCacheAt or 0)) <= (tonumber(CFG.Performance.ListingCacheSeconds) or 0.75) then
+        State.LastMyListings = State.MyListingsCache
+        return State.MyListingsCache
+    end
+
     local myId = tostring(getPlayerId())
     local out = {}
     for _, l in ipairs(getAllListings(force, includePendingRemoves)) do
         if tostring(l.OwnerId) == myId then
             table.insert(out, l)
         end
+    end
+    if not force and not includePendingRemoves then
+        State.MyListingsCache = out
+        State.LastMyListingsCacheAt = now
     end
     State.LastMyListings = out
     return out
