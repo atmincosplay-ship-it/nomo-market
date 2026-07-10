@@ -2066,9 +2066,10 @@ State.WebhookEmbedForListing = function(kind, l, extra)
     }
 end
 
-State.SendSoldWebhook = function(l)
+State.SendSoldWebhook = function(l, extra)
     if not CFG.Webhook or CFG.Webhook.Enabled ~= true or CFG.Webhook.PetSold ~= true then return false end
     l = type(l) == "table" and l or {}
+    extra = type(extra) == "table" and extra or {}
     local now = os.clock()
     for id, expires in pairs(State.SentSoldWebhooks or {}) do
         if tonumber(expires) and expires < now then
@@ -2076,10 +2077,15 @@ State.SendSoldWebhook = function(l)
         end
     end
     local id = tostring(l.ListingUUID or l.ItemId or "")
+    local itemId = tostring(l.ItemId or "")
     if id ~= "" and State.SentSoldWebhooks[id] then return false end
-    local sent = State.WebhookPost(State.WebhookEmbedForListing("sold", l, {}), "sold")
+    if itemId ~= "" and State.SentSoldWebhooks[itemId] then return false end
+    local sent = State.WebhookPost(State.WebhookEmbedForListing("sold", l, extra), "sold")
     if sent and id ~= "" then
         State.SentSoldWebhooks[id] = now + 1800
+    end
+    if sent and itemId ~= "" then
+        State.SentSoldWebhooks[itemId] = now + 1800
     end
     return sent
 end
@@ -2102,6 +2108,45 @@ State.SendSnipeWebhook = function(match)
     end
     return sent
 end
+
+State.ConnectBoothHistory = function()
+    if State.BoothHistoryConnected then return end
+    local AddToHistory = BoothRemotes:FindFirstChild("AddToHistory")
+    if not AddToHistory or not AddToHistory.OnClientEvent then return end
+    State.BoothHistoryConnected = true
+    AddToHistory.OnClientEvent:Connect(function(history)
+        if type(history) ~= "table" then return end
+        if type(history.status) == "table" and tostring(history.status.result or "") == "Failed" then return end
+        local seller = type(history.seller) == "table" and history.seller or {}
+        local buyer = type(history.buyer) == "table" and history.buyer or {}
+        if tostring(seller.userId or "") ~= tostring(LocalPlayer.UserId) then return end
+        local item = type(history.item) == "table" and history.item or {}
+        local data = type(item.data) == "table" and item.data or {}
+        local itemData = type(data.ItemData) == "table" and data.ItemData or {}
+        local petType = tostring(data.PetType or data.SkinID or itemData.ItemName or data.ItemName or "Unknown")
+        local itemId = tostring(data.UUID or data.ItemId or data.ItemID or history.itemId or history.id or "")
+        local historyId = tostring(history.id or itemId or "")
+        if historyId == "" and itemId == "" then return end
+        local listing = {
+            ListingUUID = historyId ~= "" and historyId or itemId,
+            ItemId = itemId ~= "" and itemId or historyId,
+            PetType = petType,
+            Price = tonumber(history.price) or tonumber(history.netPrice) or 0,
+            OwnerName = tostring(seller.username or LocalPlayer.Name or ""),
+            BuyerName = tostring(buyer.username or ""),
+            Item = data,
+            History = history,
+        }
+        local buyerName = tostring(buyer.username or "")
+        if not listing then return end
+        local sent = State.SendSoldWebhook(listing, {User = buyerName})
+        if sent then
+            log("History sold webhook", tostring(listing.PetType), tostring(listing.Price), tostring(listing.ListingUUID))
+        end
+    end)
+    log("Booth history sale listener connected")
+end
+State.ConnectBoothHistory()
 
 State.TrackSoldListings = function(myListings)
     local now = os.clock()
