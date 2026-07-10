@@ -209,6 +209,8 @@ local State = {
     KnownMyListings = {},
     KnownMyListingsReady = false,
     MissingMyListings = {},
+    SentSoldWebhooks = {},
+    SentSnipeWebhooks = {},
     WebhookQueue = {},
     WebhookBusy = false,
     LastCreateWaitSignal = 0,
@@ -2066,13 +2068,39 @@ end
 
 State.SendSoldWebhook = function(l)
     if not CFG.Webhook or CFG.Webhook.Enabled ~= true or CFG.Webhook.PetSold ~= true then return false end
-    return State.WebhookPost(State.WebhookEmbedForListing("sold", l, {}), "sold")
+    l = type(l) == "table" and l or {}
+    local now = os.clock()
+    for id, expires in pairs(State.SentSoldWebhooks or {}) do
+        if tonumber(expires) and expires < now then
+            State.SentSoldWebhooks[id] = nil
+        end
+    end
+    local id = tostring(l.ListingUUID or l.ItemId or "")
+    if id ~= "" and State.SentSoldWebhooks[id] then return false end
+    local sent = State.WebhookPost(State.WebhookEmbedForListing("sold", l, {}), "sold")
+    if sent and id ~= "" then
+        State.SentSoldWebhooks[id] = now + 1800
+    end
+    return sent
 end
 
 State.SendSnipeWebhook = function(match)
     if not CFG.Webhook or CFG.Webhook.Enabled ~= true or CFG.Webhook.SuccessfulSnipe ~= true then return false end
     if type(match) ~= "table" or type(match.Listing) ~= "table" then return false end
-    return State.WebhookPost(State.WebhookEmbedForListing("snipe", match.Listing, {User = match.Listing.OwnerName}), "snipe")
+    local l = match.Listing
+    local now = os.clock()
+    for id, expires in pairs(State.SentSnipeWebhooks or {}) do
+        if tonumber(expires) and expires < now then
+            State.SentSnipeWebhooks[id] = nil
+        end
+    end
+    local id = tostring(l.ListingUUID or l.ItemId or "")
+    if id ~= "" and State.SentSnipeWebhooks[id] then return false end
+    local sent = State.WebhookPost(State.WebhookEmbedForListing("snipe", l, {User = l.OwnerName}), "snipe")
+    if sent and id ~= "" then
+        State.SentSnipeWebhooks[id] = now + 1800
+    end
+    return sent
 end
 
 State.TrackSoldListings = function(myListings)
@@ -5566,7 +5594,7 @@ task.spawn(function()
             if not ok then log("Sniper scan error", tostring(err)) end
         end
 
-        if CFG.Webhook.Enabled and CFG.Webhook.PetSold and now - (State.LastSoldCheckAt or 0) >= 10 then
+        if CFG.Webhook.Enabled and CFG.Webhook.PetSold and now - (State.LastSoldCheckAt or 0) >= 5 then
             State.LastSoldCheckAt = now
             local ok, err = pcall(function()
                 State.TrackSoldListings(getMyListings(true))
