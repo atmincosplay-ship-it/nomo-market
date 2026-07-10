@@ -2025,7 +2025,7 @@ State.WebhookEmbedForListing = function(kind, l, extra)
 
     local titlePrefix = kind == "snipe" and "SNIPED" or "BOOTH SALE"
     local color = kind == "snipe" and 0xEB44D5 or 0xFFB800
-    local priceLabel = kind == "snipe" and "Bought For" or "Sold For"
+    local priceLabel = kind == "snipe" and "🪙 Bought For" or "🪙 Sold For"
     local userLabel = kind == "snipe" and "Seller" or "By User"
     local userValue = tostring(extra.User or l.OwnerName or "")
     if kind == "sold" then userValue = tostring(extra.User or "") end
@@ -2044,7 +2044,7 @@ State.WebhookEmbedForListing = function(kind, l, extra)
     table.insert(fields, {name = "Age", value = tostring(pet.Age or "?"), inline = true})
     table.insert(fields, {name = "BaseWeight", value = fmtKg(pet.BaseWeight), inline = true})
     table.insert(fields, {name = "KG", value = fmtKg(displayKg), inline = true})
-    table.insert(fields, {name = "Token Balance", value = commaNumber(getTokenBalance()) .. " Tokens", inline = true})
+    table.insert(fields, {name = "🪙 Token Balance", value = commaNumber(getTokenBalance()) .. " Tokens", inline = true})
     table.insert(fields, {name = "Pet Inventory", value = tostring(#getOwnPetsFromData()) .. " pets", inline = true})
     table.insert(fields, {name = "Server", value = "```" .. tostring(game.PlaceId) .. ":" .. tostring(game.JobId) .. "```", inline = false})
 
