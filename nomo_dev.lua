@@ -118,6 +118,8 @@ if CFG.Sniper.ScanInterval < 0.5 then CFG.Sniper.ScanInterval = 0.5 end
 CFG.Performance = CFG.Performance or {}
 CFG.Performance.ListingCacheSeconds = tonumber(CFG.Performance.ListingCacheSeconds) or 0.75
 if CFG.Performance.ListingCacheSeconds < 0.25 then CFG.Performance.ListingCacheSeconds = 0.25 end
+CFG.Performance.InventoryCacheSeconds = tonumber(CFG.Performance.InventoryCacheSeconds) or 0.75
+if CFG.Performance.InventoryCacheSeconds < 0.25 then CFG.Performance.InventoryCacheSeconds = 0.25 end
 CFG.Performance.NoUI = false
 CFG.Performance.FpsLimit = tonumber(getgenv().fps_limit) or tonumber(CFG.Performance.FpsLimit) or 0
 CFG.Performance.FpsLimitSet = getgenv().fps_limit ~= nil or CFG.Performance.FpsLimitSet == true
@@ -187,6 +189,10 @@ local State = {
     LastSniperMatches = {},
     ListingsCache = nil,
     LastListingsCacheAt = 0,
+    InventoryCache = nil,
+    LastInventoryCacheAt = 0,
+    TokenBalanceCache = nil,
+    LastTokenBalanceAt = 0,
     BoothDataCache = nil,
     LastBoothDataAt = 0,
     PendingListUUIDs = {},
@@ -334,14 +340,21 @@ local function compactNumber(n)
     return commaNumber(n)
 end
 
-local function getTokenBalance()
+local function getTokenBalance(force)
+    local now = os.clock()
+    if not force and State.TokenBalanceCache ~= nil and (now - (State.LastTokenBalanceAt or 0)) <= 1 then
+        return State.TokenBalanceCache
+    end
+
     local ok, data = pcall(function()
         return DataService:GetData()
     end)
     if ok and type(data) == "table" and data.TradeData and data.TradeData.Tokens ~= nil then
-        return tonumber(data.TradeData.Tokens) or 0
+        State.TokenBalanceCache = tonumber(data.TradeData.Tokens) or 0
+        State.LastTokenBalanceAt = now
+        return State.TokenBalanceCache
     end
-    return 0
+    return State.TokenBalanceCache or 0
 end
 
 local function registerCreateWait(reason)
@@ -730,6 +743,8 @@ end
 State.InvalidateListingCache = function()
     State.ListingsCache = nil
     State.LastListingsCacheAt = 0
+    State.InventoryCache = nil
+    State.LastInventoryCacheAt = 0
 end
 
 local function markPendingList(uuid)
@@ -1625,7 +1640,12 @@ local function isPetFavorite(petData)
     return pd and pd.IsFavorite == true
 end
 
-local function getOwnPetsFromData()
+local function getOwnPetsFromData(force)
+    local now = os.clock()
+    if not force and type(State.InventoryCache) == "table" and (now - (State.LastInventoryCacheAt or 0)) <= (tonumber(CFG.Performance.InventoryCacheSeconds) or 0.75) then
+        return State.InventoryCache
+    end
+
     local ok, data = pcall(function()
         return DataService:GetData()
     end)
@@ -1679,14 +1699,16 @@ local function getOwnPetsFromData()
         return (a.Weight or 999999) < (b.Weight or 999999)
     end)
 
+    State.InventoryCache = out
+    State.LastInventoryCacheAt = now
     return out
 end
 
-local function findOwnPetByUUID(uuid)
+local function findOwnPetByUUID(uuid, force)
     local target = tostring(uuid or "")
     if target == "" then return nil end
 
-    for _, pet in ipairs(getOwnPetsFromData()) do
+    for _, pet in ipairs(getOwnPetsFromData(force)) do
         if tostring(pet.UUID or "") == target then
             return pet
         end
@@ -1777,7 +1799,7 @@ local function validateListCandidate(pet, f, price)
         return false, nil, "missing pet uuid"
     end
 
-    local fresh = findOwnPetByUUID(pet.UUID)
+    local fresh = findOwnPetByUUID(pet.UUID, true)
     if not fresh then
         return false, nil, "pet missing from fresh inventory"
     end
@@ -2719,7 +2741,13 @@ local function snipeDryRun(force)
     State.LastSniperMatches = filtered
     State.LastSniperRawCount = #raw
 
-    log("Sniper dry-run matches", #filtered, "shown from raw", #raw)
+    local scanSig = tostring(#filtered) .. "/" .. tostring(#raw)
+    local now = os.clock()
+    if State.LastSniperScanLogSig ~= scanSig or (now - (State.LastSniperScanLogAt or 0)) >= 15 then
+        State.LastSniperScanLogSig = scanSig
+        State.LastSniperScanLogAt = now
+        log("Sniper dry-run matches", #filtered, "shown from raw", #raw)
+    end
     return filtered
 end
 
@@ -2735,7 +2763,7 @@ local function canBuyNow(price)
 
     price = tonumber(price) or 0
     local minAfter = tonumber(CFG.Sniper.MinTokensAfterBuy) or 0
-    if minAfter > 0 and (getTokenBalance() - price) < minAfter then
+    if minAfter > 0 and (getTokenBalance(true) - price) < minAfter then
         return false, "token reserve"
     end
 
