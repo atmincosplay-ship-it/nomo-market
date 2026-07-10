@@ -27,7 +27,7 @@ CFG.Seller = CFG.Seller or {
     Enabled = true,
     PreviewOnly = true,
     AutoList = false,
-    ScanInterval = 0.25,
+    ScanInterval = 1,
     ListCooldown = 0,
     MaxListPerMinute = 999,
     MinPetCountKeep = 0,
@@ -43,7 +43,7 @@ CFG.Listings = CFG.Listings or {
 CFG.Sniper = CFG.Sniper or {
     Enabled = false,
     DryRun = true,
-    ScanInterval = 0.25,
+    ScanInterval = 0.75,
     BuyCooldown = 0,
     MaxBuyPerMinute = 999,
 
@@ -55,20 +55,31 @@ CFG.Sniper = CFG.Sniper or {
     Watchlist = {},
 }
 
+CFG.Webhook = CFG.Webhook or {
+    Enabled = false,
+    Url = "",
+    SnipeUrl = tostring(getgenv().nomo_sniper_webhook or getgenv().NOMO_SNIPER_WEBHOOK or ""),
+    SoldUrl = tostring(getgenv().nomo_market_webhook or getgenv().NOMO_MARKET_WEBHOOK or ""),
+    IconUrl = "",
+    PetSold = true,
+    SuccessfulSnipe = true,
+}
+
 CFG.Debug = CFG.Debug or false
 if CFG.Booth.MaxMiddleDistance == nil or tonumber(CFG.Booth.MaxMiddleDistance) == 200 then
     CFG.Booth.MaxMiddleDistance = 85
 end
 CFG.Booth.ClaimInterval = CFG.Booth.ClaimInterval or 10
-CFG.Booth.DataCacheSeconds = CFG.Booth.DataCacheSeconds or 0.25
+CFG.Booth.DataCacheSeconds = tonumber(CFG.Booth.DataCacheSeconds) or 1
+if CFG.Booth.DataCacheSeconds < 1 then CFG.Booth.DataCacheSeconds = 1 end
 CFG.Booth.ClaimVerifyAttempts = CFG.Booth.ClaimVerifyAttempts or 6
 CFG.Booth.ClaimVerifyDelay = CFG.Booth.ClaimVerifyDelay or 0.35
 CFG.Seller.BoothCap = 50
 CFG.Seller.WeightMode = CFG.Seller.WeightMode or "Base"
 CFG.Seller.ShowSkipReasons = CFG.Seller.ShowSkipReasons ~= false
 CFG.Seller.RequireBoothBeforeList = CFG.Seller.RequireBoothBeforeList ~= false
-CFG.Seller.ScanInterval = tonumber(CFG.Seller.ScanInterval) or 0.25
-if CFG.Seller.ScanInterval > 1 then CFG.Seller.ScanInterval = 0.25 end
+CFG.Seller.ScanInterval = tonumber(CFG.Seller.ScanInterval) or 1
+if CFG.Seller.ScanInterval < 0.75 then CFG.Seller.ScanInterval = 0.75 end
 CFG.Seller.ListCooldown = 0
 CFG.Seller.ListOnceMax = 50
 CFG.Seller.AutoSmartRebuildOnStart = CFG.Seller.AutoSmartRebuildOnStart ~= false
@@ -102,8 +113,25 @@ CFG.Sniper.SkipOwnListings = CFG.Sniper.SkipOwnListings ~= false
 CFG.Sniper.RequireExactPetName = CFG.Sniper.RequireExactPetName ~= false
 CFG.Sniper.AllowNoMaxPrice = CFG.Sniper.AllowNoMaxPrice == true
 CFG.Sniper.MinTokensAfterBuy = CFG.Sniper.MinTokensAfterBuy or 0
-CFG.Sniper.ScanInterval = tonumber(CFG.Sniper.ScanInterval) or 0.25
-if CFG.Sniper.ScanInterval > 1 then CFG.Sniper.ScanInterval = 0.25 end
+CFG.Sniper.ScanInterval = tonumber(CFG.Sniper.ScanInterval) or 0.75
+if CFG.Sniper.ScanInterval < 0.5 then CFG.Sniper.ScanInterval = 0.5 end
+CFG.Performance = CFG.Performance or {}
+CFG.Performance.ListingCacheSeconds = tonumber(CFG.Performance.ListingCacheSeconds) or 0.75
+if CFG.Performance.ListingCacheSeconds < 0.25 then CFG.Performance.ListingCacheSeconds = 0.25 end
+CFG.Performance.InventoryCacheSeconds = tonumber(CFG.Performance.InventoryCacheSeconds) or 0.75
+if CFG.Performance.InventoryCacheSeconds < 0.25 then CFG.Performance.InventoryCacheSeconds = 0.25 end
+CFG.Performance.BoothChoiceCacheSeconds = tonumber(CFG.Performance.BoothChoiceCacheSeconds) or 1
+if CFG.Performance.BoothChoiceCacheSeconds < 0.25 then CFG.Performance.BoothChoiceCacheSeconds = 0.25 end
+CFG.Performance.NoUI = false
+CFG.Performance.FpsLimit = tonumber(getgenv().fps_limit) or tonumber(CFG.Performance.FpsLimit) or 0
+CFG.Performance.FpsLimitSet = getgenv().fps_limit ~= nil or CFG.Performance.FpsLimitSet == true
+CFG.Performance.RemovePlants = CFG.Performance.RemovePlants == true or getgenv().remove_plants == true
+CFG.Performance.RemoveWeatherVisuals = CFG.Performance.RemoveWeatherVisuals == true or getgenv().remove_weather_visuals == true
+CFG.Performance.FullPerformanceMode = CFG.Performance.FullPerformanceMode == true or getgenv().full_performance_mode == true
+if CFG.Performance.FullPerformanceMode then
+    CFG.Performance.RemovePlants = true
+    CFG.Performance.RemoveWeatherVisuals = true
+end
 CFG.Sniper.BuyCooldown = 0
 CFG.Sniper.WatchlistId = tostring(CFG.Sniper.WatchlistId or "1")
 CFG.Sniper.WeightMode = CFG.Sniper.WeightMode or "Base"
@@ -113,6 +141,12 @@ CFG.UI = CFG.UI or {
     FilterGameSpam = true,
 }
 CFG.UI.MaxDropdownRows = CFG.UI.MaxDropdownRows or 80
+if tostring(CFG.Webhook.SnipeUrl or "") == "" then
+    CFG.Webhook.SnipeUrl = tostring(getgenv().nomo_sniper_webhook or getgenv().NOMO_SNIPER_WEBHOOK or "")
+end
+if tostring(CFG.Webhook.SoldUrl or "") == "" then
+    CFG.Webhook.SoldUrl = tostring(getgenv().nomo_market_webhook or getgenv().NOMO_MARKET_WEBHOOK or "")
+end
 
 --//====================================================--
 --// Stop old UI/loop
@@ -142,6 +176,7 @@ local State = {
     Logs = {},
     LastSellerScanAt = 0,
     LastSniperScanAt = 0,
+    LastSoldCheckAt = 0,
     LastAutoClaimAt = 0,
     LastListAt = 0,
     ListTimes = {},
@@ -154,10 +189,26 @@ local State = {
     LastListings = {},
     LastMyListings = {},
     LastSniperMatches = {},
+    ListingsCache = nil,
+    LastListingsCacheAt = 0,
+    MyListingsCache = nil,
+    LastMyListingsCacheAt = 0,
+    InventoryCache = nil,
+    LastInventoryCacheAt = 0,
+    TokenBalanceCache = nil,
+    LastTokenBalanceAt = 0,
+    BestBoothCache = nil,
+    LastBestBoothCacheAt = 0,
     BoothDataCache = nil,
     LastBoothDataAt = 0,
     PendingListUUIDs = {},
     PendingRemoveUUIDs = {},
+    ManualRemoveUUIDs = {},
+    KnownMyListings = {},
+    KnownMyListingsReady = false,
+    MissingMyListings = {},
+    WebhookQueue = {},
+    WebhookBusy = false,
     LastCreateWaitSignal = 0,
     CreateBlockedUntil = 0,
     NextCreateAllowedAt = 0,
@@ -295,14 +346,21 @@ local function compactNumber(n)
     return commaNumber(n)
 end
 
-local function getTokenBalance()
+local function getTokenBalance(force)
+    local now = os.clock()
+    if not force and State.TokenBalanceCache ~= nil and (now - (State.LastTokenBalanceAt or 0)) <= 1 then
+        return State.TokenBalanceCache
+    end
+
     local ok, data = pcall(function()
         return DataService:GetData()
     end)
     if ok and type(data) == "table" and data.TradeData and data.TradeData.Tokens ~= nil then
-        return tonumber(data.TradeData.Tokens) or 0
+        State.TokenBalanceCache = tonumber(data.TradeData.Tokens) or 0
+        State.LastTokenBalanceAt = now
+        return State.TokenBalanceCache
     end
-    return 0
+    return State.TokenBalanceCache or 0
 end
 
 local function registerCreateWait(reason)
@@ -484,6 +542,17 @@ State.LoadRuntimeSettings = function()
         if data.Sniper.RescanBeforeBuy ~= nil then CFG.Sniper.RescanBeforeBuy = data.Sniper.RescanBeforeBuy == true end
         if data.Sniper.WatchlistId ~= nil then CFG.Sniper.WatchlistId = tostring(data.Sniper.WatchlistId) end
     end
+    if type(data.Webhook) == "table" then
+        if data.Webhook.Enabled ~= nil then CFG.Webhook.Enabled = data.Webhook.Enabled == true end
+        if type(data.Webhook.Url) == "string" then CFG.Webhook.Url = data.Webhook.Url end
+        if type(data.Webhook.SnipeUrl) == "string" then CFG.Webhook.SnipeUrl = data.Webhook.SnipeUrl end
+        if type(data.Webhook.SoldUrl) == "string" then CFG.Webhook.SoldUrl = data.Webhook.SoldUrl end
+        if type(data.Webhook.IconUrl) == "string" then CFG.Webhook.IconUrl = data.Webhook.IconUrl end
+        if data.Webhook.PetSold ~= nil then CFG.Webhook.PetSold = data.Webhook.PetSold == true end
+        if data.Webhook.SuccessfulSnipe ~= nil then CFG.Webhook.SuccessfulSnipe = data.Webhook.SuccessfulSnipe == true end
+    end
+    if tostring(CFG.Webhook.SnipeUrl or "") == "" then CFG.Webhook.SnipeUrl = tostring(CFG.Webhook.Url or "") end
+    if tostring(CFG.Webhook.SoldUrl or "") == "" then CFG.Webhook.SoldUrl = tostring(CFG.Webhook.Url or "") end
     if CFG.Seller.AutoList then
         CFG.Seller.PreviewOnly = false
     end
@@ -506,6 +575,15 @@ State.SaveRuntimeSettings = function()
             DryRun = CFG.Sniper.DryRun == true,
             RescanBeforeBuy = CFG.Sniper.RescanBeforeBuy == true,
             WatchlistId = tostring(CFG.Sniper.WatchlistId or "1"),
+        },
+        Webhook = {
+            Enabled = CFG.Webhook.Enabled == true,
+            Url = tostring(CFG.Webhook.Url or ""),
+            SnipeUrl = tostring(CFG.Webhook.SnipeUrl or ""),
+            SoldUrl = tostring(CFG.Webhook.SoldUrl or ""),
+            IconUrl = tostring(CFG.Webhook.IconUrl or ""),
+            PetSold = CFG.Webhook.PetSold == true,
+            SuccessfulSnipe = CFG.Webhook.SuccessfulSnipe == true,
         },
     }
     return saveJson(State.GetSettingsPath(), data)
@@ -668,6 +746,15 @@ local function expireMap(map)
     end
 end
 
+State.InvalidateListingCache = function()
+    State.ListingsCache = nil
+    State.LastListingsCacheAt = 0
+    State.MyListingsCache = nil
+    State.LastMyListingsCacheAt = 0
+    State.InventoryCache = nil
+    State.LastInventoryCacheAt = 0
+end
+
 local function markPendingList(uuid)
     uuid = tostring(uuid or "")
     if uuid == "" then return end
@@ -682,6 +769,7 @@ local function markPendingRemove(listingUUID)
     listingUUID = tostring(listingUUID or "")
     if listingUUID == "" then return end
     State.PendingRemoveUUIDs[listingUUID] = os.clock() + math.max(3, (tonumber(CFG.Listings.VerifyRemoveDelay) or 0.45) * (tonumber(CFG.Listings.VerifyRemoveAttempts) or 4) + 2)
+    State.InvalidateListingCache()
 end
 
 local function getPlayerId()
@@ -773,6 +861,11 @@ local function getBoothSnapshot(force)
 end
 
 local function findBestBooth(force)
+    local now = os.clock()
+    if not force and type(State.BestBoothCache) == "table" and (now - (State.LastBestBoothCacheAt or 0)) <= (tonumber(CFG.Performance.BoothChoiceCacheSeconds) or 1) then
+        return State.BestBoothCache.Target, State.BestBoothCache.Status
+    end
+
     local maxDist = tonumber(CFG.Booth.MaxMiddleDistance) or 200
     local mine, free
 
@@ -787,7 +880,13 @@ local function findBestBooth(force)
         end
     end
 
-    return mine or free, mine and "MINE" or (free and "FREE" or "NONE")
+    local target = mine or free
+    local status = mine and "MINE" or (free and "FREE" or "NONE")
+    if not force then
+        State.BestBoothCache = {Target = target, Status = status}
+        State.LastBestBoothCacheAt = now
+    end
+    return target, status
 end
 
 local function getOwnedBoothSkins()
@@ -926,6 +1025,24 @@ local function getAllListings(force, includePendingRemoves)
     expireMap(State.PendingRemoveUUIDs)
     expireMap(State.PendingListUUIDs)
 
+    local now = os.clock()
+    local cached = State.ListingsCache
+    if not force and type(cached) == "table" and (now - (State.LastListingsCacheAt or 0)) <= (tonumber(CFG.Performance.ListingCacheSeconds) or 0.75) then
+        if includePendingRemoves then
+            State.LastListings = cached
+            return cached
+        end
+
+        local filtered = {}
+        for _, l in ipairs(cached) do
+            if not State.PendingRemoveUUIDs[tostring(l.ListingUUID or "")] then
+                table.insert(filtered, l)
+            end
+        end
+        State.LastListings = filtered
+        return filtered
+    end
+
     local data = fetchBoothData(force)
     local out = {}
     if not data then return out end
@@ -936,9 +1053,6 @@ local function getAllListings(force, includePendingRemoves)
         if type(pd) == "table" and type(pd.Listings) == "table" and type(pd.Items) == "table" then
             for listingUUID, listing in pairs(pd.Listings) do
                 listingUUID = tostring(listingUUID)
-                if State.PendingRemoveUUIDs[listingUUID] and not includePendingRemoves then
-                    continue
-                end
 
                 local item = pd.Items[listing.ItemId]
                 if item then
@@ -964,17 +1078,41 @@ local function getAllListings(force, includePendingRemoves)
         return (tonumber(a.Price) or 999999999) < (tonumber(b.Price) or 999999999)
     end)
 
+    State.ListingsCache = out
+    State.LastListingsCacheAt = now
+
+    if not includePendingRemoves then
+        local filtered = {}
+        for _, l in ipairs(out) do
+            if not State.PendingRemoveUUIDs[tostring(l.ListingUUID or "")] then
+                table.insert(filtered, l)
+            end
+        end
+        State.LastListings = filtered
+        return filtered
+    end
+
     State.LastListings = out
     return out
 end
 
 local function getMyListings(force, includePendingRemoves)
+    local now = os.clock()
+    if not force and not includePendingRemoves and type(State.MyListingsCache) == "table" and (now - (State.LastMyListingsCacheAt or 0)) <= (tonumber(CFG.Performance.ListingCacheSeconds) or 0.75) then
+        State.LastMyListings = State.MyListingsCache
+        return State.MyListingsCache
+    end
+
     local myId = tostring(getPlayerId())
     local out = {}
     for _, l in ipairs(getAllListings(force, includePendingRemoves)) do
         if tostring(l.OwnerId) == myId then
             table.insert(out, l)
         end
+    end
+    if not force and not includePendingRemoves then
+        State.MyListingsCache = out
+        State.LastMyListingsCacheAt = now
     end
     State.LastMyListings = out
     return out
@@ -1043,10 +1181,12 @@ local function removeListingUUID(id)
     if id == "" then log("Remove skipped: empty id") return false end
 
     markPendingRemove(id)
+    State.ManualRemoveUUIDs[id] = os.clock() + 45
     local ok, result = pcall(function()
         return RemoveListing:InvokeServer(id)
     end)
     if ok and result ~= false then
+        State.InvalidateListingCache()
         local attempts = math.max(1, toInt(CFG.Listings.VerifyRemoveAttempts) or 4)
         local delay = tonumber(CFG.Listings.VerifyRemoveDelay) or 0.45
 
@@ -1054,6 +1194,7 @@ local function removeListingUUID(id)
             task.wait(delay)
             if not listingStillExists(id) then
                 State.PendingRemoveUUIDs[id] = nil
+                State.InvalidateListingCache()
                 log("RemoveListing verified", id, "try", tostring(attempt))
                 return true
             end
@@ -1529,7 +1670,12 @@ local function isPetFavorite(petData)
     return pd and pd.IsFavorite == true
 end
 
-local function getOwnPetsFromData()
+local function getOwnPetsFromData(force)
+    local now = os.clock()
+    if not force and type(State.InventoryCache) == "table" and (now - (State.LastInventoryCacheAt or 0)) <= (tonumber(CFG.Performance.InventoryCacheSeconds) or 0.75) then
+        return State.InventoryCache
+    end
+
     local ok, data = pcall(function()
         return DataService:GetData()
     end)
@@ -1583,14 +1729,16 @@ local function getOwnPetsFromData()
         return (a.Weight or 999999) < (b.Weight or 999999)
     end)
 
+    State.InventoryCache = out
+    State.LastInventoryCacheAt = now
     return out
 end
 
-local function findOwnPetByUUID(uuid)
+local function findOwnPetByUUID(uuid, force)
     local target = tostring(uuid or "")
     if target == "" then return nil end
 
-    for _, pet in ipairs(getOwnPetsFromData()) do
+    for _, pet in ipairs(getOwnPetsFromData(force)) do
         if tostring(pet.UUID or "") == target then
             return pet
         end
@@ -1681,7 +1829,7 @@ local function validateListCandidate(pet, f, price)
         return false, nil, "missing pet uuid"
     end
 
-    local fresh = findOwnPetByUUID(pet.UUID)
+    local fresh = findOwnPetByUUID(pet.UUID, true)
     if not fresh then
         return false, nil, "pet missing from fresh inventory"
     end
@@ -1763,6 +1911,158 @@ local function listingToPseudoPet(l)
     }
 end
 
+State.WebhookPost = function(payload, route)
+    if not CFG.Webhook or CFG.Webhook.Enabled ~= true then return false end
+    local url = tostring(CFG.Webhook.Url or "")
+    if route == "snipe" then
+        url = tostring(CFG.Webhook.SnipeUrl or CFG.Webhook.Url or "")
+    elseif route == "sold" then
+        url = tostring(CFG.Webhook.SoldUrl or CFG.Webhook.Url or "")
+    end
+    if url == "" then return false end
+
+    table.insert(State.WebhookQueue, {Payload = payload, Url = url})
+    if State.WebhookBusy then return true end
+    State.WebhookBusy = true
+
+    task.spawn(function()
+        while #State.WebhookQueue > 0 and State.Running do
+            local item = table.remove(State.WebhookQueue, 1)
+            local payload = type(item) == "table" and item.Payload or item
+            local sendUrl = type(item) == "table" and item.Url or url
+            local ok, body = pcall(function()
+                return HttpService:JSONEncode(payload)
+            end)
+            if ok then
+                local req = (type(request) == "function" and request)
+                    or (type(http_request) == "function" and http_request)
+                    or (syn and type(syn.request) == "function" and syn.request)
+                    or (http and type(http.request) == "function" and http.request)
+                if req then
+                    local sent, err = pcall(function()
+                        return req({
+                            Url = sendUrl,
+                            Method = "POST",
+                            Headers = {["Content-Type"] = "application/json"},
+                            Body = body,
+                        })
+                    end)
+                    if not sent then log("Webhook failed", tostring(err)) end
+                else
+                    local sent, err = pcall(function()
+                        return HttpService:PostAsync(sendUrl, body, Enum.HttpContentType.ApplicationJson)
+                    end)
+                    if not sent then log("Webhook failed", tostring(err)) end
+                end
+            else
+                log("Webhook JSON failed", tostring(body))
+            end
+            task.wait(0.4)
+        end
+        State.WebhookBusy = false
+    end)
+
+    return true
+end
+
+State.WebhookEmbedForListing = function(kind, l, extra)
+    local pet = listingToPseudoPet(l or {})
+    extra = type(extra) == "table" and extra or {}
+
+    local titlePrefix = kind == "snipe" and "SNIPED" or "SOLD"
+    local color = kind == "snipe" and 16711910 or 16766720
+    local priceLabel = kind == "snipe" and "Bought For" or "Sold For"
+    local userLabel = kind == "snipe" and "Seller" or "By User"
+    local userValue = tostring(extra.User or l.OwnerName or "")
+    if kind == "sold" then userValue = tostring(extra.User or "") end
+    local displayKg = tonumber(pet.VisualWeight or pet.BaseWeight) or 0
+    local fallbackIconUrl = "https://www.roblox.com/asset-thumbnail/image?assetId=" .. tostring(game.PlaceId) .. "&width=150&height=150&format=png"
+    local iconUrl = tostring(CFG.Webhook.IconUrl or "")
+    if iconUrl == "" then iconUrl = fallbackIconUrl end
+    local fields = {}
+
+    if userValue ~= "" and userValue ~= "Unknown" then
+        table.insert(fields, {name = userLabel, value = userValue, inline = false})
+    end
+    table.insert(fields, {name = priceLabel, value = "**" .. commaNumber(l.Price) .. " Tokens**", inline = true})
+    table.insert(fields, {name = "Mutation", value = tostring(pet.Mutation or "Normal"), inline = true})
+    table.insert(fields, {name = "BaseWeight", value = fmtKg(pet.BaseWeight), inline = true})
+    table.insert(fields, {name = "Age", value = tostring(pet.Age or "?"), inline = true})
+    table.insert(fields, {name = "Token Balance", value = commaNumber(getTokenBalance()) .. " Tokens", inline = true})
+    table.insert(fields, {name = "Pet Inventory", value = tostring(#getOwnPetsFromData()) .. " pets", inline = true})
+    table.insert(fields, {name = "Server", value = "```" .. tostring(game.PlaceId) .. ":" .. tostring(game.JobId) .. "```", inline = false})
+
+    return {
+        username = "NOMO Market",
+        avatar_url = iconUrl,
+        embeds = {{
+            title = string.format("%s - %s [Age %s] [%.2f KG]", titlePrefix, tostring(pet.Name or "?"), tostring(pet.Age or "?"), displayKg),
+            color = color,
+            author = {name = "NOMO Market", icon_url = iconUrl},
+            fields = fields,
+            thumbnail = {url = iconUrl},
+            footer = {text = "NOMO Market - " .. VERSION},
+            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        }},
+    }
+end
+
+State.SendSoldWebhook = function(l)
+    if not CFG.Webhook or CFG.Webhook.Enabled ~= true or CFG.Webhook.PetSold ~= true then return false end
+    return State.WebhookPost(State.WebhookEmbedForListing("sold", l, {}), "sold")
+end
+
+State.SendSnipeWebhook = function(match)
+    if not CFG.Webhook or CFG.Webhook.Enabled ~= true or CFG.Webhook.SuccessfulSnipe ~= true then return false end
+    if type(match) ~= "table" or type(match.Listing) ~= "table" then return false end
+    return State.WebhookPost(State.WebhookEmbedForListing("snipe", match.Listing, {User = match.Listing.OwnerName}), "snipe")
+end
+
+State.TrackSoldListings = function(myListings)
+    local now = os.clock()
+    local current = {}
+    for _, l in ipairs(myListings or {}) do
+        local id = tostring(l.ListingUUID or "")
+        if id ~= "" then current[id] = l end
+    end
+
+    for id, expires in pairs(State.ManualRemoveUUIDs or {}) do
+        if tonumber(expires) and expires < now then
+            State.ManualRemoveUUIDs[id] = nil
+        end
+    end
+
+    if State.KnownMyListingsReady then
+        for id, oldListing in pairs(State.KnownMyListings or {}) do
+            if not current[id] and not State.ManualRemoveUUIDs[id] then
+                local missing = State.MissingMyListings[id]
+                if missing and now - (tonumber(missing.At) or now) >= 8 then
+                    State.SendSoldWebhook(missing.Listing or oldListing)
+                    State.MissingMyListings[id] = nil
+                    log("Webhook sold detected", tostring(oldListing.PetType), tostring(oldListing.Price), id)
+                else
+                    State.MissingMyListings[id] = {At = now, Listing = oldListing}
+                end
+            end
+        end
+    end
+
+    for id in pairs(current) do
+        State.MissingMyListings[id] = nil
+    end
+
+    for id, missing in pairs(State.MissingMyListings or {}) do
+        if tonumber(missing.At) and now - missing.At > 45 then
+            State.MissingMyListings[id] = nil
+        elseif missing.Listing and not current[id] then
+            current[id] = missing.Listing
+        end
+    end
+
+    State.KnownMyListings = current
+    State.KnownMyListingsReady = true
+end
+
 local function findFilterForListing(l, filters, requirePrice)
     local pseudo = listingToPseudoPet(l)
     local f = findFilter(pseudo, filters)
@@ -1779,11 +2079,11 @@ local function findFilterForListing(l, filters, requirePrice)
     return f, pseudo, nil
 end
 
-local function countMyGoodListingsByFilter(filters)
+local function countMyGoodListingsByFilter(filters, myListings)
     filters = filters or getFilters()
     local counts = {}
 
-    for _, l in ipairs(getMyListings()) do
+    for _, l in ipairs(myListings or getMyListings()) do
         local f = findFilterForListing(l, filters, true)
         if f then
             local key = filterKey(f)
@@ -1798,7 +2098,9 @@ local function buildCandidates()
     local pets = getOwnPetsFromData()
     local filters = getFilters()
     local counts, chosenName, chosenFilter = {}, {}, {}
-    local alreadyListedByFilter = countMyGoodListingsByFilter(filters)
+    local myListings = getMyListings()
+    local currentBoothListings = #myListings
+    local alreadyListedByFilter = countMyGoodListingsByFilter(filters, myListings)
     for _, p in ipairs(pets) do counts[p.NameNorm] = (counts[p.NameNorm] or 0) + 1 end
 
     local candidates, skipped = {}, {}
@@ -1820,7 +2122,6 @@ local function buildCandidates()
 
         if not reason then
             local boothCap = tonumber(CFG.Seller.BoothCap) or 50
-            local currentBoothListings = #getMyListings()
             local remainingBoothSlots = math.max(0, boothCap - currentBoothListings)
 
             local key = filterKey(f)
@@ -1955,6 +2256,7 @@ local function listPet(pet, price, boothReady, f)
         return CreateListing:InvokeServer("Pet", petUUID, clampPrice(price))
     end)
     if ok and result ~= false then
+        State.InvalidateListingCache()
         State.LastListAt = os.clock()
         State.ListedThisSession = (State.ListedThisSession or 0) + 1
         table.insert(State.ListTimes, os.clock())
@@ -2469,7 +2771,13 @@ local function snipeDryRun(force)
     State.LastSniperMatches = filtered
     State.LastSniperRawCount = #raw
 
-    log("Sniper dry-run matches", #filtered, "shown from raw", #raw)
+    local scanSig = tostring(#filtered) .. "/" .. tostring(#raw)
+    local now = os.clock()
+    if State.LastSniperScanLogSig ~= scanSig or (now - (State.LastSniperScanLogAt or 0)) >= 15 then
+        State.LastSniperScanLogSig = scanSig
+        State.LastSniperScanLogAt = now
+        log("Sniper dry-run matches", #filtered, "shown from raw", #raw)
+    end
     return filtered
 end
 
@@ -2485,7 +2793,7 @@ local function canBuyNow(price)
 
     price = tonumber(price) or 0
     local minAfter = tonumber(CFG.Sniper.MinTokensAfterBuy) or 0
-    if minAfter > 0 and (getTokenBalance() - price) < minAfter then
+    if minAfter > 0 and (getTokenBalance(true) - price) < minAfter then
         return false, "token reserve"
     end
 
@@ -2631,6 +2939,10 @@ local function buyFirstMatch()
         State.LastBuyAt = os.clock()
         table.insert(State.BuyTimes, os.clock())
         log("Buy sent", l.PetType, l.Price, l.ListingUUID, tostring(a), tostring(b))
+        if a ~= false then
+            State.InvalidateListingCache()
+            State.SendSnipeWebhook(m)
+        end
         return a, b
     end
     log("Buy failed", tostring(a))
@@ -2664,6 +2976,15 @@ local T = {
 }
 
 local function make(class, props, parent)
+	if CFG and CFG.Performance and CFG.Performance.NoUI and State and State.NoopWidget then
+		return State.NoopWidget()
+	end
+	if parent ~= nil and typeof(parent) ~= "Instance" then
+		if State and State.NoopWidget then
+			return State.NoopWidget()
+		end
+		parent = nil
+	end
 	local o = Instance.new(class)
 	for k, v in pairs(props) do o[k] = v end
 	o.Parent = parent
@@ -3498,7 +3819,125 @@ end
 --// Uses private NOMO Hub UI V3.2
 --//====================================================--
 
-local win = Library:CreateWindow({
+State.NoopWidget = function(default)
+    local obj = {}
+    setmetatable(obj, {
+        __index = function(_, key)
+            if key == "Get" then
+                return function() return default or "" end
+            elseif key == "Set" or key == "Add" or key == "Clear" or key == "Refresh" then
+                return function() end
+            elseif key == "GetChildren" then
+                return function() return {} end
+            elseif key == "IsA" then
+                return function() return false end
+            elseif key == "Destroy" then
+                return function() end
+            elseif key == "Activated" or key == "MouseButton1Click" or key == "FocusLost" or key == "InputBegan" or key == "InputChanged" or key == "Changed" then
+                return {Connect = function() end}
+            end
+            return function() return State.NoopWidget(default) end
+        end,
+    })
+    return obj
+end
+
+State.ApplyPerformanceMode = function()
+    if CFG.Performance.FpsLimitSet and type(setfpscap) == "function" then
+        pcall(setfpscap, CFG.Performance.FpsLimit)
+    end
+
+    if CFG.Performance.FullPerformanceMode then
+        pcall(function()
+            game:GetService("RunService"):Set3dRenderingEnabled(false)
+        end)
+        pcall(function()
+            local lighting = game:GetService("Lighting")
+            lighting.GlobalShadows = false
+            lighting.FogEnd = 100000
+        end)
+    end
+
+    if CFG.Performance.RemoveWeatherVisuals or CFG.Performance.RemovePlants then
+        pcall(function()
+            for _, inst in ipairs(workspace:GetDescendants()) do
+                local className = inst.ClassName
+                local name = tostring(inst.Name or ""):lower()
+                if CFG.Performance.RemoveWeatherVisuals and (className == "ParticleEmitter" or className == "Trail" or className == "Beam" or className == "Smoke" or className == "Fire" or className == "Sparkles") then
+                    inst.Enabled = false
+                elseif CFG.Performance.RemovePlants and (name:find("plant", 1, true) or name:find("fruit", 1, true)) and inst:IsA("BasePart") then
+                    inst.LocalTransparencyModifier = 1
+                    inst.CanCollide = false
+                elseif CFG.Performance.FullPerformanceMode and (className == "Decal" or className == "Texture") then
+                    inst.Transparency = 1
+                end
+            end
+        end)
+    end
+end
+
+State.CreateHeadlessWindow = function()
+    State.ApplyPerformanceMode()
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "NomoHeadless"
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+
+    local bg = Instance.new("Frame")
+    bg.Size = UDim2.fromScale(1, 1)
+    bg.BackgroundColor3 = Color3.new(0, 0, 0)
+    bg.BorderSizePixel = 0
+    bg.Parent = gui
+
+    local panel = Instance.new("TextLabel")
+    panel.AnchorPoint = Vector2.new(0.5, 0)
+    panel.Position = UDim2.new(0.5, 0, 0, 26)
+    panel.Size = UDim2.fromOffset(520, 220)
+    panel.BackgroundTransparency = 1
+    panel.TextColor3 = Color3.fromRGB(235, 241, 255)
+    panel.Font = Enum.Font.GothamBold
+    panel.TextSize = 24
+    panel.TextWrapped = true
+    panel.TextYAlignment = Enum.TextYAlignment.Top
+    panel.Text = "NOMO Market loading..."
+    panel.Parent = gui
+    State.PerfStatsLabel = panel
+
+    local section = State.NoopWidget()
+    local page = State.NoopWidget()
+    page.AddSection = function() return section end
+    page.AddSectionInRow = function() return section end
+
+    return {
+        Gui = gui,
+        Pills = {Status = State.NoopWidget(), Booth = State.NoopWidget(), Balance = State.NoopWidget()},
+        CreatePage = function() return page end,
+        SelectPage = function() end,
+    }
+end
+
+State.UpdatePerfStats = function()
+    if not State.PerfStatsLabel then return end
+    local session = math.floor(os.clock())
+    local mins = math.floor(session / 60)
+    local secs = session % 60
+    State.PerfStatsLabel.Text = table.concat({
+        "NOMO MARKET",
+        "Mode: PERFORMANCE / NO UI",
+        "Booth: " .. tostring(State.LastBooth and State.LastBooth.Id or "?"),
+        "Tokens: " .. commaNumber(getTokenBalance()),
+        "Listed Session: " .. tostring(State.ListedThisSession or 0),
+        "Listings Cached: " .. tostring(type(State.ListingsCache) == "table" and #State.ListingsCache or 0),
+        "Sniper Matches: " .. tostring(type(State.LastSniperMatches) == "table" and #State.LastSniperMatches or 0),
+        string.format("Session: %dm %02ds", mins, secs),
+        "Version: " .. VERSION,
+    }, "\n")
+end
+
+local win = (CFG.Performance.NoUI and State.CreateHeadlessWindow() or Library:CreateWindow({
     TitleAccent = "NOMO",
     Title = "MARKET",
     Subtitle = "SELLER LITE",
@@ -3512,7 +3951,11 @@ local win = Library:CreateWindow({
     -- Optional later:
     -- MiniImage = "rbxassetid://YOUR_IMAGE_ID",
     -- MiniImage = "Nomo/blue_rose.png",
-})
+}))
+
+if not CFG.Performance.NoUI then
+    State.ApplyPerformanceMode()
+end
 
 win.Pills.Status:Set("Ready", T.Green)
 win.Pills.Booth:Set("Data", T.Accent)
@@ -3536,6 +3979,7 @@ local function refreshPills()
     local boothText = best and best.Status or "No Booth"
     win.Pills.Booth:Set(boothText, boothText == "MINE" and T.Green or (boothText == "FREE" and T.Yellow or T.Sub))
     win.Pills.Balance:Set(commaNumber(getTokenBalance()), T.Green)
+    State.UpdatePerfStats()
 end
 
 
@@ -4302,6 +4746,7 @@ end
 
 function refreshMyListingsLog()
     local my = getMyListings()
+    State.TrackSoldListings(my)
     clearListingRows()
 
     make("TextLabel", {
@@ -4765,6 +5210,91 @@ sniperCtrl:AddButton("BUY FIRST (blocked if DryRun)", function()
     State.RefreshSniperLog()
 end, "outline")
 
+--// WEBHOOK PAGE
+State.WebhookPage = win:CreatePage("Webhook")
+State.WebhookSec = State.WebhookPage:AddSection("Webhook Configuration")
+State.WebhookRouteSec = State.WebhookPage:AddSection("Routes")
+
+State.WebhookSec:AddToggle("Enable Webhook", CFG.Webhook.Enabled == true, function(v)
+    CFG.Webhook.Enabled = v
+    State.SaveRuntimeSettings()
+    log("Webhook", tostring(v))
+end)
+
+State.WebhookSec:AddToggle("Successful Snipes", CFG.Webhook.SuccessfulSnipe ~= false, function(v)
+    CFG.Webhook.SuccessfulSnipe = v
+    State.SaveRuntimeSettings()
+end)
+
+State.WebhookSec:AddToggle("Booth Sales", CFG.Webhook.PetSold ~= false, function(v)
+    CFG.Webhook.PetSold = v
+    State.SaveRuntimeSettings()
+end)
+
+State.SnipeWebhookUrlInput = State.WebhookRouteSec:AddInput("Snipe Webhook URL", tostring(CFG.Webhook.SnipeUrl or CFG.Webhook.Url or ""), function(v)
+    CFG.Webhook.SnipeUrl = tostring(v or "")
+    State.SaveRuntimeSettings()
+end)
+
+State.SoldWebhookUrlInput = State.WebhookRouteSec:AddInput("Booth Sale Webhook URL", tostring(CFG.Webhook.SoldUrl or CFG.Webhook.Url or ""), function(v)
+    CFG.Webhook.SoldUrl = tostring(v or "")
+    State.SaveRuntimeSettings()
+end)
+
+State.WebhookIconUrlInput = State.WebhookRouteSec:AddInput("Icon URL", tostring(CFG.Webhook.IconUrl or ""), function(v)
+    CFG.Webhook.IconUrl = tostring(v or "")
+    State.SaveRuntimeSettings()
+end)
+
+State.WebhookRouteSec:AddButton("Test Snipe Webhook", function()
+    CFG.Webhook.SnipeUrl = State.SnipeWebhookUrlInput:Get()
+    CFG.Webhook.SoldUrl = State.SoldWebhookUrlInput:Get()
+    CFG.Webhook.IconUrl = State.WebhookIconUrlInput:Get()
+    State.SaveRuntimeSettings()
+    local wasEnabled = CFG.Webhook.Enabled
+    CFG.Webhook.Enabled = true
+    local sample = {
+        PetType = "Golden Mimic Octopus",
+        Price = 6,
+        OwnerName = "sample_seller",
+        ListingUUID = "sample-snipe",
+        ItemId = "sample-pet",
+        Item = {
+            PetType = "Golden Mimic Octopus",
+            BaseWeight = 1.64,
+            PetData = {Level = 19},
+            Mutation = "Golden",
+        },
+    }
+    local sent = State.WebhookPost(State.WebhookEmbedForListing("snipe", sample, {User = "sample_seller"}), "snipe")
+    CFG.Webhook.Enabled = wasEnabled
+    log("Snipe webhook test sent", tostring(sent))
+end, "outline")
+
+State.WebhookRouteSec:AddButton("Test Sale Webhook", function()
+    CFG.Webhook.SnipeUrl = State.SnipeWebhookUrlInput:Get()
+    CFG.Webhook.SoldUrl = State.SoldWebhookUrlInput:Get()
+    CFG.Webhook.IconUrl = State.WebhookIconUrlInput:Get()
+    State.SaveRuntimeSettings()
+    local wasEnabled = CFG.Webhook.Enabled
+    CFG.Webhook.Enabled = true
+    local sample = {
+        PetType = "Mimic Octopus",
+        Price = 26,
+        ListingUUID = "sample-sale",
+        ItemId = "sample-pet",
+        Item = {
+            PetType = "Mimic Octopus",
+            BaseWeight = 1.88,
+            PetData = {Level = 1},
+            Mutation = "Normal",
+        },
+    }
+    local sent = State.WebhookPost(State.WebhookEmbedForListing("sold", sample, {User = "sample_buyer"}), "sold")
+    CFG.Webhook.Enabled = wasEnabled
+    log("Sale webhook test sent", tostring(sent))
+end, "outline")
+
 --// SETTINGS PAGE
 State.SettingsPage = win:CreatePage("Settings")
 State.SettingSec = State.SettingsPage:AddSection("Settings")
@@ -4977,6 +5507,14 @@ task.spawn(function()
                 snipeDryRun()
             end)
             if not ok then log("Sniper scan error", tostring(err)) end
+        end
+
+        if CFG.Webhook.Enabled and CFG.Webhook.PetSold and now - (State.LastSoldCheckAt or 0) >= 10 then
+            State.LastSoldCheckAt = now
+            local ok, err = pcall(function()
+                State.TrackSoldListings(getMyListings(true))
+            end)
+            if not ok then log("Sold webhook check error", tostring(err)) end
         end
 
         refreshPills()
