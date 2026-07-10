@@ -2023,14 +2023,14 @@ State.WebhookEmbedForListing = function(kind, l, extra)
     local pet = listingToPseudoPet(l or {})
     extra = type(extra) == "table" and extra or {}
 
-    local titlePrefix = kind == "snipe" and "SNIPED" or "SOLD"
-    local color = kind == "snipe" and 16711910 or 16766720
+    local titlePrefix = kind == "snipe" and "SNIPED" or "BOOTH SALE"
+    local color = kind == "snipe" and 0xEB44D5 or 0xFFB800
     local priceLabel = kind == "snipe" and "Bought For" or "Sold For"
     local userLabel = kind == "snipe" and "Seller" or "By User"
     local userValue = tostring(extra.User or l.OwnerName or "")
     if kind == "sold" then userValue = tostring(extra.User or "") end
     local displayKg = tonumber(pet.VisualWeight or pet.BaseWeight) or 0
-    local fallbackIconUrl = "https://www.roblox.com/asset-thumbnail/image?assetId=" .. tostring(game.PlaceId) .. "&width=150&height=150&format=png"
+    local fallbackIconUrl = "https://www.roblox.com/headshot-thumbnail/image?userId=" .. tostring(LocalPlayer.UserId) .. "&width=150&height=150&format=png"
     local iconUrl = tostring(CFG.Webhook.IconUrl or "")
     if iconUrl == "" then iconUrl = fallbackIconUrl end
     local fields = {}
@@ -2039,9 +2039,11 @@ State.WebhookEmbedForListing = function(kind, l, extra)
         table.insert(fields, {name = userLabel, value = userValue, inline = false})
     end
     table.insert(fields, {name = priceLabel, value = "**" .. commaNumber(l.Price) .. " Tokens**", inline = true})
+    table.insert(fields, {name = "Pet", value = tostring(pet.Name or "?"), inline = true})
     table.insert(fields, {name = "Mutation", value = tostring(pet.Mutation or "Normal"), inline = true})
-    table.insert(fields, {name = "BaseWeight", value = fmtKg(pet.BaseWeight), inline = true})
     table.insert(fields, {name = "Age", value = tostring(pet.Age or "?"), inline = true})
+    table.insert(fields, {name = "BaseWeight", value = fmtKg(pet.BaseWeight), inline = true})
+    table.insert(fields, {name = "KG", value = fmtKg(displayKg), inline = true})
     table.insert(fields, {name = "Token Balance", value = commaNumber(getTokenBalance()) .. " Tokens", inline = true})
     table.insert(fields, {name = "Pet Inventory", value = tostring(#getOwnPetsFromData()) .. " pets", inline = true})
     table.insert(fields, {name = "Server", value = "```" .. tostring(game.PlaceId) .. ":" .. tostring(game.JobId) .. "```", inline = false})
@@ -2051,6 +2053,7 @@ State.WebhookEmbedForListing = function(kind, l, extra)
         avatar_url = iconUrl,
         embeds = {{
             title = string.format("%s - %s [Age %s] [%.2f KG]", titlePrefix, tostring(pet.Name or "?"), tostring(pet.Age or "?"), displayKg),
+            description = kind == "snipe" and "Successful market snipe detected." or "A booth listing is no longer active and was treated as sold.",
             color = color,
             author = {name = "NOMO Market", icon_url = iconUrl},
             fields = fields,
