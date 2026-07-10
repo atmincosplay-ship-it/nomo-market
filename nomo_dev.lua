@@ -3945,8 +3945,8 @@ local win = (CFG.Performance.NoUI and State.CreateHeadlessWindow() or Library:Cr
     VersionText = VERSION,
     MiniText = "NOMO",
 
-    -- top, left-of-center: above Tokens / Booth
-    MiniPosition = UDim2.new(0.5, -160, 0, 2),
+    -- left side: avoids the game's default top-center UI.
+    MiniPosition = UDim2.new(0, 12, 0, 120),
 
     -- Optional later:
     -- MiniImage = "rbxassetid://YOUR_IMAGE_ID",
