@@ -4271,9 +4271,9 @@ State.DashLog = State.DashEventsSec:AddLog(78)
 
 --// BOOTH PAGE
 local boothPage = win:CreatePage("Booth")
-local boothRow = boothPage:AddRow()
-local boothCtrl = boothPage:AddSectionInRow(boothRow, "Booth Automation", 0.48)
-local boothDataSec = boothPage:AddSectionInRow(boothRow, "Booth Data", 0.52)
+local boothCtrl = boothPage:AddSection("Booth Control")
+local boothStatusSec = boothPage:AddSection("Booth Status")
+local boothDataSec = boothPage:AddSection("Booth Data")
 
 boothCtrl:AddToggle("Auto Claim Booth", CFG.Booth.AutoClaim, function(v)
     CFG.Booth.AutoClaim = v
@@ -4304,7 +4304,12 @@ local boothClaimInterval = boothCtrl:AddInput("Claim Interval", tostring(CFG.Boo
     CFG.Booth.ClaimInterval = toNumber(v) or CFG.Booth.ClaimInterval or 10
 end)
 
-local boothLog = boothDataSec:AddLog(315)
+State.BoothStatusLabel = boothStatusSec:AddLabel("Booth: checking...", T.Sub)
+State.BoothListingLabel = boothStatusSec:AddLabel("Listings: ...", T.Text)
+State.BoothSkinLabel = boothStatusSec:AddLabel("Skin: " .. tostring(CFG.Booth.BoothSkin or "Default"), T.Text)
+State.BoothClaimLabel = boothStatusSec:AddLabel("Claim: every " .. tostring(CFG.Booth.ClaimInterval or 10) .. "s", T.Sub)
+
+local boothLog = boothDataSec:AddLog(125)
 
 local function refreshBoothLog()
     refreshPills()
@@ -4314,18 +4319,22 @@ local function refreshBoothLog()
 
     local items = getBoothSnapshot()
     local target, status = findBestBooth()
+    local myListings = getMyListings()
+    if State.BoothStatusLabel then
+        State.BoothStatusLabel:Set("Booth: " .. tostring(status) .. " | " .. tostring(target and tostring(target.Id):sub(1, 8) or "none"), status == "MINE" and T.Green or (status == "FREE" and T.Yellow or T.Sub))
+        State.BoothListingLabel:Set("Listings: " .. tostring(#myListings) .. "/50", T.Text)
+        State.BoothSkinLabel:Set("Skin: " .. tostring(CFG.Booth.BoothSkin or "Default"), T.Text)
+        State.BoothClaimLabel:Set("Claim: every " .. tostring(CFG.Booth.ClaimInterval or 10) .. "s | max d" .. tostring(CFG.Booth.MaxMiddleDistance), T.Sub)
+    end
     local lines = {
         "Booths: " .. tostring(#items),
         "Best: " .. tostring(target and (target.Id:sub(1, 8) .. "...") or "None") .. " / " .. tostring(status),
-        "MaxDist: " .. tostring(CFG.Booth.MaxMiddleDistance),
-        "Skin: " .. tostring(CFG.Booth.BoothSkin),
-        "AutoClaim every: " .. tostring(CFG.Booth.ClaimInterval) .. "s",
         "------------------------------",
     }
 
     for i, item in ipairs(items) do
-        if i > 16 then
-            table.insert(lines, "... +" .. tostring(#items - 16) .. " more")
+        if i > 8 then
+            table.insert(lines, "... +" .. tostring(#items - 8) .. " more")
             break
         end
 
@@ -4370,6 +4379,13 @@ boothCtrl:AddButton("Claim Best Free", function()
     claimBestFreeBooth()
     refreshBoothLog()
 end)
+boothCtrl:AddButton("Smart Rebuild Booth", function()
+    task.spawn(function()
+        smartRebuildBooth()
+        task.wait(0.6)
+        refreshBoothLog()
+    end)
+end, "outline")
 boothCtrl:AddButton("Equip Skin", function()
     CFG.Booth.BoothSkin = trim(boothSkin:Get()) ~= "" and trim(boothSkin:Get()) or "Default"
     equipSkin()
