@@ -5133,12 +5133,17 @@ end, "outline")
 
 --// LISTINGS PAGE
 local listingsPage = win:CreatePage("Listings")
+State.ListingActionRow = listingsPage:AddRow()
+State.ListingManageSec = listingsPage:AddSectionInRow(State.ListingActionRow, "My Listing", 0.25)
+State.ListingRefreshSec = listingsPage:AddSectionInRow(State.ListingActionRow, "Refresh", 0.25)
+State.ListingRemoveSec = listingsPage:AddSectionInRow(State.ListingActionRow, "Remove All", 0.25)
+State.ListingMarketSec = listingsPage:AddSectionInRow(State.ListingActionRow, "Market", 0.25)
 local listingRow = listingsPage:AddRow()
-local myListingSec = listingsPage:AddSectionInRow(listingRow, "My Listings", 1)
-local allListingSec = listingsPage:AddSection("Market Listings Sample")
+local myListingSec = listingsPage:AddSectionInRow(listingRow, "My Listings", 0.55)
+local allListingSec = listingsPage:AddSectionInRow(listingRow, "Market Sample", 0.45)
 
 local myListingList = make("ScrollingFrame", {
-    Size = UDim2.new(1, 0, 0, 280),
+    Size = UDim2.new(1, 0, 0, 156),
     BackgroundColor3 = T.BG,
     BorderSizePixel = 0,
     ScrollBarThickness = 4,
@@ -5148,7 +5153,7 @@ local myListingList = make("ScrollingFrame", {
 }, myListingSec.Frame)
 corner(myListingList, 8); stroke(myListingList); pad(myListingList, 6, 6, 6, 6); vlist(myListingList, 4)
 
-local marketLog = allListingSec:AddLog(125)
+local marketLog = allListingSec:AddLog(156)
 
 local function clearListingRows()
     for _, child in ipairs(myListingList:GetChildren()) do
@@ -5400,16 +5405,22 @@ local function refreshMarketSample()
     addLines(marketLog, lines)
 end
 
-myListingSec:AddButton("Refresh My Listings", refreshMyListingsLog)
-myListingSec:AddButton("REMOVE ALL MY LISTINGS", function()
+State.ListingManageSec:AddButton("Manage", function()
+    if State.OpenMyListingsManager then
+        State.OpenMyListingsManager()
+    else
+        refreshMyListingsLog()
+    end
+end)
+State.ListingRefreshSec:AddButton("Refresh", refreshMyListingsLog, "outline")
+State.ListingRemoveSec:AddButton("Remove All", function()
     task.spawn(function()
         removeAllMyListings(CFG.Listings.RemoveAllMax or 50)
         task.wait(0.6)
         refreshMyListingsLog()
     end)
 end, "outline")
-
-allListingSec:AddButton("Refresh Market Sample", refreshMarketSample)
+State.ListingMarketSec:AddButton("Market Scan", refreshMarketSample, "outline")
 
 --// SNIPER PAGE
 local sniperPage = win:CreatePage("Sniper")
