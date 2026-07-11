@@ -61,6 +61,7 @@ CFG.Webhook = CFG.Webhook or {
     SnipeUrl = tostring(getgenv().nomo_sniper_webhook or getgenv().NOMO_SNIPER_WEBHOOK or ""),
     SoldUrl = tostring(getgenv().nomo_market_webhook or getgenv().NOMO_MARKET_WEBHOOK or ""),
     IconUrl = "",
+    DeviceName = tostring(getgenv().nomo_device_name or getgenv().NOMO_DEVICE_NAME or ""),
     PetSold = true,
     SuccessfulSnipe = true,
 }
@@ -604,9 +605,11 @@ State.LoadRuntimeSettings = function()
         if type(data.Webhook.SnipeUrl) == "string" then CFG.Webhook.SnipeUrl = data.Webhook.SnipeUrl end
         if type(data.Webhook.SoldUrl) == "string" then CFG.Webhook.SoldUrl = data.Webhook.SoldUrl end
         if type(data.Webhook.IconUrl) == "string" then CFG.Webhook.IconUrl = data.Webhook.IconUrl end
+        if type(data.Webhook.DeviceName) == "string" then CFG.Webhook.DeviceName = data.Webhook.DeviceName end
         if data.Webhook.PetSold ~= nil then CFG.Webhook.PetSold = data.Webhook.PetSold == true end
         if data.Webhook.SuccessfulSnipe ~= nil then CFG.Webhook.SuccessfulSnipe = data.Webhook.SuccessfulSnipe == true end
     end
+    if tostring(CFG.Webhook.DeviceName or "") == "" then CFG.Webhook.DeviceName = tostring(getgenv().nomo_device_name or getgenv().NOMO_DEVICE_NAME or "") end
     if tostring(CFG.Webhook.SnipeUrl or "") == "" then CFG.Webhook.SnipeUrl = tostring(CFG.Webhook.Url or "") end
     if tostring(CFG.Webhook.SoldUrl or "") == "" then CFG.Webhook.SoldUrl = tostring(CFG.Webhook.Url or "") end
     if CFG.Seller.AutoList then
@@ -638,6 +641,7 @@ State.SaveRuntimeSettings = function()
             SnipeUrl = tostring(CFG.Webhook.SnipeUrl or ""),
             SoldUrl = tostring(CFG.Webhook.SoldUrl or ""),
             IconUrl = tostring(CFG.Webhook.IconUrl or ""),
+            DeviceName = tostring(CFG.Webhook.DeviceName or ""),
             PetSold = CFG.Webhook.PetSold == true,
             SuccessfulSnipe = CFG.Webhook.SuccessfulSnipe == true,
         },
@@ -2028,9 +2032,11 @@ State.WebhookEmbedForListing = function(kind, l, extra)
     local titlePrefix = kind == "snipe" and "⚡ SNIPED" or "💰 BOOTH SALE"
     local color = kind == "snipe" and 0xEB44D5 or 0xFFB800
     local priceLabel = kind == "snipe" and "🪙 Bought For" or "🪙 Sold For"
-    local userLabel = kind == "snipe" and "👤 Seller" or "👤 Buyer"
-    local userValue = tostring(extra.User or l.OwnerName or "")
-    if kind == "sold" then userValue = tostring(extra.User or "") end
+    local userLabel = kind == "snipe" and "👤 Seller" or "👤 By User"
+    local userValue = tostring(l.OwnerName or LocalPlayer.Name or "")
+    local buyerValue = kind == "sold" and tostring(extra.User or l.BuyerName or "") or ""
+    if kind == "snipe" then userValue = tostring(extra.User or l.OwnerName or "") end
+    local deviceName = tostring(extra.DeviceName or CFG.Webhook.DeviceName or getgenv().nomo_device_name or getgenv().NOMO_DEVICE_NAME or "")
     local displayKg = tonumber(pet.VisualWeight or pet.BaseWeight) or 0
     local fallbackIconUrl = "https://www.roblox.com/headshot-thumbnail/image?userId=" .. tostring(LocalPlayer.UserId) .. "&width=150&height=150&format=png"
     local iconUrl = tostring(CFG.Webhook.IconUrl or "")
@@ -2039,6 +2045,12 @@ State.WebhookEmbedForListing = function(kind, l, extra)
 
     if userValue ~= "" and userValue ~= "Unknown" then
         table.insert(fields, {name = userLabel, value = userValue, inline = false})
+    end
+    if kind == "sold" and buyerValue ~= "" and buyerValue ~= "Unknown" then
+        table.insert(fields, {name = "👤 Buyer", value = buyerValue, inline = true})
+    end
+    if deviceName ~= "" and deviceName ~= "Unknown" then
+        table.insert(fields, {name = "📱 Device", value = deviceName, inline = true})
     end
     table.insert(fields, {name = priceLabel, value = "**" .. commaNumber(l.Price) .. " Tokens**", inline = true})
     table.insert(fields, {name = "🐾 Pet", value = tostring(pet.Name or "?"), inline = true})
@@ -5376,10 +5388,16 @@ State.WebhookIconUrlInput = State.WebhookRouteSec:AddInput("Icon URL", tostring(
     State.SaveRuntimeSettings()
 end)
 
+State.WebhookDeviceNameInput = State.WebhookRouteSec:AddInput("Device Name", tostring(CFG.Webhook.DeviceName or ""), function(v)
+    CFG.Webhook.DeviceName = tostring(v or "")
+    State.SaveRuntimeSettings()
+end)
+
 State.WebhookRouteSec:AddButton("Test Snipe Webhook", function()
     CFG.Webhook.SnipeUrl = State.SnipeWebhookUrlInput:Get()
     CFG.Webhook.SoldUrl = State.SoldWebhookUrlInput:Get()
     CFG.Webhook.IconUrl = State.WebhookIconUrlInput:Get()
+    CFG.Webhook.DeviceName = State.WebhookDeviceNameInput:Get()
     State.SaveRuntimeSettings()
     local wasEnabled = CFG.Webhook.Enabled
     CFG.Webhook.Enabled = true
@@ -5405,6 +5423,7 @@ State.WebhookRouteSec:AddButton("Test Sale Webhook", function()
     CFG.Webhook.SnipeUrl = State.SnipeWebhookUrlInput:Get()
     CFG.Webhook.SoldUrl = State.SoldWebhookUrlInput:Get()
     CFG.Webhook.IconUrl = State.WebhookIconUrlInput:Get()
+    CFG.Webhook.DeviceName = State.WebhookDeviceNameInput:Get()
     State.SaveRuntimeSettings()
     local wasEnabled = CFG.Webhook.Enabled
     CFG.Webhook.Enabled = true
