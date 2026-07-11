@@ -3679,17 +3679,42 @@ function Library:CreateWindow(cfg)
 			function sec:AddInput(text, default, cb)
 				local row = baseRow(28)
 				rowLabel(row, text)
+				local rawValue = tostring(default or "")
+				local displayTransform, focused
 				local box = make("TextBox", {
 					Size = UDim2.fromOffset(130, 24), Position = UDim2.new(1, -130, 0.5, -12),
-					BackgroundColor3 = T.Card2, Text = tostring(default or ""), TextColor3 = T.Text,
+					BackgroundColor3 = T.Card2, Text = rawValue, TextColor3 = T.Text,
 					Font = Enum.Font.Gotham, TextSize = 12, ClearTextOnFocus = false, BorderSizePixel = 0,
 				}, row)
 				corner(box, 6); stroke(box); pad(box, 0, 0, 6, 6)
-				box.FocusLost:Connect(function() if cb then cb(box.Text) end end)
+				local function displayValue(v)
+					if displayTransform then return displayTransform(v) end
+					return tostring(v or "")
+				end
+				box.Focused:Connect(function()
+					focused = true
+				end)
+				box.FocusLost:Connect(function()
+					focused = false
+					if displayTransform and tostring(box.Text or "") == "" then
+						box.Text = displayValue(rawValue)
+						return
+					end
+					rawValue = tostring(box.Text or "")
+					if cb then cb(rawValue) end
+					box.Text = displayValue(rawValue)
+				end)
 				return {
-					Set = function(_, v) box.Text = tostring(v) end,
-					Get = function() return box.Text end,
+					Set = function(_, v)
+						rawValue = tostring(v or "")
+						box.Text = focused and rawValue or displayValue(rawValue)
+					end,
+					Get = function() return rawValue end,
 					SetClearOnFocus = function(_, v) box.ClearTextOnFocus = v == true end,
+					SetDisplayTransform = function(_, fn)
+						displayTransform = fn
+						box.Text = focused and rawValue or displayValue(rawValue)
+					end,
 				}
 			end
 
@@ -5885,23 +5910,33 @@ State.WebhookSec:AddToggle("Booth Sales", CFG.Webhook.PetSold ~= false, function
     State.SaveRuntimeSettings()
 end)
 
+State.WebhookMaskValue = function(v)
+    local s = tostring(v or "")
+    if s == "" then return "" end
+    if #s <= 18 then return s end
+    return "..." .. s:sub(-14)
+end
+
 State.SnipeWebhookUrlInput = State.WebhookRouteSec:AddInput("Snipe Webhook URL", tostring(CFG.Webhook.SnipeUrl or CFG.Webhook.Url or ""), function(v)
     CFG.Webhook.SnipeUrl = tostring(v or "")
     State.SaveRuntimeSettings()
 end)
 State.SnipeWebhookUrlInput:SetClearOnFocus(true)
+State.SnipeWebhookUrlInput:SetDisplayTransform(State.WebhookMaskValue)
 
 State.SoldWebhookUrlInput = State.WebhookRouteSec:AddInput("Booth Sale Webhook URL", tostring(CFG.Webhook.SoldUrl or CFG.Webhook.Url or ""), function(v)
     CFG.Webhook.SoldUrl = tostring(v or "")
     State.SaveRuntimeSettings()
 end)
 State.SoldWebhookUrlInput:SetClearOnFocus(true)
+State.SoldWebhookUrlInput:SetDisplayTransform(State.WebhookMaskValue)
 
 State.WebhookIconUrlInput = State.WebhookRouteSec:AddInput("Icon URL", tostring(CFG.Webhook.IconUrl or ""), function(v)
     CFG.Webhook.IconUrl = tostring(v or "")
     State.SaveRuntimeSettings()
 end)
 State.WebhookIconUrlInput:SetClearOnFocus(true)
+State.WebhookIconUrlInput:SetDisplayTransform(State.WebhookMaskValue)
 
 State.WebhookDeviceNameInput = State.WebhookRouteSec:AddInput("Device Name", tostring(CFG.Webhook.DeviceName or ""), function(v)
     CFG.Webhook.DeviceName = tostring(v or "")
