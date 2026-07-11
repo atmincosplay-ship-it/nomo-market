@@ -3341,34 +3341,67 @@ function Library:CreateWindow(cfg)
 	end
 
 	local clonePanel = make("Frame", {
-		Size = UDim2.fromOffset(240, 144),
-		Position = cfg.ClonePanelPosition or UDim2.new(0.5, -120, 0.5, -72),
+		Size = UDim2.fromOffset(260, 168),
+		Position = cfg.ClonePanelPosition or UDim2.new(0.5, -130, 0.5, -84),
 		BackgroundColor3 = T.Card,
 		BorderSizePixel = 0,
 		Visible = false,
 	}, gui)
-	corner(clonePanel, 8); stroke(clonePanel, T.Border); pad(clonePanel, 8)
+	corner(clonePanel, 10); stroke(clonePanel, T.Accent, 0); pad(clonePanel, 10)
+	make("UIGradient", {
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(8, 17, 31)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(5, 11, 22)),
+		}),
+		Rotation = 90,
+	}, clonePanel)
 	make("TextLabel", {
-		Size = UDim2.new(1, 0, 0, 18),
+		Size = UDim2.new(1, -22, 0, 20),
 		BackgroundTransparency = 1,
-		Text = "NOMO STATUS",
-		TextColor3 = T.Accent,
+		Text = "NOMO MARKET",
+		TextColor3 = T.Text,
 		Font = Enum.Font.GothamBold,
-		TextSize = 12,
+		TextSize = 13,
 		TextXAlignment = Enum.TextXAlignment.Left,
 	}, clonePanel)
-	local cloneText = make("TextLabel", {
-		Size = UDim2.new(1, 0, 1, -22),
-		Position = UDim2.fromOffset(0, 22),
+	local cloneClose = make("TextButton", {
+		Size = UDim2.fromOffset(20, 20),
+		Position = UDim2.new(1, -20, 0, 0),
 		BackgroundTransparency = 1,
+		Text = "-",
+		TextColor3 = T.Accent,
+		Font = Enum.Font.GothamBold,
+		TextSize = 16,
+		BorderSizePixel = 0,
+	}, clonePanel)
+	local cloneText = make("TextLabel", {
+		Size = UDim2.new(1, 0, 1, -44),
+		Position = UDim2.fromOffset(0, 28),
+		BackgroundTransparency = 1,
+		RichText = true,
 		Text = "Loading...",
 		TextColor3 = T.Text,
 		Font = Enum.Font.Code,
-		TextSize = 11,
+		TextSize = 12,
 		TextWrapped = true,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextYAlignment = Enum.TextYAlignment.Top,
 	}, clonePanel)
+	local cloneFooter = make("TextLabel", {
+		Size = UDim2.new(1, 0, 0, 16),
+		Position = UDim2.new(0, 0, 1, -16),
+		BackgroundTransparency = 1,
+		RichText = true,
+		Text = "",
+		TextColor3 = T.Sub,
+		Font = Enum.Font.Code,
+		TextSize = 10,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, clonePanel)
+	cloneClose.Activated:Connect(function()
+		clonePanel.Visible = false
+	end)
 
 	local function setMinimized(v)
 		main.Visible = not v
@@ -3506,7 +3539,7 @@ function Library:CreateWindow(cfg)
 		TextTruncate = Enum.TextTruncate.AtEnd,
 	}, runtimeFooter)
 
-	local window = {Pills = pills, SearchBox = search, CloneStatusText = cloneText, RuntimeFooterText = runtimeFooterText}
+	local window = {Pills = pills, SearchBox = search, CloneStatusText = cloneText, CloneFooterText = cloneFooter, RuntimeFooterText = runtimeFooterText}
 	local pages = {}
 
 	local function selectPage(name)
@@ -4225,13 +4258,30 @@ State.RefreshCloneStatus = function(forceInventory)
     end
     State.ClonePanelDirty = false
     State.LastClonePanelAt = os.clock()
-    win.CloneStatusText.Text = "Device: " .. device
-        .. "\nBooth: " .. boothText .. " | " .. tostring(#listings) .. "/50"
-        .. "\nPets: " .. tostring(State.CloneInventoryCount or 0)
-        .. "\nSeller: " .. seller .. " | listed " .. tostring(State.ListedThisSession or 0)
-        .. "\nSniper: " .. sniper .. " | sniped " .. tostring(State.SnipedThisSession or 0)
-        .. "\nWebhook: " .. webhook
-        .. "\nSession: " .. session
+    local function miniRow(label, value, color)
+        return ('<font color="#%s">%s</font>  |  <font color="#%s">%s</font>'):format(
+            T.Sub:ToHex(),
+            tostring(label),
+            (color or T.Text):ToHex(),
+            tostring(value)
+        )
+    end
+    win.CloneStatusText.Text = table.concat({
+        miniRow("Device", device, T.Text),
+        miniRow("Booth", boothText .. "  " .. tostring(#listings) .. "/50", boothText == "MINE" and T.Green or T.Sub),
+        miniRow("Pets", tostring(State.CloneInventoryCount or 0), T.Red),
+        miniRow("Seller", seller .. "  +" .. tostring(State.ListedThisSession or 0), CFG.Seller.AutoList and T.Green or T.Sub),
+        miniRow("Sniper", sniper .. "  +" .. tostring(State.SnipedThisSession or 0), CFG.Sniper.Enabled and T.Green or T.Sub),
+        miniRow("Webhook", webhook, CFG.Webhook.Enabled and T.Green or T.Sub),
+        miniRow("Session", session, T.Accent),
+    }, "\n")
+    if win.CloneFooterText then
+        win.CloneFooterText.Text = ('<font color="#%s">FPS:</font> --   |   <font color="#%s">RAM:</font> --   |   <font color="#%s">Ping:</font> --'):format(
+            T.Sub:ToHex(),
+            T.Sub:ToHex(),
+            T.Sub:ToHex()
+        )
+    end
 end
 
 State.RefreshDashboard = function()
