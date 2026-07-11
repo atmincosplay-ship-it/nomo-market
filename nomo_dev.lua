@@ -4287,10 +4287,14 @@ State.RefreshCloneStatus = function(forceInventory)
     end
     State.ClonePanelDirty = false
     State.LastClonePanelAt = os.clock()
+    local function miniPad(label)
+        label = tostring(label or "")
+        return label .. string.rep(" ", math.max(1, 9 - #label))
+    end
     local function miniRow(label, value, color)
-        return ('<font color="#%s">%s</font>  |  <font color="#%s">%s</font>'):format(
+        return ('<font color="#%s">%s</font><font color="#%s">%s</font>'):format(
             T.Sub:ToHex(),
-            tostring(label),
+            miniPad(label),
             (color or T.Text):ToHex(),
             tostring(value)
         )
@@ -4305,7 +4309,7 @@ State.RefreshCloneStatus = function(forceInventory)
         miniRow("Session", session, T.Accent),
     }, "\n")
     if win.CloneFooterText then
-        win.CloneFooterText.Text = ('<font color="#%s">FPS:</font> --   |   <font color="#%s">RAM:</font> --   |   <font color="#%s">Ping:</font> --'):format(
+        win.CloneFooterText.Text = ('<font color="#%s">FPS</font> --   |   <font color="#%s">RAM</font> --   |   <font color="#%s">Ping</font> --'):format(
             T.Sub:ToHex(),
             T.Sub:ToHex(),
             T.Sub:ToHex()
