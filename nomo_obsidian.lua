@@ -4407,37 +4407,42 @@ State.DashLog = State.DashEventsSec:AddLog(64)
 
 --// BOOTH PAGE
 local boothPage = win:CreatePage("Booth")
-local boothCtrl = boothPage:AddSection("Booth Control")
-local boothStatusSec = boothPage:AddSection("Booth Status")
-local boothDataSec = boothPage:AddSection("Booth Data")
+State.BoothControlRow = boothPage:AddRow()
+State.BoothAutoSec = boothPage:AddSectionInRow(State.BoothControlRow, "Auto Claim", 1 / 3)
+State.BoothReclaimSec = boothPage:AddSectionInRow(State.BoothControlRow, "Smart Reclaim", 1 / 3)
+State.BoothDistanceSec = boothPage:AddSectionInRow(State.BoothControlRow, "Distance", 1 / 3)
 
-boothCtrl:AddToggle("Auto Claim Booth", CFG.Booth.AutoClaim, function(v)
+State.BoothAutoSec:AddToggle("Enabled", CFG.Booth.AutoClaim, function(v)
     CFG.Booth.AutoClaim = v
     State.SaveRuntimeSettings()
     log("AutoClaim", tostring(v))
 end)
 
-boothCtrl:AddToggle("Smart Reclaim", CFG.Booth.SmartReclaim, function(v)
+State.BoothReclaimSec:AddToggle("Enabled", CFG.Booth.SmartReclaim, function(v)
     CFG.Booth.SmartReclaim = v
     State.SaveRuntimeSettings()
     log("SmartReclaim", tostring(v))
 end)
 
-boothCtrl:AddToggle("Compact Booth Data", CFG.UI.CompactBoothData ~= false, function(v)
-    CFG.UI.CompactBoothData = v
-    log("CompactBoothData", tostring(v))
-end)
-
-local boothMaxDist = boothCtrl:AddInput("Max Middle Distance", tostring(CFG.Booth.MaxMiddleDistance), function(v)
+local boothMaxDist = State.BoothDistanceSec:AddInput("Max Middle", tostring(CFG.Booth.MaxMiddleDistance), function(v)
     CFG.Booth.MaxMiddleDistance = toNumber(v) or CFG.Booth.MaxMiddleDistance
 end)
 
-State.BoothStatusLabel = boothStatusSec:AddLabel("Booth: checking...", T.Sub)
-State.BoothListingLabel = boothStatusSec:AddLabel("Listings: ...", T.Text)
-State.BoothSkinLabel = boothStatusSec:AddLabel("Skin: " .. tostring(CFG.Booth.BoothSkin or "Default"), T.Text)
-State.BoothClaimLabel = boothStatusSec:AddLabel("Claim: every " .. tostring(CFG.Booth.ClaimInterval or 10) .. "s", T.Sub)
+State.BoothActionRow = boothPage:AddRow()
+State.BoothClaimSec = boothPage:AddSectionInRow(State.BoothActionRow, "Claim", 1 / 3)
+State.BoothRefreshSec = boothPage:AddSectionInRow(State.BoothActionRow, "Refresh", 1 / 3)
+State.BoothRebuildSec = boothPage:AddSectionInRow(State.BoothActionRow, "Rebuild", 1 / 3)
 
-local boothLog = boothDataSec:AddLog(125)
+State.BoothInfoRow = boothPage:AddRow()
+State.BoothStatusSec = boothPage:AddSectionInRow(State.BoothInfoRow, "Booth Status", 0.42)
+State.BoothDataSec = boothPage:AddSectionInRow(State.BoothInfoRow, "Booth Data", 0.58)
+
+State.BoothStatusLabel = State.BoothStatusSec:AddLabel("Booth: checking...", T.Sub)
+State.BoothListingLabel = State.BoothStatusSec:AddLabel("Listings: ...", T.Text)
+State.BoothSkinLabel = State.BoothStatusSec:AddLabel("Skin: " .. tostring(CFG.Booth.BoothSkin or "Default"), T.Text)
+State.BoothClaimLabel = State.BoothStatusSec:AddLabel("Claim: every " .. tostring(CFG.Booth.ClaimInterval or 10) .. "s", T.Sub)
+
+local boothLog = State.BoothDataSec:AddLog(112)
 
 local function refreshBoothLog()
     refreshPills()
@@ -4502,22 +4507,18 @@ local function refreshBoothLog()
     addLines(boothLog, lines)
 end
 
-boothCtrl:AddButton("Smart Rebuild Booth", function()
+State.BoothClaimSec:AddButton("Claim Best Free", function()
+    claimBestFreeBooth()
+    refreshBoothLog()
+end)
+State.BoothRefreshSec:AddButton("Refresh Data", refreshBoothLog, "outline")
+State.BoothRebuildSec:AddButton("Smart Rebuild", function()
     task.spawn(function()
         smartRebuildBooth()
         task.wait(0.6)
         refreshBoothLog()
     end)
 end)
-boothCtrl:AddButton("Claim Best Free", function()
-    claimBestFreeBooth()
-    refreshBoothLog()
-end)
-boothCtrl:AddButton("Refresh Booth Data", refreshBoothLog, "outline")
-boothCtrl:AddButton("Equip Skin", function()
-    CFG.Booth.BoothSkin = tostring(CFG.Booth.BoothSkin or "Default")
-    equipSkin()
-end, "outline")
 
 --// SELLER PAGE
 local sellerPage = win:CreatePage("Seller")
