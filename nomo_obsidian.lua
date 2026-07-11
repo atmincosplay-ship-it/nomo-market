@@ -5386,20 +5386,54 @@ end
 
 local function refreshMarketSample()
     local all = getAllListings()
-    local lines = {"All listings: " .. tostring(#all), "------------------------------"}
+    local my = getMyListings()
+    local wanted, wantedCount = {}, 0
+    for _, l in ipairs(my) do
+        local key = norm(l.PetType)
+        if key ~= "" and not wanted[key] then
+            wanted[key] = true
+            wantedCount += 1
+        end
+    end
 
-    for i, l in ipairs(all) do
+    local sample = {}
+    if wantedCount > 0 then
+        for _, l in ipairs(all) do
+            if wanted[norm(l.PetType)] then
+                table.insert(sample, l)
+            end
+        end
+        table.sort(sample, function(a, b)
+            local an, bn = tostring(a.PetType or ""), tostring(b.PetType or "")
+            if an == bn then return (tonumber(a.Price) or 0) < (tonumber(b.Price) or 0) end
+            return an < bn
+        end)
+    else
+        sample = all
+    end
+
+    local lines = {
+        wantedCount > 0
+            and ("Same-pet market: " .. tostring(#sample) .. " match(es) for " .. tostring(wantedCount) .. " listed pet type(s)")
+            or ("All listings: " .. tostring(#all) .. " (no booth listings to match)"),
+        "------------------------------"
+    }
+
+    for i, l in ipairs(sample) do
         if i > 10 then
-            table.insert(lines, "... +" .. tostring(#all - 10) .. " more")
+            table.insert(lines, "... +" .. tostring(#sample - 10) .. " more")
             break
         end
         table.insert(lines, string.format(
             "%02d. %s | price %s | owner %s",
             i,
-            l.PetType,
-            tostring(l.Price),
-            l.OwnerName
+            tostring(l.PetType or "?"),
+            commaNumber(l.Price),
+            tostring(l.OwnerName or "?")
         ))
+    end
+    if #sample == 0 and wantedCount > 0 then
+        table.insert(lines, "No matching market listings found for your booth pets.")
     end
 
     addLines(marketLog, lines)
