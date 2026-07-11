@@ -3482,11 +3482,31 @@ function Library:CreateWindow(cfg)
 	-- CONTENT / PAGES
 	----------------------------------------------------------------
 	local content = make("Frame", {
-		Size = UDim2.new(1, -166, 1, -68), Position = UDim2.fromOffset(158, 60),
+		Size = UDim2.new(1, -166, 1, -100), Position = UDim2.fromOffset(158, 60),
 		BackgroundTransparency = 1,
 	}, main)
 
-	local window = {Pills = pills, SearchBox = search, CloneStatusText = cloneText}
+	local runtimeFooter = make("Frame", {
+		Size = UDim2.new(1, -174, 0, 26),
+		Position = UDim2.new(0, 158, 1, -34),
+		BackgroundColor3 = T.Card,
+		BorderSizePixel = 0,
+	}, main)
+	corner(runtimeFooter, 8); stroke(runtimeFooter)
+	local runtimeFooterText = make("TextLabel", {
+		Size = UDim2.new(1, -16, 1, 0),
+		Position = UDim2.fromOffset(8, 0),
+		BackgroundTransparency = 1,
+		RichText = true,
+		Text = "Session: ...",
+		TextColor3 = T.Text,
+		Font = Enum.Font.Code,
+		TextSize = 11,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, runtimeFooter)
+
+	local window = {Pills = pills, SearchBox = search, CloneStatusText = cloneText, RuntimeFooterText = runtimeFooterText}
 	local pages = {}
 
 	local function selectPage(name)
@@ -3994,6 +4014,16 @@ function Library:CreateWindow(cfg)
 					}, logFrame)
 					logFrame.CanvasPosition = Vector2.new(0, 1e6)
 				end
+				function log:AddRich(text)
+					make("TextLabel", {
+						Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1,
+						RichText = true,
+						Text = ("%s  %s"):format(os.date("%H:%M:%S"), tostring(text or "")),
+						Font = Enum.Font.Code, TextSize = 11, TextColor3 = T.Sub,
+						TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+					}, logFrame)
+					logFrame.CanvasPosition = Vector2.new(0, 1e6)
+				end
 				function log:Clear()
 					for _, c in ipairs(logFrame:GetChildren()) do
 						if c:IsA("TextLabel") then c:Destroy() end
@@ -4206,33 +4236,47 @@ end
 
 State.RefreshDashboard = function()
     if State.DashLog then
-        local lines = {}
+        State.DashLog:Clear()
         for i = 1, math.min(5, #State.Logs) do
-            local line = tostring(State.Logs[i] or ""):gsub("^%d%d:%d%d:%d%d%s+", "")
+            local line = tostring(State.Logs[i] or "")
+                :gsub("^%d%d:%d%d:%d%d%s+", "")
+                :gsub("^%[%d%d:%d%d:%d%d%]%s*", "")
+                :gsub("<", "&lt;")
+                :gsub(">", "&gt;")
             local low = line:lower()
+            local tag, col
             if low:find("failed", 1, true) or low:find("unsafe", 1, true) or low:find("error", 1, true) then
-                line = "[WARN] " .. line
+                tag, col = "WARN", T.Red
             elseif low:find("started", 1, true) or low:find("attempt", 1, true) or low:find("scan", 1, true) then
-                line = "[RUN] " .. line
+                tag, col = "RUN", T.Accent
             elseif low:find("ok", 1, true) or low:find("done", 1, true) or low:find("complete", 1, true) or low:find("verified", 1, true) then
-                line = "[OK] " .. line
+                tag, col = "OK", T.Green
             else
-                line = "[INFO] " .. line
+                tag, col = "INFO", T.Sub
             end
-            table.insert(lines, line)
+            State.DashLog:AddRich(('<font color="#%s">[%s]</font> %s'):format(col:ToHex(), tag, line))
         end
-        addLines(State.DashLog, lines)
     end
-    if State.DashSessionLabel then
+    if win.RuntimeFooterText then
         local session = math.floor(os.clock())
         local mins = math.floor(session / 60)
         local secs = session % 60
-        State.DashSessionLabel:Set(string.format("Session: %dm %02ds", mins, secs), T.Accent)
-        State.DashSellerLabel:Set("Seller: " .. (CFG.Seller.AutoList and "ON" or "OFF") .. " | listed " .. tostring(State.ListedThisSession or 0), CFG.Seller.AutoList and T.Green or T.Sub)
-        State.DashSniperLabel:Set("Sniper: " .. (CFG.Sniper.Enabled and "ON" or "OFF") .. " | sniped " .. tostring(State.SnipedThisSession or 0), CFG.Sniper.Enabled and T.Green or T.Sub)
         local best = findBestBooth()
         local boothText = best and best.Status or "No Booth"
-        State.DashBoothLabel:Set("Booth: " .. tostring(boothText) .. " | Pets " .. tostring(State.CloneInventoryCount or 0), boothText == "MINE" and T.Green or T.Text)
+        win.RuntimeFooterText.Text = ('<font color="#%s">Session:</font> %dm %02ds   |   <font color="#%s">Seller:</font> %s/%s   |   <font color="#%s">Sniper:</font> %s/%s   |   <font color="#%s">Booth:</font> %s   |   Pets: %s'):format(
+            T.Accent:ToHex(),
+            mins,
+            secs,
+            (CFG.Seller.AutoList and T.Green or T.Sub):ToHex(),
+            CFG.Seller.AutoList and "ON" or "OFF",
+            tostring(State.ListedThisSession or 0),
+            (CFG.Sniper.Enabled and T.Green or T.Sub):ToHex(),
+            CFG.Sniper.Enabled and "ON" or "OFF",
+            tostring(State.SnipedThisSession or 0),
+            (boothText == "MINE" and T.Green or T.Sub):ToHex(),
+            tostring(boothText),
+            tostring(State.CloneInventoryCount or 0)
+        )
     end
 end
 
@@ -4309,13 +4353,7 @@ State.DashSniperNavSec:AddButton("Manage", function()
 end, "outline")
 
 State.DashEventsSec = State.DashboardPage:AddSection("Recent Events")
-State.DashLog = State.DashEventsSec:AddLog(78)
-
-State.DashFooterSec = State.DashboardPage:AddSection("Runtime Status")
-State.DashSessionLabel = State.DashFooterSec:AddLabel("Session: ...", T.Accent)
-State.DashSellerLabel = State.DashFooterSec:AddLabel("Seller: ...", T.Sub)
-State.DashSniperLabel = State.DashFooterSec:AddLabel("Sniper: ...", T.Sub)
-State.DashBoothLabel = State.DashFooterSec:AddLabel("Booth: ...", T.Text)
+State.DashLog = State.DashEventsSec:AddLog(64)
 
 --// BOOTH PAGE
 local boothPage = win:CreatePage("Booth")
