@@ -144,6 +144,9 @@ CFG.UI = CFG.UI or {
     FilterGameSpam = true,
 }
 CFG.UI.MaxDropdownRows = CFG.UI.MaxDropdownRows or 80
+if CFG.UI.AutoMinimized == nil then
+    CFG.UI.AutoMinimized = (getgenv().nomo_auto_minimized == true or getgenv().NOMO_AUTO_MINIMIZED == true)
+end
 if tostring(CFG.Webhook.SnipeUrl or "") == "" then
     CFG.Webhook.SnipeUrl = tostring(getgenv().nomo_sniper_webhook or getgenv().NOMO_SNIPER_WEBHOOK or "")
 end
@@ -616,6 +619,11 @@ State.LoadRuntimeSettings = function()
         if data.Webhook.PetSold ~= nil then CFG.Webhook.PetSold = data.Webhook.PetSold == true end
         if data.Webhook.SuccessfulSnipe ~= nil then CFG.Webhook.SuccessfulSnipe = data.Webhook.SuccessfulSnipe == true end
     end
+    if type(data.UI) == "table" then
+        if data.UI.AutoMinimized ~= nil then CFG.UI.AutoMinimized = data.UI.AutoMinimized == true end
+        if data.UI.CompactBoothData ~= nil then CFG.UI.CompactBoothData = data.UI.CompactBoothData == true end
+        if data.UI.FilterGameSpam ~= nil then CFG.UI.FilterGameSpam = data.UI.FilterGameSpam == true end
+    end
     if tostring(CFG.Webhook.DeviceName or "") == "" then CFG.Webhook.DeviceName = tostring(getgenv().nomo_device_name or getgenv().NOMO_DEVICE_NAME or "") end
     if tostring(CFG.Webhook.SnipeUrl or "") == "" then CFG.Webhook.SnipeUrl = tostring(CFG.Webhook.Url or "") end
     if tostring(CFG.Webhook.SoldUrl or "") == "" then CFG.Webhook.SoldUrl = tostring(CFG.Webhook.Url or "") end
@@ -651,6 +659,11 @@ State.SaveRuntimeSettings = function()
             DeviceName = tostring(CFG.Webhook.DeviceName or ""),
             PetSold = CFG.Webhook.PetSold == true,
             SuccessfulSnipe = CFG.Webhook.SuccessfulSnipe == true,
+        },
+        UI = {
+            AutoMinimized = CFG.UI.AutoMinimized == true,
+            CompactBoothData = CFG.UI.CompactBoothData ~= false,
+            FilterGameSpam = CFG.UI.FilterGameSpam ~= false,
         },
     }
     return saveJson(State.GetSettingsPath(), data)
@@ -3417,6 +3430,12 @@ function Library:CreateWindow(cfg)
 		setMinimized(false)
 	end)
 
+	if cfg.AutoMinimized then
+		task.defer(function()
+			setMinimized(true)
+		end)
+	end
+
 	-- drag mini button
 	do
 		local draggingMini, dragStartMini, miniStartPos
@@ -4237,6 +4256,7 @@ local win = (CFG.Performance.NoUI and State.CreateHeadlessWindow() or Library:Cr
     PlanText = "PRIVATE DATA CORE",
     VersionText = VERSION,
     MiniText = "NOMO",
+    AutoMinimized = CFG.UI.AutoMinimized == true,
 
     -- bottom-left: avoids the game's top and center UI.
     MiniPosition = UDim2.new(0, 12, 1, -210),
@@ -6005,11 +6025,19 @@ end)
 
 State.SettingUiSec:AddToggle("Compact Booth Data", CFG.UI.CompactBoothData ~= false, function(v)
     CFG.UI.CompactBoothData = v
+    State.SaveRuntimeSettings()
     log("CompactBoothData", tostring(v))
+end)
+
+State.SettingUiSec:AddToggle("Auto Minimized", CFG.UI.AutoMinimized == true, function(v)
+    CFG.UI.AutoMinimized = v
+    State.SaveRuntimeSettings()
+    log("AutoMinimized", tostring(v), "applies on next reload")
 end)
 
 State.SettingUiSec:AddToggle("Filter Warn Spam", CFG.UI.FilterGameSpam ~= false, function(v)
     CFG.UI.FilterGameSpam = v
+    State.SaveRuntimeSettings()
     if v then
         local ok = installWarnFilter()
         log("WarnFilter", tostring(ok))
