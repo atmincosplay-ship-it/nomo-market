@@ -2037,6 +2037,10 @@ State.WebhookEmbedForListing = function(kind, l, extra)
     local sellerValue = kind == "snipe" and tostring(extra.User or l.OwnerName or "") or ""
     local buyerValue = kind == "sold" and tostring(extra.User or l.BuyerName or "") or ""
     local deviceName = tostring(extra.DeviceName or CFG.Webhook.DeviceName or getgenv().nomo_device_name or getgenv().NOMO_DEVICE_NAME or "")
+    local fromHistory = kind == "sold" and (type(l.History) == "table" or extra.Source == "history")
+    local displayPrice = kind == "sold" and (tonumber(l.NetPrice) or tonumber(l.Price) or 0) or l.Price
+    local description = kind == "snipe" and "Successful market snipe detected."
+        or (fromHistory and "Booth sale confirmed from trade history." or "Booth sale inferred from booth listing data.")
     local displayKg = tonumber(pet.VisualWeight or pet.BaseWeight) or 0
     local fallbackIconUrl = "https://www.roblox.com/headshot-thumbnail/image?userId=" .. tostring(LocalPlayer.UserId) .. "&width=150&height=150&format=png"
     local iconUrl = tostring(CFG.Webhook.IconUrl or "")
@@ -2055,7 +2059,7 @@ State.WebhookEmbedForListing = function(kind, l, extra)
     if deviceName ~= "" and deviceName ~= "Unknown" then
         table.insert(fields, {name = "📱 Device", value = deviceName, inline = true})
     end
-    table.insert(fields, {name = priceLabel, value = "**" .. commaNumber(l.Price) .. " Tokens**", inline = true})
+    table.insert(fields, {name = priceLabel, value = "**" .. commaNumber(displayPrice) .. " Tokens**", inline = true})
     table.insert(fields, {name = "🐾 Pet", value = tostring(pet.Name or "?"), inline = true})
     table.insert(fields, {name = "🧬 Mutation", value = tostring(pet.Mutation or "Normal"), inline = true})
     table.insert(fields, {name = "🎂 Age", value = tostring(pet.Age or "?"), inline = true})
@@ -2070,7 +2074,7 @@ State.WebhookEmbedForListing = function(kind, l, extra)
         avatar_url = iconUrl,
         embeds = {{
             title = string.format("%s - %s [Age %s] [%.2f KG]", titlePrefix, tostring(pet.Name or "?"), tostring(pet.Age or "?"), displayKg),
-            description = kind == "snipe" and "Successful market snipe detected." or "A booth listing is no longer active and was treated as sold.",
+            description = description,
             color = color,
             author = {name = "NOMO Market", icon_url = iconUrl},
             fields = fields,
@@ -2142,11 +2146,17 @@ State.ConnectBoothHistory = function()
         local itemId = tostring(data.UUID or data.ItemId or data.ItemID or history.itemId or history.id or "")
         local historyId = tostring(history.id or itemId or "")
         if historyId == "" and itemId == "" then return end
+        local grossPrice = tonumber(history.price) or tonumber(history.grossPrice) or 0
+        local netPrice = tonumber(history.netPrice) or tonumber(history.NetPrice) or grossPrice
         local listing = {
             ListingUUID = historyId ~= "" and historyId or itemId,
             ItemId = itemId ~= "" and itemId or historyId,
             PetType = petType,
-            Price = tonumber(history.price) or tonumber(history.netPrice) or 0,
+            Price = netPrice,
+            GrossPrice = grossPrice,
+            NetPrice = netPrice,
+            FinishTime = tonumber(history.finishTime),
+            Status = type(history.status) == "table" and tostring(history.status.result or "") or "",
             OwnerName = tostring(seller.username or LocalPlayer.Name or ""),
             BuyerName = tostring(buyer.username or ""),
             Item = data,
@@ -2154,7 +2164,7 @@ State.ConnectBoothHistory = function()
         }
         local buyerName = tostring(buyer.username or "")
         if not listing then return end
-        local sent = State.SendSoldWebhook(listing, {User = buyerName})
+        local sent = State.SendSoldWebhook(listing, {User = buyerName, Source = "history"})
         if sent then
             log("History sold webhook", tostring(listing.PetType), tostring(listing.Price), tostring(listing.ListingUUID))
         end
