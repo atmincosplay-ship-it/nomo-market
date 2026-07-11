@@ -175,6 +175,7 @@ end
 
 local State = {
     Running = true,
+    StartedAt = os.clock(),
     CurrentTab = "Booth",
     Logs = {},
     LastSellerScanAt = 0,
@@ -184,6 +185,7 @@ local State = {
     LastListAt = 0,
     ListTimes = {},
     ListedThisSession = 0,
+    SnipedThisSession = 0,
     LastBuyAt = 0,
     BuyTimes = {},
     PetList = {},
@@ -204,6 +206,7 @@ local State = {
     LastBestBoothCacheAt = 0,
     BoothDataCache = nil,
     LastBoothDataAt = 0,
+    LastClonePanelAt = 0,
     PendingListUUIDs = {},
     PendingRemoveUUIDs = {},
     ManualRemoveUUIDs = {},
@@ -3096,6 +3099,7 @@ local function buyFirstMatch()
         log("Buy sent", l.PetType, l.Price, l.ListingUUID, tostring(a), tostring(b))
         if a ~= false then
             State.InvalidateListingCache()
+            State.SnipedThisSession = (State.SnipedThisSession or 0) + 1
             State.SendSnipeWebhook(m)
         end
         return a, b
@@ -3325,9 +3329,40 @@ function Library:CreateWindow(cfg)
 		}, mini)
 	end
 
+	local clonePanel = make("Frame", {
+		Size = UDim2.fromOffset(230, 128),
+		Position = cfg.ClonePanelPosition or UDim2.new(0, 12, 1, -348),
+		BackgroundColor3 = T.Card,
+		BorderSizePixel = 0,
+		Visible = false,
+	}, gui)
+	corner(clonePanel, 8); stroke(clonePanel, T.Border); pad(clonePanel, 8)
+	make("TextLabel", {
+		Size = UDim2.new(1, 0, 0, 18),
+		BackgroundTransparency = 1,
+		Text = "NOMO STATUS",
+		TextColor3 = T.Accent,
+		Font = Enum.Font.GothamBold,
+		TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, clonePanel)
+	local cloneText = make("TextLabel", {
+		Size = UDim2.new(1, 0, 1, -22),
+		Position = UDim2.fromOffset(0, 22),
+		BackgroundTransparency = 1,
+		Text = "Loading...",
+		TextColor3 = T.Text,
+		Font = Enum.Font.Code,
+		TextSize = 11,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+	}, clonePanel)
+
 	local function setMinimized(v)
 		main.Visible = not v
 		mini.Visible = v
+		clonePanel.Visible = v
 	end
 
 	winBtn("–", -66, function()
@@ -3440,7 +3475,7 @@ function Library:CreateWindow(cfg)
 		BackgroundTransparency = 1,
 	}, main)
 
-	local window = {Pills = pills, SearchBox = search}
+	local window = {Pills = pills, SearchBox = search, CloneStatusText = cloneText}
 	local pages = {}
 
 	local function selectPage(name)
@@ -4135,6 +4170,24 @@ local function refreshPills()
     win.Pills.Booth:Set(boothText, boothText == "MINE" and T.Green or (boothText == "FREE" and T.Yellow or T.Sub))
     win.Pills.Balance:Set(commaNumber(getTokenBalance()), T.Green)
     State.UpdatePerfStats()
+    if win.CloneStatusText and os.clock() - (State.LastClonePanelAt or 0) >= 2 then
+        State.LastClonePanelAt = os.clock()
+        local listings = State.LastMyListings
+        if type(listings) ~= "table" then listings = getMyListings() end
+        local device = tostring(CFG.Webhook.DeviceName or getgenv().nomo_device_name or getgenv().NOMO_DEVICE_NAME or "")
+        if device == "" then device = tostring(LocalPlayer.Name or "NOMO") end
+        local uptime = math.max(0, math.floor(os.clock() - (State.StartedAt or os.clock())))
+        local session = string.format("%02d:%02d", math.floor(uptime / 60), uptime % 60)
+        local seller = CFG.Seller.AutoList and "ON" or (CFG.Seller.PreviewOnly and "PREVIEW" or "OFF")
+        local sniper = CFG.Sniper.Enabled and (CFG.Sniper.DryRun and "DRY" or "ON") or "OFF"
+        local webhook = CFG.Webhook.Enabled and "ON" or "OFF"
+        win.CloneStatusText.Text = "Device: " .. device
+            .. "\nBooth: " .. boothText .. " | " .. tostring(#listings) .. "/50"
+            .. "\nSeller: " .. seller .. " | listed " .. tostring(State.ListedThisSession or 0)
+            .. "\nSniper: " .. sniper .. " | sniped " .. tostring(State.SnipedThisSession or 0)
+            .. "\nWebhook: " .. webhook
+            .. "\nSession: " .. session
+    end
 end
 
 
