@@ -4296,14 +4296,6 @@ local boothMaxDist = boothCtrl:AddInput("Max Middle Distance", tostring(CFG.Boot
     CFG.Booth.MaxMiddleDistance = toNumber(v) or CFG.Booth.MaxMiddleDistance
 end)
 
-local boothSkin = boothCtrl:AddInput("Booth Skin", tostring(CFG.Booth.BoothSkin or "Default"), function(v)
-    CFG.Booth.BoothSkin = trim(v) ~= "" and trim(v) or "Default"
-end)
-
-local boothClaimInterval = boothCtrl:AddInput("Claim Interval", tostring(CFG.Booth.ClaimInterval or 10), function(v)
-    CFG.Booth.ClaimInterval = toNumber(v) or CFG.Booth.ClaimInterval or 10
-end)
-
 State.BoothStatusLabel = boothStatusSec:AddLabel("Booth: checking...", T.Sub)
 State.BoothListingLabel = boothStatusSec:AddLabel("Listings: ...", T.Text)
 State.BoothSkinLabel = boothStatusSec:AddLabel("Skin: " .. tostring(CFG.Booth.BoothSkin or "Default"), T.Text)
@@ -4314,8 +4306,8 @@ local boothLog = boothDataSec:AddLog(125)
 local function refreshBoothLog()
     refreshPills()
     CFG.Booth.MaxMiddleDistance = toNumber(boothMaxDist:Get()) or CFG.Booth.MaxMiddleDistance
-    CFG.Booth.BoothSkin = trim(boothSkin:Get()) ~= "" and trim(boothSkin:Get()) or "Default"
-    CFG.Booth.ClaimInterval = toNumber(boothClaimInterval:Get()) or CFG.Booth.ClaimInterval or 10
+    CFG.Booth.BoothSkin = tostring(CFG.Booth.BoothSkin or "Default")
+    CFG.Booth.ClaimInterval = tonumber(CFG.Booth.ClaimInterval) or 10
 
     local items = getBoothSnapshot()
     local target, status = findBestBooth()
@@ -4374,20 +4366,20 @@ local function refreshBoothLog()
     addLines(boothLog, lines)
 end
 
-boothCtrl:AddButton("Refresh Booth Data", refreshBoothLog)
-boothCtrl:AddButton("Claim Best Free", function()
-    claimBestFreeBooth()
-    refreshBoothLog()
-end)
 boothCtrl:AddButton("Smart Rebuild Booth", function()
     task.spawn(function()
         smartRebuildBooth()
         task.wait(0.6)
         refreshBoothLog()
     end)
-end, "outline")
+end)
+boothCtrl:AddButton("Claim Best Free", function()
+    claimBestFreeBooth()
+    refreshBoothLog()
+end)
+boothCtrl:AddButton("Refresh Booth Data", refreshBoothLog, "outline")
 boothCtrl:AddButton("Equip Skin", function()
-    CFG.Booth.BoothSkin = trim(boothSkin:Get()) ~= "" and trim(boothSkin:Get()) or "Default"
+    CFG.Booth.BoothSkin = tostring(CFG.Booth.BoothSkin or "Default")
     equipSkin()
 end, "outline")
 
