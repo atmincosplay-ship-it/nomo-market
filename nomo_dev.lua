@@ -4253,8 +4253,8 @@ end)
 
 State.DashActionRow = State.DashboardPage:AddRow()
 State.DashRebuildSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Rebuild", 0.25)
-State.DashRefreshSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Refresh", 0.25)
-State.DashListingsSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Listings", 0.25)
+State.DashListingsSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "My Booth", 0.25)
+State.DashFiltersSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Filters", 0.25)
 State.DashSniperNavSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Sniper", 0.25)
 
 State.DashRebuildSec:AddButton("Smart Rebuild", function()
@@ -4264,17 +4264,25 @@ State.DashRebuildSec:AddButton("Smart Rebuild", function()
         State.RefreshDashboard()
     end)
 end)
-State.DashRefreshSec:AddButton("Refresh", function()
-    State.ClonePanelDirty = true
-    State.CloneInventoryDirty = true
-    refreshPills()
-    State.RefreshDashboard()
-end, "outline")
-State.DashListingsSec:AddButton("Open", function()
+State.DashListingsSec:AddButton("Manage", function()
     win:SelectPage("Listings")
+    task.spawn(function()
+        if refreshMyListingsLog then refreshMyListingsLog() end
+    end)
 end, "outline")
-State.DashSniperNavSec:AddButton("Open", function()
-    win:SelectPage("Sniper")
+State.DashFiltersSec:AddButton("Manage", function()
+    if State.OpenFilterManager then
+        State.OpenFilterManager()
+    else
+        win:SelectPage("Seller")
+    end
+end, "outline")
+State.DashSniperNavSec:AddButton("Manage", function()
+    if State.OpenSniperWatchlistManager then
+        State.OpenSniperWatchlistManager()
+    else
+        win:SelectPage("Sniper")
+    end
 end, "outline")
 
 State.DashEventsSec = State.DashboardPage:AddSection("Recent Events")
