@@ -4523,7 +4523,9 @@ end)
 --// SELLER PAGE
 local sellerPage = win:CreatePage("Seller")
 local sellerCtrl = sellerPage:AddSection("Seller Control")
+sellerCtrl.Frame.LayoutOrder = 30
 local filterRow = sellerPage:AddRow()
+filterRow.LayoutOrder = 10
 local filterSec = sellerPage:AddSectionInRow(filterRow, "Filter Builder", 0.5)
 local filterRangeSec = sellerPage:AddSectionInRow(filterRow, "Filter Limits", 0.5)
 
@@ -4659,6 +4661,11 @@ local minAgeInput = filterRangeSec:AddInput("Min Age", "1")
 local maxAgeInput = filterRangeSec:AddInput("Max Age", "100")
 local variantInput = { Get = function() return "Any" end } -- hatch type is part of Pet name, e.g. GIANT Barn Owl
 local maxListedInput = filterRangeSec:AddInput("Per Filter Cap", "5")
+filterRangeSec:AddButton("Manage Filters", function()
+    if State.OpenFilterManager then
+        State.OpenFilterManager()
+    end
+end)
 
 State.OpenFilterEditPopup = function(index, managerOverlay)
     State.LoadLocalFilters()
@@ -4937,6 +4944,7 @@ State.OpenFilterManager = function()
 end
 
 local filterLogSec = sellerPage:AddSection("Active Filters / Candidates")
+filterLogSec.Frame.LayoutOrder = 20
 sellerLog = filterLogSec:AddLog(125)
 
 diagnosePetFilter = function(petName)
@@ -5116,10 +5124,6 @@ end)
 filterSec:AddButton("Preview Candidates", function()
     refreshSellerLog(true)
 end, "outline")
-
-filterLogSec:AddButton("Manage Filters", function()
-    State.OpenFilterManager()
-end)
 
 filterLogSec:AddButton("Clear All Filters", function()
     clearFilters()
