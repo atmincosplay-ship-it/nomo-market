@@ -4229,40 +4229,51 @@ end
 
 --// DASHBOARD PAGE
 State.DashboardPage = win:CreatePage("Dashboard")
-State.DashActionSec = State.DashboardPage:AddSection("Market Control")
-State.DashActionSec:AddToggle("Auto List", CFG.Seller.AutoList, function(v)
+State.DashToggleRow = State.DashboardPage:AddRow()
+State.DashAutoSec = State.DashboardPage:AddSectionInRow(State.DashToggleRow, "Auto List", 1 / 3)
+State.DashSniperSec = State.DashboardPage:AddSectionInRow(State.DashToggleRow, "Sniper", 1 / 3)
+State.DashWebhookSec = State.DashboardPage:AddSectionInRow(State.DashToggleRow, "Webhook", 1 / 3)
+
+State.DashAutoSec:AddToggle("Enabled", CFG.Seller.AutoList, function(v)
     CFG.Seller.AutoList = v
     CFG.Seller.PreviewOnly = not v
     State.SaveRuntimeSettings()
     log("Dashboard AutoList", tostring(v))
 end)
-State.DashActionSec:AddToggle("Sniper Enabled", CFG.Sniper.Enabled, function(v)
+State.DashSniperSec:AddToggle("Enabled", CFG.Sniper.Enabled, function(v)
     CFG.Sniper.Enabled = v
     State.SaveRuntimeSettings()
     log("Dashboard Sniper", tostring(v))
 end)
-State.DashActionSec:AddToggle("Webhook", CFG.Webhook.Enabled == true, function(v)
+State.DashWebhookSec:AddToggle("Enabled", CFG.Webhook.Enabled == true, function(v)
     CFG.Webhook.Enabled = v
     State.SaveRuntimeSettings()
     log("Dashboard Webhook", tostring(v))
 end)
-State.DashActionSec:AddButton("Smart Rebuild Booth", function()
+
+State.DashActionRow = State.DashboardPage:AddRow()
+State.DashRebuildSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Rebuild", 0.25)
+State.DashRefreshSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Refresh", 0.25)
+State.DashListingsSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Listings", 0.25)
+State.DashSniperNavSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Sniper", 0.25)
+
+State.DashRebuildSec:AddButton("Smart Rebuild", function()
     task.spawn(function()
         smartRebuildBooth()
         task.wait(0.5)
         State.RefreshDashboard()
     end)
 end)
-State.DashActionSec:AddButton("Refresh Dashboard", function()
+State.DashRefreshSec:AddButton("Refresh", function()
     State.ClonePanelDirty = true
     State.CloneInventoryDirty = true
     refreshPills()
     State.RefreshDashboard()
 end, "outline")
-State.DashActionSec:AddButton("Open Listings", function()
+State.DashListingsSec:AddButton("Open", function()
     win:SelectPage("Listings")
 end, "outline")
-State.DashActionSec:AddButton("Open Sniper", function()
+State.DashSniperNavSec:AddButton("Open", function()
     win:SelectPage("Sniper")
 end, "outline")
 
