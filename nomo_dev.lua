@@ -4317,30 +4317,34 @@ State.DashWebhookSec:AddToggle("Enabled", CFG.Webhook.Enabled == true, function(
     log("Dashboard Webhook", tostring(v))
 end)
 
-State.DashActionSec = State.DashboardPage:AddSection("Quick Actions")
+State.DashActionRow = State.DashboardPage:AddRow()
+State.DashRebuildSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Rebuild", 0.25)
+State.DashListingsSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "My Listing", 0.25)
+State.DashFiltersSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Filters", 0.25)
+State.DashSniperNavSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Sniper", 0.25)
 
-State.DashActionSec:AddButton("Smart Rebuild Booth", function()
+State.DashRebuildSec:AddButton("Smart Rebuild", function()
     task.spawn(function()
         smartRebuildBooth()
         task.wait(0.5)
         State.RefreshDashboard()
     end)
 end)
-State.DashActionSec:AddButton("Manage My Listing", function()
+State.DashListingsSec:AddButton("Manage", function()
     if State.OpenMyListingsManager then
         State.OpenMyListingsManager()
     else
         win:SelectPage("Listings")
     end
 end, "outline")
-State.DashActionSec:AddButton("Manage Filters", function()
+State.DashFiltersSec:AddButton("Manage", function()
     if State.OpenFilterManager then
         State.OpenFilterManager()
     else
         win:SelectPage("Seller")
     end
 end, "outline")
-State.DashActionSec:AddButton("Manage Sniper", function()
+State.DashSniperNavSec:AddButton("Manage", function()
     if State.OpenSniperWatchlistManager then
         State.OpenSniperWatchlistManager()
     else
