@@ -3127,7 +3127,7 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
 
-local SCALE = 0.85 -- readable size for Redfinger / 1280x720
+local SCALE = 0.8 -- compact Redfinger 2x2 window target
 
 local T = {
 	BG        = Color3.fromRGB(8, 12, 22),
@@ -3215,7 +3215,7 @@ function Library:CreateWindow(cfg)
 	gui.Parent = pg
 
 	local main = make("Frame", {
-		Size = UDim2.fromOffset(820, 500),
+		Size = UDim2.fromOffset(700, 400),
 		Position = UDim2.new(0, 110, 0, 58),
 		BackgroundColor3 = T.BG,
 		BorderSizePixel = 0,
@@ -3232,8 +3232,8 @@ function Library:CreateWindow(cfg)
 	local top = make("Frame", {Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1}, main)
 
 	local search = make("TextBox", {
-		Size = UDim2.fromOffset(260, 32),
-		Position = UDim2.fromOffset(196, 10),
+		Size = UDim2.fromOffset(185, 32),
+		Position = UDim2.fromOffset(164, 10),
 		BackgroundColor3 = T.Card,
 		Text = "",
 		PlaceholderText = "  Search pets, UUIDs, users...",
@@ -3249,7 +3249,7 @@ function Library:CreateWindow(cfg)
 
 	-- status pills (right side)
 	local pillHolder = make("Frame", {
-		Size = UDim2.new(1, -530, 0, 32),
+		Size = UDim2.new(1, -430, 0, 32),
 		Position = UDim2.new(1, -74, 0, 10),
 		AnchorPoint = Vector2.new(1, 0),
 		BackgroundTransparency = 1,
@@ -3262,7 +3262,7 @@ function Library:CreateWindow(cfg)
 	}, pillHolder)
 
 	local function makePill(label, value, color)
-		local f = make("Frame", {Size = UDim2.fromOffset(110, 32), BackgroundColor3 = T.Card, BorderSizePixel = 0}, pillHolder)
+		local f = make("Frame", {Size = UDim2.fromOffset(86, 32), BackgroundColor3 = T.Card, BorderSizePixel = 0}, pillHolder)
 		corner(f, 8); stroke(f)
 		make("TextLabel", {
 			Size = UDim2.new(1, -10, 0, 12), Position = UDim2.fromOffset(10, 4),
@@ -3428,7 +3428,7 @@ function Library:CreateWindow(cfg)
 	-- SIDEBAR
 	----------------------------------------------------------------
 	local side = make("Frame", {
-		Size = UDim2.new(0, 180, 1, 0),
+		Size = UDim2.new(0, 150, 1, 0),
 		BackgroundColor3 = T.Sidebar,
 		BorderSizePixel = 0,
 	}, main)
@@ -3482,7 +3482,7 @@ function Library:CreateWindow(cfg)
 	-- CONTENT / PAGES
 	----------------------------------------------------------------
 	local content = make("Frame", {
-		Size = UDim2.new(1, -196, 1, -68), Position = UDim2.fromOffset(188, 60),
+		Size = UDim2.new(1, -166, 1, -68), Position = UDim2.fromOffset(158, 60),
 		BackgroundTransparency = 1,
 	}, main)
 
@@ -4204,6 +4204,33 @@ State.RefreshCloneStatus = function(forceInventory)
         .. "\nSession: " .. session
 end
 
+State.RefreshDashboard = function()
+    if not State.DashBooth then return end
+    local best = findBestBooth()
+    local boothText = best and best.Status or "No Booth"
+    local listings = type(State.LastMyListings) == "table" and State.LastMyListings or getMyListings()
+    if State.CloneInventoryDirty or os.clock() - (State.LastCloneInventoryAt or 0) >= 10 then
+        State.CloneInventoryCount = #getOwnPetsFromData(State.CloneInventoryDirty)
+        State.LastCloneInventoryAt = os.clock()
+        State.CloneInventoryDirty = false
+    end
+    local uptime = math.max(0, math.floor(os.clock() - (State.StartedAt or os.clock())))
+    State.DashBooth:Set("Booth: " .. boothText .. " | " .. tostring(#listings) .. "/50", boothText == "MINE" and T.Green or T.Sub)
+    State.DashTokens:Set("Tokens: " .. commaNumber(getTokenBalance()), T.Green)
+    State.DashPets:Set("Pets: " .. tostring(State.CloneInventoryCount or 0), T.Text)
+    State.DashSeller:Set("Seller: " .. (CFG.Seller.AutoList and "ON" or "OFF") .. " | listed " .. tostring(State.ListedThisSession or 0), CFG.Seller.AutoList and T.Green or T.Sub)
+    State.DashSniper:Set("Sniper: " .. (CFG.Sniper.Enabled and (CFG.Sniper.DryRun and "DRY" or "ON") or "OFF") .. " | sniped " .. tostring(State.SnipedThisSession or 0), CFG.Sniper.Enabled and T.Green or T.Sub)
+    State.DashWebhook:Set("Webhook: " .. (CFG.Webhook.Enabled and "ON" or "OFF"), CFG.Webhook.Enabled and T.Green or T.Sub)
+    State.DashSession:Set(string.format("Session: %02d:%02d", math.floor(uptime / 60), uptime % 60), T.Accent)
+    if State.DashLog then
+        local lines = {}
+        for i = 1, math.min(5, #State.Logs) do
+            table.insert(lines, State.Logs[i])
+        end
+        addLines(State.DashLog, lines)
+    end
+end
+
 local function refreshPills()
     local best = findBestBooth()
     local boothText = best and best.Status or "No Booth"
@@ -4213,8 +4240,43 @@ local function refreshPills()
     if State.ClonePanelDirty or os.clock() - (State.LastClonePanelAt or 0) >= 2 then
         State.RefreshCloneStatus(State.CloneInventoryDirty)
     end
+    State.RefreshDashboard()
 end
 
+
+--// DASHBOARD PAGE
+State.DashboardPage = win:CreatePage("Dashboard")
+State.DashStatusSec = State.DashboardPage:AddSection("Market Runtime")
+State.DashBooth = State.DashStatusSec:AddLabel("Booth: checking...", T.Sub)
+State.DashTokens = State.DashStatusSec:AddLabel("Tokens: ...", T.Green)
+State.DashPets = State.DashStatusSec:AddLabel("Pets: ...", T.Text)
+State.DashSeller = State.DashStatusSec:AddLabel("Seller: ...", T.Sub)
+State.DashSniper = State.DashStatusSec:AddLabel("Sniper: ...", T.Sub)
+State.DashWebhook = State.DashStatusSec:AddLabel("Webhook: ...", T.Sub)
+State.DashSession = State.DashStatusSec:AddLabel("Session: 00:00", T.Accent)
+
+State.DashActionSec = State.DashboardPage:AddSection("Quick Actions")
+State.DashActionSec:AddButton("Smart Rebuild Booth", function()
+    task.spawn(function()
+        smartRebuildBooth()
+        task.wait(0.5)
+        State.RefreshDashboard()
+    end)
+end)
+State.DashActionSec:AddButton("Refresh Dashboard", function()
+    State.ClonePanelDirty = true
+    State.CloneInventoryDirty = true
+    State.RefreshDashboard()
+end, "outline")
+State.DashActionSec:AddButton("Open Listings", function()
+    win:SelectPage("Listings")
+end, "outline")
+State.DashActionSec:AddButton("Open Sniper", function()
+    win:SelectPage("Sniper")
+end, "outline")
+
+State.DashEventsSec = State.DashboardPage:AddSection("Recent Events")
+State.DashLog = State.DashEventsSec:AddLog(78)
 
 --// BOOTH PAGE
 local boothPage = win:CreatePage("Booth")
@@ -5655,7 +5717,7 @@ refreshMyListingsLog()
 refreshMarketSample()
 State.RefreshSniperLog()
 
-win:SelectPage("Booth")
+win:SelectPage("Dashboard")
 
 --// Auto smart rebuild once per server/job after first execution.
 task.spawn(function()
