@@ -4735,7 +4735,7 @@ State.OpenFilterEditPopup = function(index, managerOverlay)
 
     make("TextLabel", {
         Size = UDim2.new(1, 0, 0, 50),
-        Position = UDim2.fromOffset(0, 34),
+        Position = UDim2.fromOffset(0, 32),
         BackgroundTransparency = 1,
         Text = string.format("Base KG %s-%s | Age %s-%s | Mutation %s",
             tostring(f.MinWeight or 0),
@@ -4861,7 +4861,7 @@ State.OpenFilterManager = function()
     local modal = make("Frame", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.new(0.5, 0, 0.5, 0),
-        Size = UDim2.fromOffset(560, 390),
+        Size = UDim2.fromOffset(540, 300),
         BackgroundColor3 = T.Card,
         BorderSizePixel = 0,
         ZIndex = 91,
@@ -4892,8 +4892,8 @@ State.OpenFilterManager = function()
     corner(closeBtn, 7); stroke(closeBtn)
 
     local list = make("ScrollingFrame", {
-        Size = UDim2.new(1, 0, 1, -36),
-        Position = UDim2.fromOffset(0, 34),
+        Size = UDim2.new(1, 0, 1, -34),
+        Position = UDim2.fromOffset(0, 32),
         BackgroundColor3 = T.Card2,
         BorderSizePixel = 0,
         ScrollBarThickness = 4,
@@ -5288,7 +5288,7 @@ State.OpenMyListingsManager = function()
     local modal = make("Frame", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.new(0.5, 0, 0.5, 0),
-        Size = UDim2.fromOffset(560, 390),
+        Size = UDim2.fromOffset(540, 300),
         BackgroundColor3 = T.Card,
         BorderSizePixel = 0,
         ZIndex = 91,
@@ -5319,8 +5319,8 @@ State.OpenMyListingsManager = function()
     corner(closeBtn, 7); stroke(closeBtn)
 
     local list = make("ScrollingFrame", {
-        Size = UDim2.new(1, 0, 1, -36),
-        Position = UDim2.fromOffset(0, 34),
+        Size = UDim2.new(1, 0, 1, -34),
+        Position = UDim2.fromOffset(0, 32),
         BackgroundColor3 = T.Card2,
         BorderSizePixel = 0,
         ScrollBarThickness = 4,
@@ -5587,7 +5587,7 @@ State.OpenSniperWatchEditPopup = function(name, managerOverlay)
 
     make("TextLabel", {
         Size = UDim2.new(1, 0, 0, 24),
-        Position = UDim2.fromOffset(0, 34),
+        Position = UDim2.fromOffset(0, 32),
         BackgroundTransparency = 1,
         Text = tostring(mode) .. " weight mode",
         TextColor3 = T.Sub,
@@ -5694,7 +5694,7 @@ State.OpenSniperWatchlistManager = function()
     local modal = make("Frame", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.new(0.5, 0, 0.5, 0),
-        Size = UDim2.fromOffset(560, 390),
+        Size = UDim2.fromOffset(540, 300),
         BackgroundColor3 = T.Card,
         BorderSizePixel = 0,
         ZIndex = 91,
@@ -5725,8 +5725,8 @@ State.OpenSniperWatchlistManager = function()
     corner(closeBtn, 7); stroke(closeBtn)
 
     local list = make("ScrollingFrame", {
-        Size = UDim2.new(1, 0, 1, -36),
-        Position = UDim2.fromOffset(0, 34),
+        Size = UDim2.new(1, 0, 1, -34),
+        Position = UDim2.fromOffset(0, 32),
         BackgroundColor3 = T.Card2,
         BorderSizePixel = 0,
         ScrollBarThickness = 4,
