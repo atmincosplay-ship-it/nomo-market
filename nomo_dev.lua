@@ -4931,30 +4931,43 @@ State.OpenFilterManager = function()
 
     for i, f in ipairs(getFilters()) do
         local row = make("Frame", {
-            Size = UDim2.new(1, 0, 0, 34),
+            Size = UDim2.new(1, 0, 0, 46),
             BackgroundColor3 = T.Card,
             BorderSizePixel = 0,
             ZIndex = 93,
         }, list)
         corner(row, 7); stroke(row)
         make("TextLabel", {
-            Size = UDim2.new(1, -116, 1, 0),
-            Position = UDim2.fromOffset(8, 0),
+            Size = UDim2.new(1, -116, 0, 20),
+            Position = UDim2.fromOffset(8, 5),
             BackgroundTransparency = 1,
-            Text = string.format("%02d. %s | Price %s | Base KG %s-%s | Age %s-%s | Max %s | %s",
+            Text = string.format("%02d. %s | P %s | KG %s-%s | Age %s-%s",
                 i,
                 tostring(f.Pet or "?"),
                 tostring(f.Price or "?"),
                 tostring(f.MinWeight or 0),
                 tostring(f.MaxWeight or "?"),
                 tostring(f.MinLevel or 1),
-                tostring(f.MaxLevel or 100),
-                tostring(f.MaxListedPet or 5),
-                tostring(f.Mutation or "Any")
+                tostring(f.MaxLevel or 100)
             ),
             TextColor3 = T.Text,
             Font = Enum.Font.Code,
             TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 94,
+        }, row)
+        make("TextLabel", {
+            Size = UDim2.new(1, -116, 0, 18),
+            Position = UDim2.fromOffset(8, 24),
+            BackgroundTransparency = 1,
+            Text = string.format("Mutation %s | Max %s per filter",
+                tostring(f.Mutation or "Any"),
+                tostring(f.MaxListedPet or 5)
+            ),
+            TextColor3 = T.Sub,
+            Font = Enum.Font.Code,
+            TextSize = 10,
             TextXAlignment = Enum.TextXAlignment.Left,
             TextTruncate = Enum.TextTruncate.AtEnd,
             ZIndex = 94,
@@ -5386,26 +5399,39 @@ State.OpenMyListingsManager = function()
         end
 
         local row = make("Frame", {
-            Size = UDim2.new(1, 0, 0, 34),
+            Size = UDim2.new(1, 0, 0, 46),
             BackgroundColor3 = T.Card,
             BorderSizePixel = 0,
             ZIndex = 93,
         }, list)
         corner(row, 7); stroke(row)
         make("TextLabel", {
-            Size = UDim2.new(1, -54, 1, 0),
-            Position = UDim2.fromOffset(8, 0),
+            Size = UDim2.new(1, -54, 0, 20),
+            Position = UDim2.fromOffset(8, 5),
             BackgroundTransparency = 1,
-            Text = string.format("%02d. %s | %s | %s | id %s",
+            Text = string.format("%02d. %s | %s Tokens",
                 i,
                 tostring(l.PetType or "?"),
-                tostring(l.ItemType or "?"),
-                commaNumber(l.Price),
-                tostring(l.ListingUUID or ""):sub(1, 8)
+                commaNumber(l.Price)
             ),
             TextColor3 = T.Text,
             Font = Enum.Font.Code,
             TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 94,
+        }, row)
+        make("TextLabel", {
+            Size = UDim2.new(1, -54, 0, 18),
+            Position = UDim2.fromOffset(8, 24),
+            BackgroundTransparency = 1,
+            Text = string.format("%s | id %s",
+                tostring(l.ItemType or "?"),
+                tostring(l.ListingUUID or ""):sub(1, 8)
+            ),
+            TextColor3 = T.Sub,
+            Font = Enum.Font.Code,
+            TextSize = 10,
             TextXAlignment = Enum.TextXAlignment.Left,
             TextTruncate = Enum.TextTruncate.AtEnd,
             ZIndex = 94,
@@ -5772,26 +5798,37 @@ State.OpenSniperWatchlistManager = function()
         local perPet = type(cfg) == "table" and (toInt(cfg.MaxMatchesPerPet or cfg.PerPet) or toInt(CFG.Sniper.MaxMatchesPerPet) or 5) or (toInt(CFG.Sniper.MaxMatchesPerPet) or 5)
         local mode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode)
         local row = make("Frame", {
-            Size = UDim2.new(1, 0, 0, 34),
+            Size = UDim2.new(1, 0, 0, 46),
             BackgroundColor3 = T.Card,
             BorderSizePixel = 0,
             ZIndex = 93,
         }, list)
         corner(row, 7); stroke(row)
         make("TextLabel", {
-            Size = UDim2.new(1, -116, 1, 0),
-            Position = UDim2.fromOffset(8, 0),
+            Size = UDim2.new(1, -116, 0, 20),
+            Position = UDim2.fromOffset(8, 5),
             BackgroundTransparency = 1,
-            Text = string.format("%02d. %s | Price %s | %s | Max %s per pet",
+            Text = string.format("%02d. %s | Price %s | %s",
                 idx,
                 tostring(name),
                 formatSniperMax(maxPrice),
-                State.FormatSniperKgRange(mode, minKg, maxKg),
-                tostring(perPet)
+                State.FormatSniperKgRange(mode, minKg, maxKg)
             ),
             TextColor3 = T.Text,
             Font = Enum.Font.Code,
             TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 94,
+        }, row)
+        make("TextLabel", {
+            Size = UDim2.new(1, -116, 0, 18),
+            Position = UDim2.fromOffset(8, 24),
+            BackgroundTransparency = 1,
+            Text = "Max " .. tostring(perPet) .. " per pet",
+            TextColor3 = T.Sub,
+            Font = Enum.Font.Code,
+            TextSize = 10,
             TextXAlignment = Enum.TextXAlignment.Left,
             TextTruncate = Enum.TextTruncate.AtEnd,
             ZIndex = 94,
