@@ -5457,38 +5457,24 @@ State.ListingMarketSec:AddButton("Market Scan", refreshMarketSample, "outline")
 
 --// SNIPER PAGE
 local sniperPage = win:CreatePage("Sniper")
-State.SniperToggleRow = sniperPage:AddRow()
-State.SniperEnabledSec = sniperPage:AddSectionInRow(State.SniperToggleRow, "Enabled", 1 / 3)
-State.SniperDrySec = sniperPage:AddSectionInRow(State.SniperToggleRow, "Dry Run", 1 / 3)
-State.SniperRescanSec = sniperPage:AddSectionInRow(State.SniperToggleRow, "Rescan", 1 / 3)
-
 State.SniperConfigRow = sniperPage:AddRow()
-State.SniperWatchSec = sniperPage:AddSectionInRow(State.SniperConfigRow, "Watch Setup", 0.4)
-State.SniperWeightSec = sniperPage:AddSectionInRow(State.SniperConfigRow, "Weight", 0.3)
-State.SniperLimitSec = sniperPage:AddSectionInRow(State.SniperConfigRow, "Limits", 0.3)
-
-State.SniperActionRow = sniperPage:AddRow()
-State.SniperAddSec = sniperPage:AddSectionInRow(State.SniperActionRow, "Add", 0.2)
-State.SniperManageSec = sniperPage:AddSectionInRow(State.SniperActionRow, "Manage", 0.2)
-State.SniperDryScanSec = sniperPage:AddSectionInRow(State.SniperActionRow, "Scan", 0.2)
-State.SniperClearSec = sniperPage:AddSectionInRow(State.SniperActionRow, "Clear", 0.2)
-State.SniperBuySec = sniperPage:AddSectionInRow(State.SniperActionRow, "Buy", 0.2)
-
+State.SniperWatchSec = sniperPage:AddSectionInRow(State.SniperConfigRow, "Watch Builder", 0.5)
+State.SniperLimitSec = sniperPage:AddSectionInRow(State.SniperConfigRow, "Watch Limits", 0.5)
 State.SniperResultSec = sniperPage:AddSection("Sniper Matches")
 
-State.SniperEnabledSec:AddToggle("Active", CFG.Sniper.Enabled, function(v)
+State.SniperWatchSec:AddToggle("Enabled", CFG.Sniper.Enabled, function(v)
     CFG.Sniper.Enabled = v
     State.SaveRuntimeSettings()
     log("Sniper Enabled", tostring(v))
 end)
 
-State.SniperDrySec:AddToggle("Preview", CFG.Sniper.DryRun, function(v)
+State.SniperWatchSec:AddToggle("Dry Run", CFG.Sniper.DryRun, function(v)
     CFG.Sniper.DryRun = v
     State.SaveRuntimeSettings()
     log("Sniper DryRun", tostring(v))
 end)
 
-State.SniperRescanSec:AddToggle("Before Buy", CFG.Sniper.RescanBeforeBuy, function(v)
+State.SniperWatchSec:AddToggle("Rescan Before Buy", CFG.Sniper.RescanBeforeBuy, function(v)
     CFG.Sniper.RescanBeforeBuy = v
     State.SaveRuntimeSettings()
     log("Sniper RescanBeforeBuy", tostring(v))
@@ -5496,14 +5482,14 @@ end)
 
 local sPet = State.SniperWatchSec:AddSearchDropdown("Pet", getPetList(), "Red Fox")
 local sMax = State.SniperWatchSec:AddInput("Max Price", "6")
-State.SniperWeightModeInput = State.SniperWeightSec:AddDropdown("Mode", {"Base", "Visual"}, CFG.Sniper.WeightMode or "Base", function(v)
+State.SniperWeightModeInput = State.SniperLimitSec:AddDropdown("Weight Mode", {"Base", "Visual"}, CFG.Sniper.WeightMode or "Base", function(v)
     CFG.Sniper.WeightMode = normalizeSniperWeightMode(v)
     log("SniperWeightMode", CFG.Sniper.WeightMode)
 end)
-State.SniperMinKgInput = State.SniperWeightSec:AddInput("Min KG", "0", function(v)
+State.SniperMinKgInput = State.SniperLimitSec:AddInput("Min KG", "0", function(v)
     CFG.Sniper.MinWeight = toNumber(v) or 0
 end)
-State.SniperMaxKgInput = State.SniperWeightSec:AddInput("Max KG", "", function(v)
+State.SniperMaxKgInput = State.SniperLimitSec:AddInput("Max KG", "", function(v)
     CFG.Sniper.MaxWeight = toNumber(v)
 end)
 local sShow = State.SniperLimitSec:AddInput("Show", tostring(CFG.Sniper.MaxMatchesShown or 20), function(v)
@@ -5512,7 +5498,7 @@ end)
 local sPerPet = State.SniperLimitSec:AddInput("Per Pet", tostring(CFG.Sniper.MaxMatchesPerPet or 5), function(v)
     CFG.Sniper.MaxMatchesPerPet = toInt(v) or CFG.Sniper.MaxMatchesPerPet or 5
 end)
-State.SniperWatchlistIdInput = State.SniperLimitSec:AddInput("Watch ID", tostring(CFG.Sniper.WatchlistId or "1"), function(v)
+State.SniperWatchlistIdInput = State.SniperLimitSec:AddInput("Watchlist ID", tostring(CFG.Sniper.WatchlistId or "1"), function(v)
     CFG.Sniper.WatchlistId = tostring(v or "1")
     State.SaveRuntimeSettings()
     State.ReloadSniperConfig()
@@ -5844,30 +5830,30 @@ State.RefreshSniperLog = function()
     addLines(sniperLog, lines)
 end
 
-State.SniperAddSec:AddButton("Add Watch", function()
+State.SniperWatchSec:AddButton("Add Watch", function()
     State.ApplySniperLimits()
     addWatch(sPet:Get(), sMax:Get())
     State.RefreshSniperLog()
 end)
 
-State.SniperManageSec:AddButton("Manage", function()
+State.SniperWatchSec:AddButton("Manage Watchlist", function()
     State.OpenSniperWatchlistManager()
 end, "outline")
 
-State.SniperDryScanSec:AddButton("Dry Scan", function()
+State.SniperWatchSec:AddButton("Dry Run Scan", function()
     State.ApplySniperLimits()
     snipeDryRun()
     State.RefreshSniperLog()
 end, "outline")
 
-State.SniperClearSec:AddButton("Clear", function()
+State.SniperLimitSec:AddButton("Clear Watchlist", function()
     clearWatch()
     State.LastSniperMatches = {}
     State.LastSniperRawCount = 0
     State.RefreshSniperLog()
 end, "outline")
 
-State.SniperBuySec:AddButton("Buy First", function()
+State.SniperLimitSec:AddButton("Buy First", function()
     buyFirstMatch()
     State.RefreshSniperLog()
 end, "outline")
