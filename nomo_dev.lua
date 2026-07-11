@@ -2032,10 +2032,10 @@ State.WebhookEmbedForListing = function(kind, l, extra)
     local titlePrefix = kind == "snipe" and "⚡ SNIPED" or "💰 BOOTH SALE"
     local color = kind == "snipe" and 0xEB44D5 or 0xFFB800
     local priceLabel = kind == "snipe" and "🪙 Bought For" or "🪙 Sold For"
-    local userLabel = kind == "snipe" and "👤 Seller" or "👤 By User"
-    local userValue = tostring(l.OwnerName or LocalPlayer.Name or "")
+    local userLabel = "👤 By User"
+    local userValue = tostring(LocalPlayer.Name or "")
+    local sellerValue = kind == "snipe" and tostring(extra.User or l.OwnerName or "") or ""
     local buyerValue = kind == "sold" and tostring(extra.User or l.BuyerName or "") or ""
-    if kind == "snipe" then userValue = tostring(extra.User or l.OwnerName or "") end
     local deviceName = tostring(extra.DeviceName or CFG.Webhook.DeviceName or getgenv().nomo_device_name or getgenv().NOMO_DEVICE_NAME or "")
     local displayKg = tonumber(pet.VisualWeight or pet.BaseWeight) or 0
     local fallbackIconUrl = "https://www.roblox.com/headshot-thumbnail/image?userId=" .. tostring(LocalPlayer.UserId) .. "&width=150&height=150&format=png"
@@ -2045,6 +2045,9 @@ State.WebhookEmbedForListing = function(kind, l, extra)
 
     if userValue ~= "" and userValue ~= "Unknown" then
         table.insert(fields, {name = userLabel, value = userValue, inline = false})
+    end
+    if kind == "snipe" and sellerValue ~= "" and sellerValue ~= "Unknown" then
+        table.insert(fields, {name = "👤 Seller", value = sellerValue, inline = true})
     end
     if kind == "sold" and buyerValue ~= "" and buyerValue ~= "Unknown" then
         table.insert(fields, {name = "👤 Buyer", value = buyerValue, inline = true})
