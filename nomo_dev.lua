@@ -4208,9 +4208,31 @@ State.RefreshDashboard = function()
     if State.DashLog then
         local lines = {}
         for i = 1, math.min(5, #State.Logs) do
-            table.insert(lines, State.Logs[i])
+            local line = tostring(State.Logs[i] or ""):gsub("^%d%d:%d%d:%d%d%s+", "")
+            local low = line:lower()
+            if low:find("failed", 1, true) or low:find("unsafe", 1, true) or low:find("error", 1, true) then
+                line = "[WARN] " .. line
+            elseif low:find("started", 1, true) or low:find("attempt", 1, true) or low:find("scan", 1, true) then
+                line = "[RUN] " .. line
+            elseif low:find("ok", 1, true) or low:find("done", 1, true) or low:find("complete", 1, true) or low:find("verified", 1, true) then
+                line = "[OK] " .. line
+            else
+                line = "[INFO] " .. line
+            end
+            table.insert(lines, line)
         end
         addLines(State.DashLog, lines)
+    end
+    if State.DashSessionLabel then
+        local session = math.floor(os.clock())
+        local mins = math.floor(session / 60)
+        local secs = session % 60
+        State.DashSessionLabel:Set(string.format("Session: %dm %02ds", mins, secs), T.Accent)
+        State.DashSellerLabel:Set("Seller: " .. (CFG.Seller.AutoList and "ON" or "OFF") .. " | listed " .. tostring(State.ListedThisSession or 0), CFG.Seller.AutoList and T.Green or T.Sub)
+        State.DashSniperLabel:Set("Sniper: " .. (CFG.Sniper.Enabled and "ON" or "OFF") .. " | sniped " .. tostring(State.SnipedThisSession or 0), CFG.Sniper.Enabled and T.Green or T.Sub)
+        local best = findBestBooth()
+        local boothText = best and best.Status or "No Booth"
+        State.DashBoothLabel:Set("Booth: " .. tostring(boothText) .. " | Pets " .. tostring(State.CloneInventoryCount or 0), boothText == "MINE" and T.Green or T.Text)
     end
 end
 
@@ -4288,6 +4310,12 @@ end, "outline")
 
 State.DashEventsSec = State.DashboardPage:AddSection("Recent Events")
 State.DashLog = State.DashEventsSec:AddLog(78)
+
+State.DashFooterSec = State.DashboardPage:AddSection("Runtime Status")
+State.DashSessionLabel = State.DashFooterSec:AddLabel("Session: ...", T.Accent)
+State.DashSellerLabel = State.DashFooterSec:AddLabel("Seller: ...", T.Sub)
+State.DashSniperLabel = State.DashFooterSec:AddLabel("Sniper: ...", T.Sub)
+State.DashBoothLabel = State.DashFooterSec:AddLabel("Booth: ...", T.Text)
 
 --// BOOTH PAGE
 local boothPage = win:CreatePage("Booth")
