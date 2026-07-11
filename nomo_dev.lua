@@ -5931,13 +5931,6 @@ end)
 State.SoldWebhookUrlInput:SetClearOnFocus(true)
 State.SoldWebhookUrlInput:SetDisplayTransform(State.WebhookMaskValue)
 
-State.WebhookIconUrlInput = State.WebhookRouteSec:AddInput("Icon URL", tostring(CFG.Webhook.IconUrl or ""), function(v)
-    CFG.Webhook.IconUrl = tostring(v or "")
-    State.SaveRuntimeSettings()
-end)
-State.WebhookIconUrlInput:SetClearOnFocus(true)
-State.WebhookIconUrlInput:SetDisplayTransform(State.WebhookMaskValue)
-
 State.WebhookDeviceNameInput = State.WebhookRouteSec:AddInput("Device Name", tostring(CFG.Webhook.DeviceName or ""), function(v)
     CFG.Webhook.DeviceName = tostring(v or "")
     State.SaveRuntimeSettings()
@@ -5946,7 +5939,7 @@ end)
 State.WebhookTestSec:AddButton("Test Snipe Webhook", function()
     CFG.Webhook.SnipeUrl = State.SnipeWebhookUrlInput:Get()
     CFG.Webhook.SoldUrl = State.SoldWebhookUrlInput:Get()
-    CFG.Webhook.IconUrl = State.WebhookIconUrlInput:Get()
+    CFG.Webhook.IconUrl = tostring(CFG.Webhook.IconUrl or "")
     CFG.Webhook.DeviceName = State.WebhookDeviceNameInput:Get()
     State.SaveRuntimeSettings()
     local wasEnabled = CFG.Webhook.Enabled
@@ -5972,7 +5965,7 @@ end, "outline")
 State.WebhookTestSec:AddButton("Test Sale Webhook", function()
     CFG.Webhook.SnipeUrl = State.SnipeWebhookUrlInput:Get()
     CFG.Webhook.SoldUrl = State.SoldWebhookUrlInput:Get()
-    CFG.Webhook.IconUrl = State.WebhookIconUrlInput:Get()
+    CFG.Webhook.IconUrl = tostring(CFG.Webhook.IconUrl or "")
     CFG.Webhook.DeviceName = State.WebhookDeviceNameInput:Get()
     State.SaveRuntimeSettings()
     local wasEnabled = CFG.Webhook.Enabled
@@ -5996,18 +5989,22 @@ end, "outline")
 
 --// SETTINGS PAGE
 State.SettingsPage = win:CreatePage("Settings")
-State.SettingSec = State.SettingsPage:AddSection("Settings")
-State.FilterPathInput = State.SettingSec:AddInput("Filter Path", getConfigFolder(), function(v)
+State.SettingsTopRow = State.SettingsPage:AddRow()
+State.SettingPathSec = State.SettingsPage:AddSectionInRow(State.SettingsTopRow, "Paths", 0.45)
+State.SettingUiSec = State.SettingsPage:AddSectionInRow(State.SettingsTopRow, "UI", 0.25)
+State.SettingActionSec = State.SettingsPage:AddSectionInRow(State.SettingsTopRow, "Actions", 0.3)
+
+State.FilterPathInput = State.SettingPathSec:AddInput("Filter Folder", getConfigFolder(), function(v)
     CFG.Seller.ListingFilterPath = v
     reloadFilters()
 end)
 
-State.SettingSec:AddToggle("Compact Booth Data", CFG.UI.CompactBoothData ~= false, function(v)
+State.SettingUiSec:AddToggle("Compact Booth Data", CFG.UI.CompactBoothData ~= false, function(v)
     CFG.UI.CompactBoothData = v
     log("CompactBoothData", tostring(v))
 end)
 
-State.SettingSec:AddToggle("Filter Game Warn Spam", CFG.UI.FilterGameSpam ~= false, function(v)
+State.SettingUiSec:AddToggle("Filter Warn Spam", CFG.UI.FilterGameSpam ~= false, function(v)
     CFG.UI.FilterGameSpam = v
     if v then
         local ok = installWarnFilter()
@@ -6017,12 +6014,12 @@ State.SettingSec:AddToggle("Filter Game Warn Spam", CFG.UI.FilterGameSpam ~= fal
     end
 end)
 
-State.SettingSec:AddButton("Reload Pet API List", function()
+State.SettingActionSec:AddButton("Reload Pet List", function()
     loadGamePetList()
     log("PetList reloaded", tostring(#State.PetList))
 end, "outline")
 
-State.SettingSec:AddButton("Save / Reload Filter Path", function()
+State.SettingPathSec:AddButton("Save / Reload Path", function()
     CFG.Seller.ListingFilterPath = State.FilterPathInput:Get()
     State.SaveRuntimeSettings()
     reloadFilters()
@@ -6030,12 +6027,12 @@ State.SettingSec:AddButton("Save / Reload Filter Path", function()
     log("Config path set", tostring(CFG.Seller.ListingFilterPath), "listing", getFilterPath(), "sniper", getSniperFilterPath())
 end)
 
-State.SettingSec:AddButton("Stop Script", function()
+State.SettingActionSec:AddButton("Stop Script", function()
     State.Stop("settings stop")
 end, "outline")
 
 State.ActivitySec = State.SettingsPage:AddSection("Activity Log")
-State.ActivityLog = State.ActivitySec:AddLog(230)
+State.ActivityLog = State.ActivitySec:AddLog(170)
 
 State.ActivitySec:AddButton("Refresh Activity", function()
     addLines(State.ActivityLog, State.Logs)
