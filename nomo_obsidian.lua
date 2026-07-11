@@ -4385,9 +4385,8 @@ end, "outline")
 
 --// SELLER PAGE
 local sellerPage = win:CreatePage("Seller")
-local sellerRow = sellerPage:AddRow()
-local sellerCtrl = sellerPage:AddSectionInRow(sellerRow, "Runtime Controls", 0.45)
-local filterSec = sellerPage:AddSectionInRow(sellerRow, "Filter Builder", 0.55)
+local sellerCtrl = sellerPage:AddSection("Seller Control")
+local filterSec = sellerPage:AddSection("Filter Builder")
 
 sellerCtrl:AddToggle("Auto List", CFG.Seller.AutoList, function(v)
     CFG.Seller.AutoList = v
@@ -4427,22 +4426,6 @@ end)
 sellerCtrl:AddButton("REMOVE ALL MY LISTINGS", function()
     task.spawn(function()
         removeAllMyListings(CFG.Listings.RemoveAllMax or 50)
-        task.wait(0.6)
-        refreshSellerLog(true)
-    end)
-end, "outline")
-
-sellerCtrl:AddButton("REBUILD BOOTH", function()
-    task.spawn(function()
-        rebuildBooth()
-        task.wait(0.6)
-        refreshSellerLog(true)
-    end)
-end, "outline")
-
-sellerCtrl:AddButton("SMART REBUILD", function()
-    task.spawn(function()
-        smartRebuildBooth()
         task.wait(0.6)
         refreshSellerLog(true)
     end)
@@ -4763,9 +4746,8 @@ State.OpenFilterManager = function()
     end
 end
 
-local logRow = sellerPage:AddRow()
-local filterLogSec = sellerPage:AddSectionInRow(logRow, "Active Filters / Candidates", 1)
-sellerLog = filterLogSec:AddLog(210)
+local filterLogSec = sellerPage:AddSection("Active Filters / Candidates")
+sellerLog = filterLogSec:AddLog(125)
 
 diagnosePetFilter = function(petName)
     petName = tostring(petName or "")
@@ -4945,15 +4927,9 @@ filterSec:AddButton("Preview Candidates", function()
     refreshSellerLog(true)
 end, "outline")
 
-local delFilterInput = filterLogSec:AddInput("Remove Filter #", "1")
 filterLogSec:AddButton("Manage Filters", function()
     State.OpenFilterManager()
 end)
-
-filterLogSec:AddButton("Remove Selected Filter", function()
-    deleteFilter(delFilterInput:Get())
-    refreshSellerLog(true)
-end, "outline")
 
 filterLogSec:AddButton("Clear All Filters", function()
     clearFilters()
