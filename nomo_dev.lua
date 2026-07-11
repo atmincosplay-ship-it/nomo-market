@@ -209,6 +209,8 @@ local State = {
     LastClonePanelAt = 0,
     LastCloneInventoryAt = 0,
     CloneInventoryCount = 0,
+    ClonePanelDirty = true,
+    CloneInventoryDirty = true,
     PendingListUUIDs = {},
     PendingRemoveUUIDs = {},
     ManualRemoveUUIDs = {},
@@ -818,6 +820,12 @@ State.InvalidateListingCache = function()
     State.LastMyListingsCacheAt = 0
     State.InventoryCache = nil
     State.LastInventoryCacheAt = 0
+    State.ClonePanelDirty = true
+    State.CloneInventoryDirty = true
+    State.LastClonePanelAt = 0
+    if State.RefreshCloneStatus then
+        task.defer(State.RefreshCloneStatus, true)
+    end
 end
 
 local function markPendingList(uuid)
@@ -2170,6 +2178,7 @@ State.ConnectBoothHistory = function()
         local buyerName = tostring(buyer.username or "")
         if not listing then return end
         local sent = State.SendSoldWebhook(listing, {User = buyerName, Source = "history"})
+        State.InvalidateListingCache()
         if sent then
             log("History sold webhook", tostring(listing.PetType), tostring(listing.Price), tostring(listing.ListingUUID))
         end
@@ -4166,34 +4175,43 @@ end
 
 local refreshSellerLog
 
+State.RefreshCloneStatus = function(forceInventory)
+    if not win.CloneStatusText then return end
+    local best = findBestBooth()
+    local boothText = best and best.Status or "No Booth"
+    local listings = State.LastMyListings
+    if type(listings) ~= "table" then listings = getMyListings() end
+    local device = tostring(CFG.Webhook.DeviceName or getgenv().nomo_device_name or getgenv().NOMO_DEVICE_NAME or "")
+    if device == "" then device = tostring(LocalPlayer.Name or "NOMO") end
+    local uptime = math.max(0, math.floor(os.clock() - (State.StartedAt or os.clock())))
+    local session = string.format("%02d:%02d", math.floor(uptime / 60), uptime % 60)
+    local seller = CFG.Seller.AutoList and "ON" or (CFG.Seller.PreviewOnly and "PREVIEW" or "OFF")
+    local sniper = CFG.Sniper.Enabled and (CFG.Sniper.DryRun and "DRY" or "ON") or "OFF"
+    local webhook = CFG.Webhook.Enabled and "ON" or "OFF"
+    if forceInventory or State.CloneInventoryDirty or os.clock() - (State.LastCloneInventoryAt or 0) >= 10 then
+        State.LastCloneInventoryAt = os.clock()
+        State.CloneInventoryCount = #getOwnPetsFromData(forceInventory or State.CloneInventoryDirty)
+        State.CloneInventoryDirty = false
+    end
+    State.ClonePanelDirty = false
+    State.LastClonePanelAt = os.clock()
+    win.CloneStatusText.Text = "Device: " .. device
+        .. "\nBooth: " .. boothText .. " | " .. tostring(#listings) .. "/50"
+        .. "\nPets: " .. tostring(State.CloneInventoryCount or 0)
+        .. "\nSeller: " .. seller .. " | listed " .. tostring(State.ListedThisSession or 0)
+        .. "\nSniper: " .. sniper .. " | sniped " .. tostring(State.SnipedThisSession or 0)
+        .. "\nWebhook: " .. webhook
+        .. "\nSession: " .. session
+end
+
 local function refreshPills()
     local best = findBestBooth()
     local boothText = best and best.Status or "No Booth"
     win.Pills.Booth:Set(boothText, boothText == "MINE" and T.Green or (boothText == "FREE" and T.Yellow or T.Sub))
     win.Pills.Balance:Set(commaNumber(getTokenBalance()), T.Green)
     State.UpdatePerfStats()
-    if win.CloneStatusText and os.clock() - (State.LastClonePanelAt or 0) >= 2 then
-        State.LastClonePanelAt = os.clock()
-        local listings = State.LastMyListings
-        if type(listings) ~= "table" then listings = getMyListings() end
-        local device = tostring(CFG.Webhook.DeviceName or getgenv().nomo_device_name or getgenv().NOMO_DEVICE_NAME or "")
-        if device == "" then device = tostring(LocalPlayer.Name or "NOMO") end
-        local uptime = math.max(0, math.floor(os.clock() - (State.StartedAt or os.clock())))
-        local session = string.format("%02d:%02d", math.floor(uptime / 60), uptime % 60)
-        local seller = CFG.Seller.AutoList and "ON" or (CFG.Seller.PreviewOnly and "PREVIEW" or "OFF")
-        local sniper = CFG.Sniper.Enabled and (CFG.Sniper.DryRun and "DRY" or "ON") or "OFF"
-        local webhook = CFG.Webhook.Enabled and "ON" or "OFF"
-        if os.clock() - (State.LastCloneInventoryAt or 0) >= 10 then
-            State.LastCloneInventoryAt = os.clock()
-            State.CloneInventoryCount = #getOwnPetsFromData()
-        end
-        win.CloneStatusText.Text = "Device: " .. device
-            .. "\nBooth: " .. boothText .. " | " .. tostring(#listings) .. "/50"
-            .. "\nPets: " .. tostring(State.CloneInventoryCount or 0)
-            .. "\nSeller: " .. seller .. " | listed " .. tostring(State.ListedThisSession or 0)
-            .. "\nSniper: " .. sniper .. " | sniped " .. tostring(State.SnipedThisSession or 0)
-            .. "\nWebhook: " .. webhook
-            .. "\nSession: " .. session
+    if State.ClonePanelDirty or os.clock() - (State.LastClonePanelAt or 0) >= 2 then
+        State.RefreshCloneStatus(State.CloneInventoryDirty)
     end
 end
 
