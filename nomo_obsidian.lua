@@ -5990,9 +5990,9 @@ end, "outline")
 --// SETTINGS PAGE
 State.SettingsPage = win:CreatePage("Settings")
 State.SettingsTopRow = State.SettingsPage:AddRow()
-State.SettingPathSec = State.SettingsPage:AddSectionInRow(State.SettingsTopRow, "Paths", 0.45)
-State.SettingUiSec = State.SettingsPage:AddSectionInRow(State.SettingsTopRow, "UI", 0.25)
-State.SettingActionSec = State.SettingsPage:AddSectionInRow(State.SettingsTopRow, "Actions", 0.3)
+State.SettingPathSec = State.SettingsPage:AddSectionInRow(State.SettingsTopRow, "Paths", 0.34)
+State.SettingUiSec = State.SettingsPage:AddSectionInRow(State.SettingsTopRow, "UI", 0.33)
+State.SettingActionSec = State.SettingsPage:AddSectionInRow(State.SettingsTopRow, "Actions", 0.33)
 
 State.FilterPathInput = State.SettingPathSec:AddInput("Filter Folder", getConfigFolder(), function(v)
     CFG.Seller.ListingFilterPath = v
