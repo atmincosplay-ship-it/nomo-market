@@ -207,6 +207,8 @@ local State = {
     BoothDataCache = nil,
     LastBoothDataAt = 0,
     LastClonePanelAt = 0,
+    LastCloneInventoryAt = 0,
+    CloneInventoryCount = 0,
     PendingListUUIDs = {},
     PendingRemoveUUIDs = {},
     ManualRemoveUUIDs = {},
@@ -3330,8 +3332,8 @@ function Library:CreateWindow(cfg)
 	end
 
 	local clonePanel = make("Frame", {
-		Size = UDim2.fromOffset(230, 128),
-		Position = cfg.ClonePanelPosition or UDim2.new(0, 12, 1, -348),
+		Size = UDim2.fromOffset(240, 144),
+		Position = cfg.ClonePanelPosition or UDim2.new(0.5, -120, 0.5, -72),
 		BackgroundColor3 = T.Card,
 		BorderSizePixel = 0,
 		Visible = false,
@@ -4181,8 +4183,13 @@ local function refreshPills()
         local seller = CFG.Seller.AutoList and "ON" or (CFG.Seller.PreviewOnly and "PREVIEW" or "OFF")
         local sniper = CFG.Sniper.Enabled and (CFG.Sniper.DryRun and "DRY" or "ON") or "OFF"
         local webhook = CFG.Webhook.Enabled and "ON" or "OFF"
+        if os.clock() - (State.LastCloneInventoryAt or 0) >= 10 then
+            State.LastCloneInventoryAt = os.clock()
+            State.CloneInventoryCount = #getOwnPetsFromData()
+        end
         win.CloneStatusText.Text = "Device: " .. device
             .. "\nBooth: " .. boothText .. " | " .. tostring(#listings) .. "/50"
+            .. "\nPets: " .. tostring(State.CloneInventoryCount or 0)
             .. "\nSeller: " .. seller .. " | listed " .. tostring(State.ListedThisSession or 0)
             .. "\nSniper: " .. sniper .. " | sniped " .. tostring(State.SnipedThisSession or 0)
             .. "\nWebhook: " .. webhook
