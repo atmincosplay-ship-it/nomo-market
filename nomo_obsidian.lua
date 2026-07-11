@@ -3686,7 +3686,11 @@ function Library:CreateWindow(cfg)
 				}, row)
 				corner(box, 6); stroke(box); pad(box, 0, 0, 6, 6)
 				box.FocusLost:Connect(function() if cb then cb(box.Text) end end)
-				return {Set = function(_, v) box.Text = tostring(v) end, Get = function() return box.Text end}
+				return {
+					Set = function(_, v) box.Text = tostring(v) end,
+					Get = function() return box.Text end,
+					SetClearOnFocus = function(_, v) box.ClearTextOnFocus = v == true end,
+				}
 			end
 
 			function sec:AddDropdown(text, options, default, cb)
@@ -5885,16 +5889,19 @@ State.SnipeWebhookUrlInput = State.WebhookRouteSec:AddInput("Snipe Webhook URL",
     CFG.Webhook.SnipeUrl = tostring(v or "")
     State.SaveRuntimeSettings()
 end)
+State.SnipeWebhookUrlInput:SetClearOnFocus(true)
 
 State.SoldWebhookUrlInput = State.WebhookRouteSec:AddInput("Booth Sale Webhook URL", tostring(CFG.Webhook.SoldUrl or CFG.Webhook.Url or ""), function(v)
     CFG.Webhook.SoldUrl = tostring(v or "")
     State.SaveRuntimeSettings()
 end)
+State.SoldWebhookUrlInput:SetClearOnFocus(true)
 
 State.WebhookIconUrlInput = State.WebhookRouteSec:AddInput("Icon URL", tostring(CFG.Webhook.IconUrl or ""), function(v)
     CFG.Webhook.IconUrl = tostring(v or "")
     State.SaveRuntimeSettings()
 end)
+State.WebhookIconUrlInput:SetClearOnFocus(true)
 
 State.WebhookDeviceNameInput = State.WebhookRouteSec:AddInput("Device Name", tostring(CFG.Webhook.DeviceName or ""), function(v)
     CFG.Webhook.DeviceName = tostring(v or "")
