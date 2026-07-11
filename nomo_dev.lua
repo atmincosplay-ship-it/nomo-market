@@ -5860,10 +5860,12 @@ end, "outline")
 
 --// WEBHOOK PAGE
 State.WebhookPage = win:CreatePage("Webhook")
-State.WebhookSec = State.WebhookPage:AddSection("Webhook Configuration")
-State.WebhookRouteSec = State.WebhookPage:AddSection("Routes")
+State.WebhookTopRow = State.WebhookPage:AddRow()
+State.WebhookSec = State.WebhookPage:AddSectionInRow(State.WebhookTopRow, "Delivery", 0.35)
+State.WebhookRouteSec = State.WebhookPage:AddSectionInRow(State.WebhookTopRow, "Routes", 0.65)
+State.WebhookTestSec = State.WebhookPage:AddSection("Tests")
 
-State.WebhookSec:AddToggle("Enable Webhook", CFG.Webhook.Enabled == true, function(v)
+State.WebhookSec:AddToggle("Enabled", CFG.Webhook.Enabled == true, function(v)
     CFG.Webhook.Enabled = v
     State.SaveRuntimeSettings()
     log("Webhook", tostring(v))
@@ -5899,7 +5901,7 @@ State.WebhookDeviceNameInput = State.WebhookRouteSec:AddInput("Device Name", tos
     State.SaveRuntimeSettings()
 end)
 
-State.WebhookRouteSec:AddButton("Test Snipe Webhook", function()
+State.WebhookTestSec:AddButton("Test Snipe Webhook", function()
     CFG.Webhook.SnipeUrl = State.SnipeWebhookUrlInput:Get()
     CFG.Webhook.SoldUrl = State.SoldWebhookUrlInput:Get()
     CFG.Webhook.IconUrl = State.WebhookIconUrlInput:Get()
@@ -5925,7 +5927,7 @@ State.WebhookRouteSec:AddButton("Test Snipe Webhook", function()
     log("Snipe webhook test sent", tostring(sent))
 end, "outline")
 
-State.WebhookRouteSec:AddButton("Test Sale Webhook", function()
+State.WebhookTestSec:AddButton("Test Sale Webhook", function()
     CFG.Webhook.SnipeUrl = State.SnipeWebhookUrlInput:Get()
     CFG.Webhook.SoldUrl = State.SoldWebhookUrlInput:Get()
     CFG.Webhook.IconUrl = State.WebhookIconUrlInput:Get()
