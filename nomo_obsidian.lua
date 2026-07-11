@@ -4402,17 +4402,7 @@ sellerCtrl:AddToggle("Preview Only", CFG.Seller.PreviewOnly, function(v)
     log("PreviewOnly", tostring(v))
 end)
 
-sellerCtrl:AddToggle("Skip Favorited", CFG.Seller.SkipFavorited, function(v)
-    CFG.Seller.SkipFavorited = v
-end)
-
-sellerCtrl:AddToggle("Skip Locked", CFG.Seller.SkipLocked, function(v)
-    CFG.Seller.SkipLocked = v
-end)
-
-sellerCtrl:AddInput("Scan Interval", tostring(CFG.Seller.ScanInterval), function(v)
-    CFG.Seller.ScanInterval = toNumber(v) or CFG.Seller.ScanInterval
-end)
+sellerCtrl:AddNote("Safety: skips favorited/locked pets. Scan interval is hardcoded for performance.")
 
 sellerCtrl:AddButton("LIST UNTIL BOOTH FULL", function()
     CFG.Seller.BoothCap = 50
@@ -4430,14 +4420,6 @@ sellerCtrl:AddButton("REMOVE ALL MY LISTINGS", function()
         refreshSellerLog(true)
     end)
 end, "outline")
-
-sellerCtrl:AddToggle("Auto Smart Rebuild On Start", CFG.Seller.AutoSmartRebuildOnStart, function(v)
-    CFG.Seller.AutoSmartRebuildOnStart = v
-end)
-
-sellerCtrl:AddToggle("Remote Config", CFG.Seller.RemoteConfigEnabled, function(v)
-    CFG.Seller.RemoteConfigEnabled = v
-end)
 
 sellerCtrl:AddButton("Reload Remote Config", function()
     task.spawn(function()
