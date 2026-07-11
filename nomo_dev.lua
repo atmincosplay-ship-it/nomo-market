@@ -4385,28 +4385,102 @@ end, "outline")
 
 --// SELLER PAGE
 local sellerPage = win:CreatePage("Seller")
-local sellerTopRow = sellerPage:AddRow()
-local sellerCtrl = sellerPage:AddSectionInRow(sellerTopRow, "Seller Control", 0.5)
-local sellerActions = sellerPage:AddSectionInRow(sellerTopRow, "Seller Actions", 0.5)
+local sellerCtrl = sellerPage:AddSection("Seller Control")
 local filterRow = sellerPage:AddRow()
 local filterSec = sellerPage:AddSectionInRow(filterRow, "Filter Builder", 0.5)
 local filterRangeSec = sellerPage:AddSectionInRow(filterRow, "Filter Limits", 0.5)
 
-sellerCtrl:AddToggle("Auto List", CFG.Seller.AutoList, function(v)
+State.SellerCompactRow = function(section, height)
+    local row = make("Frame", {
+        Size = UDim2.new(1, 0, 0, height or 30),
+        BackgroundTransparency = 1,
+    }, section.Frame)
+    make("UIListLayout", {
+        FillDirection = Enum.FillDirection.Horizontal,
+        Padding = UDim.new(0, 8),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+    }, row)
+    return row
+end
+
+State.SellerCompactToggle = function(row, text, default, cb)
+    local state = default == true
+    local btn = make("TextButton", {
+        Size = UDim2.new(0.5, -4, 1, 0),
+        BackgroundColor3 = T.Card2,
+        Text = "",
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+    }, row)
+    corner(btn, 7); stroke(btn)
+    make("TextLabel", {
+        Size = UDim2.new(1, -52, 1, 0),
+        Position = UDim2.fromOffset(10, 0),
+        BackgroundTransparency = 1,
+        Text = text,
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamMedium,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, btn)
+    local bg = make("Frame", {
+        Size = UDim2.fromOffset(34, 18),
+        Position = UDim2.new(1, -42, 0.5, -9),
+        BackgroundColor3 = state and T.Accent or T.Toggle0,
+        BorderSizePixel = 0,
+    }, btn)
+    corner(bg, 9)
+    local knob = make("Frame", {
+        Size = UDim2.fromOffset(14, 14),
+        Position = state and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7),
+        BackgroundColor3 = T.Text,
+        BorderSizePixel = 0,
+    }, bg)
+    corner(knob, 7)
+    local function set(v)
+        state = v == true
+        bg.BackgroundColor3 = state and T.Accent or T.Toggle0
+        knob.Position = state and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
+        if cb then cb(state) end
+    end
+    btn.Activated:Connect(function() set(not state) end)
+    return {Set = function(_, v) set(v) end, Get = function() return state end}
+end
+
+State.SellerCompactButton = function(row, text, cb, style)
+    local filled = style ~= "outline"
+    local btn = make("TextButton", {
+        Size = UDim2.new(1 / 3, -6, 1, 0),
+        BackgroundColor3 = filled and T.Accent or T.Card2,
+        Text = text,
+        TextColor3 = filled and Color3.new(1, 1, 1) or T.Accent,
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+    }, row)
+    corner(btn, 7)
+    if not filled then stroke(btn, T.Accent, 0.45) end
+    btn.Activated:Connect(function() if cb then cb() end end)
+    return btn
+end
+
+State.SellerToggleRow = State.SellerCompactRow(sellerCtrl, 30)
+State.SellerCompactToggle(State.SellerToggleRow, "Auto List", CFG.Seller.AutoList, function(v)
     CFG.Seller.AutoList = v
     CFG.Seller.PreviewOnly = not v
     State.SaveRuntimeSettings()
     log("AutoList", tostring(v))
 end)
 
-sellerCtrl:AddToggle("Preview Only", CFG.Seller.PreviewOnly, function(v)
+State.SellerCompactToggle(State.SellerToggleRow, "Preview Only", CFG.Seller.PreviewOnly, function(v)
     CFG.Seller.PreviewOnly = v
     if v then CFG.Seller.AutoList = false end
     State.SaveRuntimeSettings()
     log("PreviewOnly", tostring(v))
 end)
 
-sellerActions:AddButton("LIST UNTIL BOOTH FULL", function()
+State.SellerActionRow = State.SellerCompactRow(sellerCtrl, 32)
+State.SellerCompactButton(State.SellerActionRow, "LIST UNTIL BOOTH FULL", function()
     CFG.Seller.BoothCap = 50
     CFG.Seller.ListOnceMax = 50
     CFG.Seller.MaxAutoListSession = 50
@@ -4415,7 +4489,7 @@ sellerActions:AddButton("LIST UNTIL BOOTH FULL", function()
     end)
 end)
 
-sellerActions:AddButton("REMOVE ALL MY LISTINGS", function()
+State.SellerCompactButton(State.SellerActionRow, "REMOVE ALL LISTINGS", function()
     task.spawn(function()
         removeAllMyListings(CFG.Listings.RemoveAllMax or 50)
         task.wait(0.6)
@@ -4423,7 +4497,7 @@ sellerActions:AddButton("REMOVE ALL MY LISTINGS", function()
     end)
 end, "outline")
 
-sellerActions:AddButton("Reload Remote Config", function()
+State.SellerCompactButton(State.SellerActionRow, "RELOAD CONFIG", function()
     task.spawn(function()
         reloadFilters()
         task.wait(0.2)
