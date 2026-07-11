@@ -4253,7 +4253,7 @@ end)
 
 State.DashActionRow = State.DashboardPage:AddRow()
 State.DashRebuildSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Rebuild", 0.25)
-State.DashListingsSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "My Booth", 0.25)
+State.DashListingsSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "My Listing", 0.25)
 State.DashFiltersSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Filters", 0.25)
 State.DashSniperNavSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Sniper", 0.25)
 
@@ -4265,10 +4265,11 @@ State.DashRebuildSec:AddButton("Smart Rebuild", function()
     end)
 end)
 State.DashListingsSec:AddButton("Manage", function()
-    win:SelectPage("Listings")
-    task.spawn(function()
-        if refreshMyListingsLog then refreshMyListingsLog() end
-    end)
+    if State.OpenMyListingsManager then
+        State.OpenMyListingsManager()
+    else
+        win:SelectPage("Listings")
+    end
 end, "outline")
 State.DashFiltersSec:AddButton("Manage", function()
     if State.OpenFilterManager then
@@ -5120,6 +5121,144 @@ function refreshMyListingsLog()
             break
         end
         makeListingRow(i, l)
+    end
+end
+
+State.OpenMyListingsManager = function()
+    local my = getMyListings()
+    State.TrackSoldListings(my)
+
+    local overlay = make("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.35,
+        BorderSizePixel = 0,
+        ZIndex = 90,
+    }, win.Gui)
+    local modal = make("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.fromOffset(560, 390),
+        BackgroundColor3 = T.Card,
+        BorderSizePixel = 0,
+        ZIndex = 91,
+    }, overlay)
+    corner(modal, 10); stroke(modal); pad(modal, 10)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, -74, 0, 26),
+        BackgroundTransparency = 1,
+        Text = "Manage My Listings",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 92,
+    }, modal)
+    local closeBtn = make("TextButton", {
+        Size = UDim2.fromOffset(64, 24),
+        Position = UDim2.new(1, -64, 0, 0),
+        BackgroundColor3 = T.Card2,
+        Text = "Done",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 92,
+    }, modal)
+    corner(closeBtn, 7); stroke(closeBtn)
+
+    local list = make("ScrollingFrame", {
+        Size = UDim2.new(1, 0, 1, -36),
+        Position = UDim2.fromOffset(0, 34),
+        BackgroundColor3 = T.Card2,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 4,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = UDim2.new(),
+        ZIndex = 92,
+    }, modal)
+    corner(list, 8); pad(list, 5); vlist(list, 4)
+
+    closeBtn.Activated:Connect(function() overlay:Destroy() end)
+
+    if #my == 0 then
+        make("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 32),
+            BackgroundTransparency = 1,
+            Text = "No active booth listings found.",
+            TextColor3 = T.Sub,
+            Font = Enum.Font.Gotham,
+            TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 93,
+        }, list)
+        return
+    end
+
+    for i, l in ipairs(my) do
+        if i > 50 then
+            make("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 26),
+                BackgroundTransparency = 1,
+                Text = "... +" .. tostring(#my - 50) .. " more",
+                TextColor3 = T.Sub,
+                Font = Enum.Font.Gotham,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                ZIndex = 93,
+            }, list)
+            break
+        end
+
+        local row = make("Frame", {
+            Size = UDim2.new(1, 0, 0, 34),
+            BackgroundColor3 = T.Card,
+            BorderSizePixel = 0,
+            ZIndex = 93,
+        }, list)
+        corner(row, 7); stroke(row)
+        make("TextLabel", {
+            Size = UDim2.new(1, -54, 1, 0),
+            Position = UDim2.fromOffset(8, 0),
+            BackgroundTransparency = 1,
+            Text = string.format("%02d. %s | %s | %s | id %s",
+                i,
+                tostring(l.PetType or "?"),
+                tostring(l.ItemType or "?"),
+                commaNumber(l.Price),
+                tostring(l.ListingUUID or ""):sub(1, 8)
+            ),
+            TextColor3 = T.Text,
+            Font = Enum.Font.Code,
+            TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 94,
+        }, row)
+        local delBtn = make("TextButton", {
+            Size = UDim2.fromOffset(36, 24),
+            Position = UDim2.new(1, -44, 0.5, -12),
+            BackgroundColor3 = T.Red,
+            Text = "X",
+            TextColor3 = Color3.new(1, 1, 1),
+            Font = Enum.Font.GothamBold,
+            TextSize = 12,
+            BorderSizePixel = 0,
+            ZIndex = 94,
+        }, row)
+        corner(delBtn, 6)
+        delBtn.Activated:Connect(function()
+            delBtn.Text = "..."
+            local ok = removeListingUUID(l.ListingUUID)
+            task.wait(0.35)
+            refreshMyListingsLog()
+            if not ok then
+                log("Popup remove failed", tostring(l.ListingUUID))
+            end
+            overlay:Destroy()
+            State.OpenMyListingsManager()
+        end)
     end
 end
 
