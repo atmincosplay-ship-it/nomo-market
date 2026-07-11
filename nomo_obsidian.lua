@@ -3341,21 +3341,21 @@ function Library:CreateWindow(cfg)
 	end
 
 	local clonePanel = make("Frame", {
-		Size = UDim2.fromOffset(240, 144),
-		Position = cfg.ClonePanelPosition or UDim2.new(0.5, -120, 0.5, -72),
+		Size = UDim2.fromOffset(260, 132),
+		Position = cfg.ClonePanelPosition or UDim2.new(0.5, -130, 0.5, -66),
 		BackgroundColor3 = T.Card,
 		BorderSizePixel = 0,
 		Visible = false,
 	}, gui)
-	corner(clonePanel, 8); stroke(clonePanel, T.Border); pad(clonePanel, 8)
+	corner(clonePanel, 10); stroke(clonePanel, T.Accent, 0.25); pad(clonePanel, 8)
 	make("TextLabel", {
 		Size = UDim2.new(1, 0, 0, 18),
 		BackgroundTransparency = 1,
-		Text = "NOMO STATUS",
+		Text = "NOMO MARKET STATUS",
 		TextColor3 = T.Accent,
 		Font = Enum.Font.GothamBold,
 		TextSize = 12,
-		TextXAlignment = Enum.TextXAlignment.Left,
+		TextXAlignment = Enum.TextXAlignment.Center,
 	}, clonePanel)
 	local cloneText = make("TextLabel", {
 		Size = UDim2.new(1, 0, 1, -22),
@@ -3364,9 +3364,9 @@ function Library:CreateWindow(cfg)
 		Text = "Loading...",
 		TextColor3 = T.Text,
 		Font = Enum.Font.Code,
-		TextSize = 11,
+		TextSize = 10,
 		TextWrapped = true,
-		TextXAlignment = Enum.TextXAlignment.Left,
+		TextXAlignment = Enum.TextXAlignment.Center,
 		TextYAlignment = Enum.TextYAlignment.Top,
 	}, clonePanel)
 
@@ -4205,6 +4205,16 @@ State.RefreshCloneStatus = function(forceInventory)
 end
 
 State.RefreshDashboard = function()
+    if State.DashBoothMetric then
+        local best = findBestBooth()
+        local boothText = best and best.Status or "No Booth"
+        State.DashBoothMetric:Set(boothText, boothText == "MINE" and T.Green or (boothText == "FREE" and T.Yellow or T.Sub))
+        State.DashTokenMetric:Set(commaNumber(getTokenBalance()), T.Green)
+        State.DashPetMetric:Set(tostring(State.CloneInventoryCount or 0), T.Text)
+        State.DashSellerMetric:Set((CFG.Seller.AutoList and "ON" or "OFF") .. " | " .. tostring(State.ListedThisSession or 0), CFG.Seller.AutoList and T.Green or T.Sub)
+        State.DashSniperMetric:Set((CFG.Sniper.Enabled and "ON" or "OFF") .. " | " .. tostring(State.SnipedThisSession or 0), CFG.Sniper.Enabled and T.Green or T.Sub)
+        State.DashWebhookMetric:Set(CFG.Webhook.Enabled and "ON" or "OFF", CFG.Webhook.Enabled and T.Green or T.Sub)
+    end
     if State.DashLog then
         local lines = {}
         for i = 1, math.min(5, #State.Logs) do
@@ -4230,41 +4240,159 @@ end
 --// DASHBOARD PAGE
 State.DashboardPage = win:CreatePage("Dashboard")
 State.DashActionSec = State.DashboardPage:AddSection("Market Control")
-State.DashActionSec:AddToggle("Auto List", CFG.Seller.AutoList, function(v)
+
+State.DashCompactRow = function(section, height)
+    local row = make("Frame", {
+        Size = UDim2.new(1, 0, 0, height or 30),
+        BackgroundTransparency = 1,
+    }, section.Frame)
+    make("UIListLayout", {
+        FillDirection = Enum.FillDirection.Horizontal,
+        Padding = UDim.new(0, 8),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+    }, row)
+    return row
+end
+
+State.DashToggle = function(row, text, default, cb)
+    local state = default == true
+    local btn = make("TextButton", {
+        Size = UDim2.new(1 / 3, -6, 1, 0),
+        BackgroundColor3 = T.Card2,
+        Text = "",
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+    }, row)
+    corner(btn, 7); stroke(btn)
+    make("TextLabel", {
+        Size = UDim2.new(1, -52, 1, 0),
+        Position = UDim2.fromOffset(10, 0),
+        BackgroundTransparency = 1,
+        Text = text,
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamMedium,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, btn)
+    local bg = make("Frame", {
+        Size = UDim2.fromOffset(34, 18),
+        Position = UDim2.new(1, -42, 0.5, -9),
+        BackgroundColor3 = state and T.Accent or T.Toggle0,
+        BorderSizePixel = 0,
+    }, btn)
+    corner(bg, 9)
+    local knob = make("Frame", {
+        Size = UDim2.fromOffset(14, 14),
+        Position = state and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7),
+        BackgroundColor3 = T.Text,
+        BorderSizePixel = 0,
+    }, bg)
+    corner(knob, 7)
+    local function set(v)
+        state = v == true
+        bg.BackgroundColor3 = state and T.Accent or T.Toggle0
+        knob.Position = state and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
+        if cb then cb(state) end
+    end
+    btn.Activated:Connect(function() set(not state) end)
+    return {Set = function(_, v) set(v) end, Get = function() return state end}
+end
+
+State.DashButton = function(row, text, cb, style)
+    local filled = style ~= "outline"
+    local btn = make("TextButton", {
+        Size = UDim2.new(0.25, -6, 1, 0),
+        BackgroundColor3 = filled and T.Accent or T.Card2,
+        Text = text,
+        TextColor3 = filled and Color3.new(1, 1, 1) or T.Accent,
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+    }, row)
+    corner(btn, 7)
+    if not filled then stroke(btn, T.Accent, 0.45) end
+    btn.Activated:Connect(function() if cb then cb() end end)
+    return btn
+end
+
+State.DashMetric = function(row, label, value, color)
+    local card = make("Frame", {
+        Size = UDim2.new(1 / 3, -6, 1, 0),
+        BackgroundColor3 = T.Card2,
+        BorderSizePixel = 0,
+    }, row)
+    corner(card, 7); stroke(card)
+    make("TextLabel", {
+        Size = UDim2.new(1, -12, 0, 12),
+        Position = UDim2.fromOffset(8, 4),
+        BackgroundTransparency = 1,
+        Text = label,
+        TextColor3 = T.Sub,
+        Font = Enum.Font.Gotham,
+        TextSize = 9,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, card)
+    local val = make("TextLabel", {
+        Size = UDim2.new(1, -12, 0, 16),
+        Position = UDim2.fromOffset(8, 17),
+        BackgroundTransparency = 1,
+        Text = tostring(value or "-"),
+        TextColor3 = color or T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    }, card)
+    return {Set = function(_, txt, col) val.Text = tostring(txt or "-") if col then val.TextColor3 = col end end}
+end
+
+State.DashToggleRow = State.DashCompactRow(State.DashActionSec, 30)
+State.DashToggle(State.DashToggleRow, "Auto List", CFG.Seller.AutoList, function(v)
     CFG.Seller.AutoList = v
     CFG.Seller.PreviewOnly = not v
     State.SaveRuntimeSettings()
     log("Dashboard AutoList", tostring(v))
 end)
-State.DashActionSec:AddToggle("Sniper Enabled", CFG.Sniper.Enabled, function(v)
+State.DashToggle(State.DashToggleRow, "Sniper", CFG.Sniper.Enabled, function(v)
     CFG.Sniper.Enabled = v
     State.SaveRuntimeSettings()
     log("Dashboard Sniper", tostring(v))
 end)
-State.DashActionSec:AddToggle("Webhook", CFG.Webhook.Enabled == true, function(v)
+State.DashToggle(State.DashToggleRow, "Webhook", CFG.Webhook.Enabled == true, function(v)
     CFG.Webhook.Enabled = v
     State.SaveRuntimeSettings()
     log("Dashboard Webhook", tostring(v))
 end)
-State.DashActionSec:AddButton("Smart Rebuild Booth", function()
+State.DashActionRow = State.DashCompactRow(State.DashActionSec, 32)
+State.DashButton(State.DashActionRow, "Smart Rebuild", function()
     task.spawn(function()
         smartRebuildBooth()
         task.wait(0.5)
         State.RefreshDashboard()
     end)
 end)
-State.DashActionSec:AddButton("Refresh Dashboard", function()
+State.DashButton(State.DashActionRow, "Refresh", function()
     State.ClonePanelDirty = true
     State.CloneInventoryDirty = true
     refreshPills()
     State.RefreshDashboard()
 end, "outline")
-State.DashActionSec:AddButton("Open Listings", function()
+State.DashButton(State.DashActionRow, "Listings", function()
     win:SelectPage("Listings")
 end, "outline")
-State.DashActionSec:AddButton("Open Sniper", function()
+State.DashButton(State.DashActionRow, "Sniper", function()
     win:SelectPage("Sniper")
 end, "outline")
+
+State.DashStatusSec = State.DashboardPage:AddSection("Market Status")
+State.DashMetricRow1 = State.DashCompactRow(State.DashStatusSec, 38)
+State.DashBoothMetric = State.DashMetric(State.DashMetricRow1, "Booth", "-", T.Sub)
+State.DashTokenMetric = State.DashMetric(State.DashMetricRow1, "Tokens", "-", T.Green)
+State.DashPetMetric = State.DashMetric(State.DashMetricRow1, "Pets", "-", T.Text)
+State.DashMetricRow2 = State.DashCompactRow(State.DashStatusSec, 38)
+State.DashSellerMetric = State.DashMetric(State.DashMetricRow2, "Seller", "-", T.Sub)
+State.DashSniperMetric = State.DashMetric(State.DashMetricRow2, "Sniper", "-", T.Sub)
+State.DashWebhookMetric = State.DashMetric(State.DashMetricRow2, "Webhook", "-", T.Sub)
 
 State.DashEventsSec = State.DashboardPage:AddSection("Recent Events")
 State.DashLog = State.DashEventsSec:AddLog(78)
