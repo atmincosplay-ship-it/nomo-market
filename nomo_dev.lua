@@ -4205,23 +4205,6 @@ State.RefreshCloneStatus = function(forceInventory)
 end
 
 State.RefreshDashboard = function()
-    if not State.DashBooth then return end
-    local best = findBestBooth()
-    local boothText = best and best.Status or "No Booth"
-    local listings = type(State.LastMyListings) == "table" and State.LastMyListings or getMyListings()
-    if State.CloneInventoryDirty or os.clock() - (State.LastCloneInventoryAt or 0) >= 10 then
-        State.CloneInventoryCount = #getOwnPetsFromData(State.CloneInventoryDirty)
-        State.LastCloneInventoryAt = os.clock()
-        State.CloneInventoryDirty = false
-    end
-    local uptime = math.max(0, math.floor(os.clock() - (State.StartedAt or os.clock())))
-    State.DashBooth:Set("Booth: " .. boothText .. " | " .. tostring(#listings) .. "/50", boothText == "MINE" and T.Green or T.Sub)
-    State.DashTokens:Set("Tokens: " .. commaNumber(getTokenBalance()), T.Green)
-    State.DashPets:Set("Pets: " .. tostring(State.CloneInventoryCount or 0), T.Text)
-    State.DashSeller:Set("Seller: " .. (CFG.Seller.AutoList and "ON" or "OFF") .. " | listed " .. tostring(State.ListedThisSession or 0), CFG.Seller.AutoList and T.Green or T.Sub)
-    State.DashSniper:Set("Sniper: " .. (CFG.Sniper.Enabled and (CFG.Sniper.DryRun and "DRY" or "ON") or "OFF") .. " | sniped " .. tostring(State.SnipedThisSession or 0), CFG.Sniper.Enabled and T.Green or T.Sub)
-    State.DashWebhook:Set("Webhook: " .. (CFG.Webhook.Enabled and "ON" or "OFF"), CFG.Webhook.Enabled and T.Green or T.Sub)
-    State.DashSession:Set(string.format("Session: %02d:%02d", math.floor(uptime / 60), uptime % 60), T.Accent)
     if State.DashLog then
         local lines = {}
         for i = 1, math.min(5, #State.Logs) do
@@ -4246,16 +4229,23 @@ end
 
 --// DASHBOARD PAGE
 State.DashboardPage = win:CreatePage("Dashboard")
-State.DashStatusSec = State.DashboardPage:AddSection("Market Runtime")
-State.DashBooth = State.DashStatusSec:AddLabel("Booth: checking...", T.Sub)
-State.DashTokens = State.DashStatusSec:AddLabel("Tokens: ...", T.Green)
-State.DashPets = State.DashStatusSec:AddLabel("Pets: ...", T.Text)
-State.DashSeller = State.DashStatusSec:AddLabel("Seller: ...", T.Sub)
-State.DashSniper = State.DashStatusSec:AddLabel("Sniper: ...", T.Sub)
-State.DashWebhook = State.DashStatusSec:AddLabel("Webhook: ...", T.Sub)
-State.DashSession = State.DashStatusSec:AddLabel("Session: 00:00", T.Accent)
-
-State.DashActionSec = State.DashboardPage:AddSection("Quick Actions")
+State.DashActionSec = State.DashboardPage:AddSection("Market Control")
+State.DashActionSec:AddToggle("Auto List", CFG.Seller.AutoList, function(v)
+    CFG.Seller.AutoList = v
+    CFG.Seller.PreviewOnly = not v
+    State.SaveRuntimeSettings()
+    log("Dashboard AutoList", tostring(v))
+end)
+State.DashActionSec:AddToggle("Sniper Enabled", CFG.Sniper.Enabled, function(v)
+    CFG.Sniper.Enabled = v
+    State.SaveRuntimeSettings()
+    log("Dashboard Sniper", tostring(v))
+end)
+State.DashActionSec:AddToggle("Webhook", CFG.Webhook.Enabled == true, function(v)
+    CFG.Webhook.Enabled = v
+    State.SaveRuntimeSettings()
+    log("Dashboard Webhook", tostring(v))
+end)
 State.DashActionSec:AddButton("Smart Rebuild Booth", function()
     task.spawn(function()
         smartRebuildBooth()
@@ -4266,6 +4256,7 @@ end)
 State.DashActionSec:AddButton("Refresh Dashboard", function()
     State.ClonePanelDirty = true
     State.CloneInventoryDirty = true
+    refreshPills()
     State.RefreshDashboard()
 end, "outline")
 State.DashActionSec:AddButton("Open Listings", function()
