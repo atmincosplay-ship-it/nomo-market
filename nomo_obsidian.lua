@@ -4385,8 +4385,12 @@ end, "outline")
 
 --// SELLER PAGE
 local sellerPage = win:CreatePage("Seller")
-local sellerCtrl = sellerPage:AddSection("Seller Control")
-local filterSec = sellerPage:AddSection("Filter Builder")
+local sellerTopRow = sellerPage:AddRow()
+local sellerCtrl = sellerPage:AddSectionInRow(sellerTopRow, "Seller Control", 0.5)
+local sellerActions = sellerPage:AddSectionInRow(sellerTopRow, "Seller Actions", 0.5)
+local filterRow = sellerPage:AddRow()
+local filterSec = sellerPage:AddSectionInRow(filterRow, "Filter Builder", 0.5)
+local filterRangeSec = sellerPage:AddSectionInRow(filterRow, "Filter Limits", 0.5)
 
 sellerCtrl:AddToggle("Auto List", CFG.Seller.AutoList, function(v)
     CFG.Seller.AutoList = v
@@ -4402,9 +4406,7 @@ sellerCtrl:AddToggle("Preview Only", CFG.Seller.PreviewOnly, function(v)
     log("PreviewOnly", tostring(v))
 end)
 
-sellerCtrl:AddNote("Safety: skips favorited/locked pets. Scan interval is hardcoded for performance.")
-
-sellerCtrl:AddButton("LIST UNTIL BOOTH FULL", function()
+sellerActions:AddButton("LIST UNTIL BOOTH FULL", function()
     CFG.Seller.BoothCap = 50
     CFG.Seller.ListOnceMax = 50
     CFG.Seller.MaxAutoListSession = 50
@@ -4413,7 +4415,7 @@ sellerCtrl:AddButton("LIST UNTIL BOOTH FULL", function()
     end)
 end)
 
-sellerCtrl:AddButton("REMOVE ALL MY LISTINGS", function()
+sellerActions:AddButton("REMOVE ALL MY LISTINGS", function()
     task.spawn(function()
         removeAllMyListings(CFG.Listings.RemoveAllMax or 50)
         task.wait(0.6)
@@ -4421,7 +4423,7 @@ sellerCtrl:AddButton("REMOVE ALL MY LISTINGS", function()
     end)
 end, "outline")
 
-sellerCtrl:AddButton("Reload Remote Config", function()
+sellerActions:AddButton("Reload Remote Config", function()
     task.spawn(function()
         reloadFilters()
         task.wait(0.2)
@@ -4444,13 +4446,13 @@ filterSec:AddButton("Diagnose This Pet", function()
     end
 end, "outline")
 local priceInput = filterSec:AddInput("Price", "111")
-local minKgInput = filterSec:AddInput("Min Base KG", "0")
-local maxKgInput = filterSec:AddInput("Max Base KG", "3")
-local minAgeInput = filterSec:AddInput("Min Age", "1")
-local maxAgeInput = filterSec:AddInput("Max Age", "100")
 local mutationInput = filterSec:AddSearchDropdown("Mutation", getMutationList(), "Any")
+local minKgInput = filterRangeSec:AddInput("Min Base KG", "0")
+local maxKgInput = filterRangeSec:AddInput("Max Base KG", "3")
+local minAgeInput = filterRangeSec:AddInput("Min Age", "1")
+local maxAgeInput = filterRangeSec:AddInput("Max Age", "100")
 local variantInput = { Get = function() return "Any" end } -- hatch type is part of Pet name, e.g. GIANT Barn Owl
-local maxListedInput = filterSec:AddInput("Per Filter Cap", "5")
+local maxListedInput = filterRangeSec:AddInput("Per Filter Cap", "5")
 
 State.OpenFilterEditPopup = function(index, managerOverlay)
     State.LoadLocalFilters()
