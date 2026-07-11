@@ -4651,11 +4651,6 @@ filterSec:AddDropdown("Listing Weight Mode", {"Base", "Visual"}, CFG.Seller.Weig
 end)
 
 local petInput = filterSec:AddSearchDropdown("Pet", getPetList(), "Ankylosaurus")
-filterSec:AddButton("Diagnose This Pet", function()
-    if sellerLog and diagnosePetFilter then
-        addLines(sellerLog, diagnosePetFilter(petInput:Get()))
-    end
-end, "outline")
 local priceInput = filterSec:AddInput("Price", "111")
 local mutationInput = filterSec:AddSearchDropdown("Mutation", getMutationList(), "Any")
 local minKgInput = filterRangeSec:AddInput("Min Base KG", "0")
