@@ -5553,7 +5553,7 @@ local function refreshMarketSample()
             local prices = marketByKey[key] or {}
             table.sort(prices)
             if #prices == 0 then
-                table.insert(lines, string.format("%02d. %s | mine %s | market none | NO DATA",
+                table.insert(lines, string.format("%02d. [NO DATA] %s | mine %s | market none",
                     i,
                     tostring(nameByKey[key] or "?"),
                     mineText
@@ -5570,14 +5570,14 @@ local function refreshMarketSample()
                 elseif mineHigh < avg * 0.85 then
                     verdict = "LOW"
                 end
-                table.insert(lines, string.format("%02d. %s | mine %s | market %s-%s avg %s | %s",
+                table.insert(lines, string.format("%02d. [%s] %s | mine %s | mkt %s-%s avg %s",
                     i,
+                    verdict,
                     tostring(nameByKey[key] or "?"),
                     mineText,
                     commaNumber(low),
                     commaNumber(high),
-                    commaNumber(avg),
-                    verdict
+                    commaNumber(avg)
                 ))
                 table.insert(lines, "    samples " .. tostring(math.min(#prices, 5)) .. "/" .. tostring(#prices) .. ": " .. table.concat((function()
                     local out = {}
