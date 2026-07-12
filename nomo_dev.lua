@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V7.6 AUTO SNIPER BUY"
+local VERSION = "V7.7 LIGHT STATUS"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -135,6 +135,7 @@ if CFG.Performance.FullPerformanceMode then
 end
 CFG.Performance.AntiAfk = CFG.Performance.AntiAfk ~= false
 CFG.Performance.ClearLoadingScreens = CFG.Performance.ClearLoadingScreens ~= false
+CFG.Performance.ConsoleLogs = CFG.Performance.ConsoleLogs == true
 CFG.Sniper.BuyCooldown = 0
 CFG.Sniper.WatchlistId = tostring(CFG.Sniper.WatchlistId or "1")
 CFG.Sniper.WeightMode = CFG.Sniper.WeightMode or "Base"
@@ -348,9 +349,11 @@ local function log(...)
         table.insert(parts, tostring(select(i, ...)))
     end
     local text = stamp() .. " | " .. table.concat(parts, " ")
-    print("[NOMO V3]", table.concat(parts, " "))
+    if CFG.Performance.ConsoleLogs then
+        print("[NOMO V3]", table.concat(parts, " "))
+    end
     table.insert(State.Logs, 1, text)
-    while #State.Logs > 70 do table.remove(State.Logs) end
+    while #State.Logs > 50 do table.remove(State.Logs) end
 end
 
 local function dlog(...)
@@ -4520,9 +4523,9 @@ end
 local function refreshPills()
     local now = os.clock()
     local minimized = State.UiMinimized == true
-    local pillInterval = minimized and 5 or 1
-    local cloneInterval = minimized and 5 or 2
-    local dashboardInterval = minimized and 10 or 2
+    local pillInterval = minimized and 10 or 1
+    local cloneInterval = minimized and 10 or 2
+    local dashboardInterval = minimized and 20 or 2
 
     if State.UiRefreshDirty or now - (State.LastPillRefreshAt or 0) >= pillInterval then
         State.LastPillRefreshAt = now
