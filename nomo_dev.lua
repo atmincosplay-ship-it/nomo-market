@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V7.7 LIGHT STATUS"
+local VERSION = "V7.8 PRIORITY SNIPER"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -2945,6 +2945,11 @@ local function formatSniperMax(price)
     return tostring(price)
 end
 
+local function getSniperPriority(cfg)
+    if type(cfg) ~= "table" then return 0 end
+    return toInt(cfg.Priority or cfg.priority) or 0
+end
+
 State.FormatSniperKgRange = function(mode, minKg, maxKg)
     local upper = tonumber(maxKg)
     return tostring(mode or "Base") .. " KG " .. tostring(tonumber(minKg) or 0) .. "-" .. (upper and tostring(upper) or "unli")
@@ -2956,6 +2961,9 @@ State.GetSortedSniperWatches = function()
         table.insert(out, {Name = tostring(name), Config = cfg})
     end
     table.sort(out, function(a, b)
+        local ap = getSniperPriority(a.Config)
+        local bp = getSniperPriority(b.Config)
+        if ap ~= bp then return ap > bp end
         return a.Name:lower() < b.Name:lower()
     end)
     return out
@@ -2994,6 +3002,7 @@ local function snipeDryRun(force)
             MaxWeight = type(cfg) == "table" and toNumber(cfg.MaxWeight or cfg.maxWeight) or nil,
             WeightMode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode or cfg.weightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode),
             MaxMatchesPerPet = 0,
+            Priority = getSniperPriority(cfg),
         }
     end
 
@@ -3021,6 +3030,12 @@ local function snipeDryRun(force)
     end
 
     table.sort(raw, function(a, b)
+        local apr = tonumber(a.Watch and a.Watch.Priority) or 0
+        local bpr = tonumber(b.Watch and b.Watch.Priority) or 0
+        if apr ~= bpr then
+            return apr > bpr
+        end
+
         local ap = tonumber(a.Listing.Price) or 999999999
         local bp = tonumber(b.Listing.Price) or 999999999
 
@@ -3107,6 +3122,7 @@ local function getCurrentSniperWatch(petType)
                 MaxWeight = type(cfg) == "table" and toNumber(cfg.MaxWeight or cfg.maxWeight) or nil,
                 WeightMode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode or cfg.weightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode),
                 MaxMatchesPerPet = 0,
+                Priority = getSniperPriority(cfg),
             }
         end
     end
@@ -6104,8 +6120,10 @@ State.RefreshSniperLog = function()
         local minKg = type(cfg) == "table" and cfg.MinWeight or 0
         local maxKg = type(cfg) == "table" and cfg.MaxWeight or nil
         local mode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode)
+        local priority = getSniperPriority(cfg)
+        local priorityText = priority > 0 and (" | P" .. tostring(priority)) or ""
         if watchCount <= 8 then
-            table.insert(lines, "- " .. tostring(name) .. " | Price " .. formatSniperMax(maxPrice) .. " | " .. State.FormatSniperKgRange(mode, minKg, maxKg))
+            table.insert(lines, "- " .. tostring(name) .. " | Price " .. formatSniperMax(maxPrice) .. " | " .. State.FormatSniperKgRange(mode, minKg, maxKg) .. priorityText)
         end
     end
     if watchCount > 8 then
