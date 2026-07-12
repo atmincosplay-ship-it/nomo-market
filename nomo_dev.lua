@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V7.5 LIVE SNIPER TOGGLE"
+local VERSION = "V7.6 AUTO SNIPER BUY"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6478,7 +6478,10 @@ task.spawn(function()
             State.LastSniperScanAt = now
             local ok, err = pcall(function()
                 State.ApplySniperLimits()
-                snipeDryRun()
+                local matches = snipeDryRun()
+                if CFG.Sniper.DryRun == false and #matches > 0 then
+                    buyFirstMatch()
+                end
             end)
             if not ok then log("Sniper scan error", tostring(err)) end
         end
