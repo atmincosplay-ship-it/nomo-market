@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V7.8 PRIORITY SNIPER"
+local VERSION = "V7.9 SNIPER CONFIG COMPAT"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -2873,8 +2873,8 @@ local function importSniperWatchlist(path)
 
         local minWeight, maxWeight, weightMode
         if type(cfg) == "table" then
-            minWeight = toNumber(cfg.MinWeight or cfg.minWeight or cfg.MinKG or cfg.minKG)
-            maxWeight = toNumber(cfg.MaxWeight or cfg.maxWeight or cfg.MaxKG or cfg.maxKG)
+            minWeight = getSniperMinWeight(cfg)
+            maxWeight = getSniperMaxWeight(cfg)
             weightMode = tostring(cfg.WeightMode or cfg.weightMode or CFG.Sniper.WeightMode or "Base")
         end
         weightMode = weightMode:gsub("%s+", "")
@@ -2950,6 +2950,16 @@ local function getSniperPriority(cfg)
     return toInt(cfg.Priority or cfg.priority) or 0
 end
 
+local function getSniperMinWeight(cfg)
+    if type(cfg) ~= "table" then return 0 end
+    return toNumber(cfg.MinWeight or cfg.minWeight or cfg.MinKG or cfg.minKG or cfg.MinBaseWeight) or 0
+end
+
+local function getSniperMaxWeight(cfg)
+    if type(cfg) ~= "table" then return nil end
+    return toNumber(cfg.MaxWeight or cfg.maxWeight or cfg.MaxKG or cfg.maxKG or cfg.MaxBaseWeight)
+end
+
 State.FormatSniperKgRange = function(mode, minKg, maxKg)
     local upper = tonumber(maxKg)
     return tostring(mode or "Base") .. " KG " .. tostring(tonumber(minKg) or 0) .. "-" .. (upper and tostring(upper) or "unli")
@@ -2998,8 +3008,8 @@ local function snipeDryRun(force)
         watchNorm[norm(name)] = {
             Name = name,
             MaxPrice = tonumber(type(cfg) == "table" and cfg.MaxPrice or cfg) or 0,
-            MinWeight = type(cfg) == "table" and toNumber(cfg.MinWeight or cfg.minWeight) or 0,
-            MaxWeight = type(cfg) == "table" and toNumber(cfg.MaxWeight or cfg.maxWeight) or nil,
+            MinWeight = getSniperMinWeight(cfg),
+            MaxWeight = getSniperMaxWeight(cfg),
             WeightMode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode or cfg.weightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode),
             MaxMatchesPerPet = 0,
             Priority = getSniperPriority(cfg),
@@ -3118,8 +3128,8 @@ local function getCurrentSniperWatch(petType)
             return {
                 Name = tostring(name),
                 MaxPrice = tonumber(type(cfg) == "table" and cfg.MaxPrice or cfg) or 0,
-                MinWeight = type(cfg) == "table" and toNumber(cfg.MinWeight or cfg.minWeight) or 0,
-                MaxWeight = type(cfg) == "table" and toNumber(cfg.MaxWeight or cfg.maxWeight) or nil,
+                MinWeight = getSniperMinWeight(cfg),
+                MaxWeight = getSniperMaxWeight(cfg),
                 WeightMode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode or cfg.weightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode),
                 MaxMatchesPerPet = 0,
                 Priority = getSniperPriority(cfg),
@@ -5849,9 +5859,10 @@ State.OpenSniperWatchEditPopup = function(name, managerOverlay)
         return
     end
     local maxPrice = type(cfg) == "table" and cfg.MaxPrice or cfg
-    local minKg = type(cfg) == "table" and cfg.MinWeight or 0
-    local maxKg = type(cfg) == "table" and cfg.MaxWeight or nil
+    local minKg = getSniperMinWeight(cfg)
+    local maxKg = getSniperMaxWeight(cfg)
     local mode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode)
+    local priority = getSniperPriority(cfg)
 
     local overlay = make("Frame", {
         Size = UDim2.new(1, 0, 1, 0),
@@ -5965,6 +5976,7 @@ State.OpenSniperWatchEditPopup = function(name, managerOverlay)
             MaxWeight = toNumber(maxBox.Text),
             WeightMode = mode,
             MaxMatchesPerPet = 0,
+            Priority = priority,
         }
         local ok = State.SaveSniperWatchlist()
         log("Updated watch", tostring(name), "price", tostring(CFG.Sniper.Watchlist[name].MaxPrice), "saved=" .. tostring(ok), getSniperFilterPath())
@@ -6036,8 +6048,8 @@ State.OpenSniperWatchlistManager = function()
         local name, cfg = watch.Name, watch.Config
         idx += 1
         local maxPrice = type(cfg) == "table" and cfg.MaxPrice or cfg
-        local minKg = type(cfg) == "table" and cfg.MinWeight or 0
-        local maxKg = type(cfg) == "table" and cfg.MaxWeight or nil
+        local minKg = getSniperMinWeight(cfg)
+        local maxKg = getSniperMaxWeight(cfg)
         local mode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode)
         local row = make("Frame", {
             Size = UDim2.new(1, 0, 0, 46),
@@ -6117,8 +6129,8 @@ State.RefreshSniperLog = function()
         local name, cfg = watch.Name, watch.Config
         watchCount += 1
         local maxPrice = type(cfg) == "table" and cfg.MaxPrice or cfg
-        local minKg = type(cfg) == "table" and cfg.MinWeight or 0
-        local maxKg = type(cfg) == "table" and cfg.MaxWeight or nil
+        local minKg = getSniperMinWeight(cfg)
+        local maxKg = getSniperMaxWeight(cfg)
         local mode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode)
         local priority = getSniperPriority(cfg)
         local priorityText = priority > 0 and (" | P" .. tostring(priority)) or ""
