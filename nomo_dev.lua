@@ -5225,10 +5225,10 @@ State.ListingActionRow = listingsPage:AddRow()
 State.ListingManageSec = listingsPage:AddSectionInRow(State.ListingActionRow, "My Listing", 0.25)
 State.ListingRefreshSec = listingsPage:AddSectionInRow(State.ListingActionRow, "Refresh", 0.25)
 State.ListingRemoveSec = listingsPage:AddSectionInRow(State.ListingActionRow, "Remove All", 0.25)
-State.ListingMarketSec = listingsPage:AddSectionInRow(State.ListingActionRow, "Market", 0.25)
+State.ListingMarketSec = listingsPage:AddSectionInRow(State.ListingActionRow, "Compare", 0.25)
 local listingRow = listingsPage:AddRow()
 local myListingSec = listingsPage:AddSectionInRow(listingRow, "My Listings", 0.55)
-local allListingSec = listingsPage:AddSectionInRow(listingRow, "Market Sample", 0.45)
+local allListingSec = listingsPage:AddSectionInRow(listingRow, "Price Compare", 0.45)
 
 local myListingList = make("ScrollingFrame", {
     Size = UDim2.new(1, 0, 0, 156),
@@ -5492,20 +5492,32 @@ end
 local function refreshMarketSample()
     local all = getAllListings()
     local my = getMyListings()
-    local wanted, wantedCount = {}, 0
+    local myId = tostring(getPlayerId())
+    local wanted, wantedCount, mineByKey, nameByKey = {}, 0, {}, {}
     for _, l in ipairs(my) do
         local key = norm(l.PetType)
         if key ~= "" and not wanted[key] then
             wanted[key] = true
             wantedCount += 1
         end
+        if key ~= "" then
+            mineByKey[key] = mineByKey[key] or {}
+            table.insert(mineByKey[key], tonumber(l.Price) or 0)
+            nameByKey[key] = tostring(l.PetType or "?")
+        end
     end
 
-    local sample = {}
+    local sample, marketByKey = {}, {}
     if wantedCount > 0 then
         for _, l in ipairs(all) do
-            if wanted[norm(l.PetType)] then
+            local key = norm(l.PetType)
+            if wanted[key] then
                 table.insert(sample, l)
+                if tostring(l.OwnerId or "") ~= myId then
+                    marketByKey[key] = marketByKey[key] or {}
+                    table.insert(marketByKey[key], tonumber(l.Price) or 0)
+                    nameByKey[key] = nameByKey[key] or tostring(l.PetType or "?")
+                end
             end
         end
         table.sort(sample, function(a, b)
@@ -5517,25 +5529,80 @@ local function refreshMarketSample()
         sample = all
     end
 
-    local lines = {
-        wantedCount > 0
-            and ("Same-pet market: " .. tostring(#sample) .. " match(es) for " .. tostring(wantedCount) .. " listed pet type(s)")
-            or ("All listings: " .. tostring(#all) .. " (no booth listings to match)"),
-        "------------------------------"
-    }
+    local lines = {}
+    if wantedCount > 0 then
+        table.insert(lines, "Price compare: " .. tostring(wantedCount) .. " listed pet type(s) | market rows " .. tostring(#sample))
+        table.insert(lines, "------------------------------")
 
-    for i, l in ipairs(sample) do
-        if i > 10 then
-            table.insert(lines, "... +" .. tostring(#sample - 10) .. " more")
-            break
+        local keys = {}
+        for key in pairs(mineByKey) do table.insert(keys, key) end
+        table.sort(keys, function(a, b) return tostring(nameByKey[a] or a) < tostring(nameByKey[b] or b) end)
+
+        for i, key in ipairs(keys) do
+            if i > 8 then
+                table.insert(lines, "... +" .. tostring(#keys - 8) .. " more pet type(s)")
+                break
+            end
+
+            local minePrices = mineByKey[key] or {}
+            table.sort(minePrices)
+            local mineLow = minePrices[1] or 0
+            local mineHigh = minePrices[#minePrices] or mineLow
+            local mineText = mineLow == mineHigh and commaNumber(mineLow) or (commaNumber(mineLow) .. "-" .. commaNumber(mineHigh))
+
+            local prices = marketByKey[key] or {}
+            table.sort(prices)
+            if #prices == 0 then
+                table.insert(lines, string.format("%02d. %s | mine %s | market none | NO DATA",
+                    i,
+                    tostring(nameByKey[key] or "?"),
+                    mineText
+                ))
+            else
+                local sum = 0
+                for _, p in ipairs(prices) do sum += tonumber(p) or 0 end
+                local low = prices[1] or 0
+                local high = prices[#prices] or low
+                local avg = math.floor((sum / math.max(1, #prices)) + 0.5)
+                local verdict = "FAIR"
+                if mineLow > math.max(low, avg * 1.2) then
+                    verdict = "HIGH"
+                elseif mineHigh < avg * 0.85 then
+                    verdict = "LOW"
+                end
+                table.insert(lines, string.format("%02d. %s | mine %s | market %s-%s avg %s | %s",
+                    i,
+                    tostring(nameByKey[key] or "?"),
+                    mineText,
+                    commaNumber(low),
+                    commaNumber(high),
+                    commaNumber(avg),
+                    verdict
+                ))
+                table.insert(lines, "    samples " .. tostring(math.min(#prices, 5)) .. "/" .. tostring(#prices) .. ": " .. table.concat((function()
+                    local out = {}
+                    for j = 1, math.min(#prices, 5) do table.insert(out, commaNumber(prices[j])) end
+                    return out
+                end)(), ", "))
+            end
         end
-        table.insert(lines, string.format(
-            "%02d. %s | price %s | owner %s",
-            i,
-            tostring(l.PetType or "?"),
-            commaNumber(l.Price),
-            tostring(l.OwnerName or "?")
-        ))
+    else
+        table.insert(lines, "All listings: " .. tostring(#all) .. " (no booth listings to match)")
+        table.insert(lines, "------------------------------")
+
+        for i, l in ipairs(sample) do
+            if i > 10 then
+                table.insert(lines, "... +" .. tostring(#sample - 10) .. " more")
+                break
+            end
+            table.insert(lines, string.format(
+                "%02d. %s | price %s | owner %s",
+                i,
+                tostring(l.PetType or "?"),
+                commaNumber(l.Price),
+                tostring(l.OwnerName or "?")
+            ))
+        end
     end
     if #sample == 0 and wantedCount > 0 then
         table.insert(lines, "No matching market listings found for your booth pets.")
@@ -5559,7 +5626,7 @@ State.ListingRemoveSec:AddButton("Remove All", function()
         refreshMyListingsLog()
     end)
 end, "outline")
-State.ListingMarketSec:AddButton("Market Scan", refreshMarketSample, "outline")
+State.ListingMarketSec:AddButton("Price Check", refreshMarketSample, "outline")
 
 --// SNIPER PAGE
 local sniperPage = win:CreatePage("Sniper")
