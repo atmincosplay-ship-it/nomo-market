@@ -4340,16 +4340,19 @@ end
 State.RefreshDashboard = function()
     if State.DashLog then
         State.DashLog:Clear()
+        local function escRich(v)
+            return tostring(v or ""):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
+        end
         for i = 1, math.min(5, #State.Logs) do
             local line = tostring(State.Logs[i] or "")
-                :gsub("^%d%d:%d%d:%d%d%s+", "")
+                :gsub("^%d%d:%d%d:%d%d%s*|%s*", "")
                 :gsub("^%[%d%d:%d%d:%d%d%]%s*", "")
-                :gsub("<", "&lt;")
-                :gsub(">", "&gt;")
             local low = line:lower()
             local tag, col
             if low:find("failed", 1, true) or low:find("unsafe", 1, true) or low:find("error", 1, true) then
-                tag, col = "WARN", T.Red
+                tag, col = "ERR", T.Red
+            elseif low:find("warn", 1, true) or low:find("wait", 1, true) or low:find("skip", 1, true) then
+                tag, col = "WARN", T.Yellow
             elseif low:find("started", 1, true) or low:find("attempt", 1, true) or low:find("scan", 1, true) then
                 tag, col = "RUN", T.Accent
             elseif low:find("ok", 1, true) or low:find("done", 1, true) or low:find("complete", 1, true) or low:find("verified", 1, true) then
@@ -4357,7 +4360,7 @@ State.RefreshDashboard = function()
             else
                 tag, col = "INFO", T.Sub
             end
-            State.DashLog:AddRich(('<font color="#%s">[%s]</font> %s'):format(col:ToHex(), tag, line))
+            State.DashLog:AddRich(('<font color="#%s">[%s]</font> %s'):format(col:ToHex(), tag, escRich(line)))
         end
     end
     if win.RuntimeFooterText then
@@ -4366,18 +4369,24 @@ State.RefreshDashboard = function()
         local secs = session % 60
         local best = findBestBooth()
         local boothText = best and best.Status or "No Booth"
-        win.RuntimeFooterText.Text = ('<font color="#%s">Session:</font> %dm %02ds   |   <font color="#%s">Seller:</font> %s/%s   |   <font color="#%s">Sniper:</font> %s/%s   |   <font color="#%s">Booth:</font> %s   |   Pets: %s'):format(
+        win.RuntimeFooterText.Text = ('<font color="#%s">Session:</font> <font color="#%s">%dm %02ds</font>   |   <font color="#%s">Seller:</font> <font color="#%s">%s/%s</font>   |   <font color="#%s">Sniper:</font> <font color="#%s">%s/%s</font>   |   <font color="#%s">Booth:</font> <font color="#%s">%s</font>   |   <font color="#%s">Pets:</font> <font color="#%s">%s</font>'):format(
+            T.Sub:ToHex(),
             T.Accent:ToHex(),
             mins,
             secs,
+            T.Sub:ToHex(),
             (CFG.Seller.AutoList and T.Green or T.Sub):ToHex(),
             CFG.Seller.AutoList and "ON" or "OFF",
             tostring(State.ListedThisSession or 0),
+            T.Sub:ToHex(),
             (CFG.Sniper.Enabled and T.Green or T.Sub):ToHex(),
             CFG.Sniper.Enabled and "ON" or "OFF",
             tostring(State.SnipedThisSession or 0),
+            T.Sub:ToHex(),
             (boothText == "MINE" and T.Green or T.Sub):ToHex(),
             tostring(boothText),
+            T.Sub:ToHex(),
+            T.Text:ToHex(),
             tostring(State.CloneInventoryCount or 0)
         )
     end
@@ -4941,10 +4950,13 @@ State.OpenFilterManager = function()
             Size = UDim2.new(1, -116, 0, 20),
             Position = UDim2.fromOffset(8, 5),
             BackgroundTransparency = 1,
-            Text = string.format("%02d. %s | P %s | KG %s-%s | Age %s-%s",
+            RichText = true,
+            Text = string.format('%02d. %s | <font color="#%s">P %s</font> | <font color="#%s">KG %s-%s</font> | Age %s-%s',
                 i,
-                tostring(f.Pet or "?"),
+                tostring(f.Pet or "?"):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"),
+                T.Yellow:ToHex(),
                 tostring(f.Price or "?"),
+                T.Accent:ToHex(),
                 tostring(f.MinWeight or 0),
                 tostring(f.MaxWeight or "?"),
                 tostring(f.MinLevel or 1),
@@ -4961,8 +4973,11 @@ State.OpenFilterManager = function()
             Size = UDim2.new(1, -116, 0, 18),
             Position = UDim2.fromOffset(8, 24),
             BackgroundTransparency = 1,
-            Text = string.format("Mutation %s | Max %s per filter",
-                tostring(f.Mutation or "Any"),
+            RichText = true,
+            Text = string.format('Mutation <font color="#%s">%s</font> | <font color="#%s">Max %s</font> per filter',
+                T.Text:ToHex(),
+                tostring(f.Mutation or "Any"):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"),
+                T.Green:ToHex(),
                 tostring(f.MaxListedPet or 5)
             ),
             TextColor3 = T.Sub,
@@ -5409,9 +5424,11 @@ State.OpenMyListingsManager = function()
             Size = UDim2.new(1, -54, 0, 20),
             Position = UDim2.fromOffset(8, 5),
             BackgroundTransparency = 1,
-            Text = string.format("%02d. %s | %s Tokens",
+            RichText = true,
+            Text = string.format('%02d. %s | <font color="#%s">%s Tokens</font>',
                 i,
-                tostring(l.PetType or "?"),
+                tostring(l.PetType or "?"):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"),
+                T.Yellow:ToHex(),
                 commaNumber(l.Price)
             ),
             TextColor3 = T.Text,
@@ -5425,8 +5442,10 @@ State.OpenMyListingsManager = function()
             Size = UDim2.new(1, -54, 0, 18),
             Position = UDim2.fromOffset(8, 24),
             BackgroundTransparency = 1,
-            Text = string.format("%s | id %s",
-                tostring(l.ItemType or "?"),
+            RichText = true,
+            Text = string.format('%s | <font color="#%s">id %s</font>',
+                tostring(l.ItemType or "?"):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"),
+                T.Accent:ToHex(),
                 tostring(l.ListingUUID or ""):sub(1, 8)
             ),
             TextColor3 = T.Sub,
@@ -5808,10 +5827,13 @@ State.OpenSniperWatchlistManager = function()
             Size = UDim2.new(1, -116, 0, 20),
             Position = UDim2.fromOffset(8, 5),
             BackgroundTransparency = 1,
-            Text = string.format("%02d. %s | Price %s | %s",
+            RichText = true,
+            Text = string.format('%02d. %s | <font color="#%s">Price %s</font> | <font color="#%s">%s</font>',
                 idx,
-                tostring(name),
+                tostring(name):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"),
+                T.Yellow:ToHex(),
                 formatSniperMax(maxPrice),
+                T.Accent:ToHex(),
                 State.FormatSniperKgRange(mode, minKg, maxKg)
             ),
             TextColor3 = T.Text,
@@ -5825,7 +5847,8 @@ State.OpenSniperWatchlistManager = function()
             Size = UDim2.new(1, -116, 0, 18),
             Position = UDim2.fromOffset(8, 24),
             BackgroundTransparency = 1,
-            Text = "Max " .. tostring(perPet) .. " per pet",
+            RichText = true,
+            Text = ('<font color="#%s">Max %s</font> per pet'):format(T.Green:ToHex(), tostring(perPet)),
             TextColor3 = T.Sub,
             Font = Enum.Font.Code,
             TextSize = 10,
