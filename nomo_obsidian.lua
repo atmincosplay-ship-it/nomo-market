@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V7.4 LIVE DEFAULTS"
+local VERSION = "V7.5 LIVE SNIPER TOGGLE"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -4563,8 +4563,9 @@ State.DashAutoSec:AddToggle("Enabled", CFG.Seller.AutoList, function(v)
 end)
 State.DashSniperSec:AddToggle("Enabled", CFG.Sniper.Enabled, function(v)
     CFG.Sniper.Enabled = v
+    if v then CFG.Sniper.DryRun = false end
     State.SaveRuntimeSettings()
-    log("Dashboard Sniper", tostring(v))
+    log("Dashboard Sniper", tostring(v), "DryRun", tostring(CFG.Sniper.DryRun))
 end)
 State.DashWebhookSec:AddToggle("Enabled", CFG.Webhook.Enabled == true, function(v)
     CFG.Webhook.Enabled = v
@@ -5772,8 +5773,9 @@ State.SniperResultSec = sniperPage:AddSection("Sniper Matches")
 
 State.SniperWatchSec:AddToggle("Enabled", CFG.Sniper.Enabled, function(v)
     CFG.Sniper.Enabled = v
+    if v then CFG.Sniper.DryRun = false end
     State.SaveRuntimeSettings()
-    log("Sniper Enabled", tostring(v))
+    log("Sniper Enabled", tostring(v), "DryRun", tostring(CFG.Sniper.DryRun))
 end)
 
 State.SniperWatchSec:AddToggle("Dry Run", CFG.Sniper.DryRun, function(v)
