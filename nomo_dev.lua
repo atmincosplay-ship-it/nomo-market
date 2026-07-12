@@ -1,7 +1,7 @@
 --//====================================================--
 --// NOMO MARKET SELLER LITE V3.0
 --// Blue Rose Full UI + Exact Booth/Listings Data Core
---// Seller focused. Sniper dry-run only by default.
+--// Seller focused. Live market automation by default.
 --//====================================================--
 
 local VERSION = "V7.3 CONFIG COMPAT"
@@ -25,8 +25,8 @@ CFG.Booth = CFG.Booth or {
 
 CFG.Seller = CFG.Seller or {
     Enabled = true,
-    PreviewOnly = true,
-    AutoList = false,
+    PreviewOnly = false,
+    AutoList = true,
     ScanInterval = 1,
     ListCooldown = 0,
     MaxListPerMinute = 999,
@@ -41,8 +41,8 @@ CFG.Listings = CFG.Listings or {
 }
 
 CFG.Sniper = CFG.Sniper or {
-    Enabled = false,
-    DryRun = true,
+    Enabled = true,
+    DryRun = false,
     ScanInterval = 0.75,
     BuyCooldown = 0,
     MaxBuyPerMinute = 999,
@@ -147,7 +147,7 @@ CFG.UI = CFG.UI or {
 CFG.UI.MaxDropdownRows = CFG.UI.MaxDropdownRows or 80
 CFG.UI.FilterGameSpam = true
 if CFG.UI.AutoMinimized == nil then
-    CFG.UI.AutoMinimized = (getgenv().nomo_auto_minimized == true or getgenv().NOMO_AUTO_MINIMIZED == true)
+    CFG.UI.AutoMinimized = (getgenv().nomo_auto_minimized ~= false and getgenv().NOMO_AUTO_MINIMIZED ~= false)
 end
 if tostring(CFG.Webhook.SnipeUrl or "") == "" then
     CFG.Webhook.SnipeUrl = tostring(getgenv().nomo_sniper_webhook or getgenv().NOMO_SNIPER_WEBHOOK or "")
@@ -602,6 +602,8 @@ end
 
 State.LoadRuntimeSettings = function()
     local data = readJson(State.GetSettingsPath())
+    local defaultsVersion = "v7_automation_live_defaults"
+    local applyLiveAutomationDefaults = type(data.Meta) ~= "table" or data.Meta.DefaultsVersion ~= defaultsVersion
     if type(data.Booth) == "table" then
         if data.Booth.AutoClaim ~= nil then CFG.Booth.AutoClaim = data.Booth.AutoClaim == true end
         if data.Booth.SmartReclaim ~= nil then CFG.Booth.SmartReclaim = data.Booth.SmartReclaim == true end
@@ -639,11 +641,22 @@ State.LoadRuntimeSettings = function()
     if CFG.Seller.AutoList then
         CFG.Seller.PreviewOnly = false
     end
+    if applyLiveAutomationDefaults then
+        CFG.Seller.AutoList = true
+        CFG.Seller.PreviewOnly = false
+        CFG.Sniper.Enabled = true
+        CFG.Sniper.DryRun = false
+        CFG.UI.AutoMinimized = true
+        State.PendingRuntimeDefaultsSave = true
+    end
     return data
 end
 
 State.SaveRuntimeSettings = function()
     local data = {
+        Meta = {
+            DefaultsVersion = "v7_automation_live_defaults",
+        },
         Booth = {
             AutoClaim = CFG.Booth.AutoClaim == true,
             SmartReclaim = CFG.Booth.SmartReclaim == true,
@@ -678,6 +691,10 @@ State.SaveRuntimeSettings = function()
 end
 
 State.LoadRuntimeSettings()
+if State.PendingRuntimeDefaultsSave then
+    State.PendingRuntimeDefaultsSave = false
+    State.SaveRuntimeSettings()
+end
 
 --//====================================================--
 --// Pet database
