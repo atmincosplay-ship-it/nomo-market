@@ -4273,10 +4273,38 @@ win.Pills.Status:Set("Ready", T.Green)
 win.Pills.Booth:Set("Data", T.Accent)
 win.Pills.Balance:Set(commaNumber(getTokenBalance()), T.Green)
 
-local function addLines(logObj, lines)
+local function richEscape(v)
+    return tostring(v or ""):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
+end
+
+local function formatEventLine(line)
+    line = tostring(line or "")
+        :gsub("^%d%d:%d%d:%d%d%s*|%s*", "")
+        :gsub("^%[%d%d:%d%d:%d%d%]%s*", "")
+    local low = line:lower()
+    local tag, col
+    if low:find("failed", 1, true) or low:find("unsafe", 1, true) or low:find("error", 1, true) then
+        tag, col = "ERR", T.Red
+    elseif low:find("warn", 1, true) or low:find("wait", 1, true) or low:find("skip", 1, true) then
+        tag, col = "WARN", T.Yellow
+    elseif low:find("started", 1, true) or low:find("attempt", 1, true) or low:find("scan", 1, true) then
+        tag, col = "RUN", T.Accent
+    elseif low:find("ok", 1, true) or low:find("done", 1, true) or low:find("complete", 1, true) or low:find("verified", 1, true) then
+        tag, col = "OK", T.Green
+    else
+        tag, col = "INFO", T.Sub
+    end
+    return ('<font color="#%s">[%s]</font> %s'):format(col:ToHex(), tag, richEscape(line))
+end
+
+local function addLines(logObj, lines, colorEvents)
     logObj:Clear()
     for _, line in ipairs(lines) do
-        logObj:Add(line)
+        if colorEvents and logObj.AddRich then
+            logObj:AddRich(formatEventLine(line))
+        else
+            logObj:Add(line)
+        end
     end
 end
 
@@ -4339,27 +4367,8 @@ end
 State.RefreshDashboard = function()
     if State.DashLog then
         State.DashLog:Clear()
-        local function escRich(v)
-            return tostring(v or ""):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
-        end
         for i = 1, math.min(5, #State.Logs) do
-            local line = tostring(State.Logs[i] or "")
-                :gsub("^%d%d:%d%d:%d%d%s*|%s*", "")
-                :gsub("^%[%d%d:%d%d:%d%d%]%s*", "")
-            local low = line:lower()
-            local tag, col
-            if low:find("failed", 1, true) or low:find("unsafe", 1, true) or low:find("error", 1, true) then
-                tag, col = "ERR", T.Red
-            elseif low:find("warn", 1, true) or low:find("wait", 1, true) or low:find("skip", 1, true) then
-                tag, col = "WARN", T.Yellow
-            elseif low:find("started", 1, true) or low:find("attempt", 1, true) or low:find("scan", 1, true) then
-                tag, col = "RUN", T.Accent
-            elseif low:find("ok", 1, true) or low:find("done", 1, true) or low:find("complete", 1, true) or low:find("verified", 1, true) then
-                tag, col = "OK", T.Green
-            else
-                tag, col = "INFO", T.Sub
-            end
-            State.DashLog:AddRich(('<font color="#%s">[%s]</font> %s'):format(col:ToHex(), tag, escRich(line)))
+            State.DashLog:AddRich(formatEventLine(State.Logs[i]))
         end
     end
     if win.RuntimeFooterText then
@@ -6073,8 +6082,8 @@ end, "outline")
 --// SETTINGS PAGE
 State.SettingsPage = win:CreatePage("Settings")
 State.SettingsTopRow = State.SettingsPage:AddRow()
-State.SettingPathSec = State.SettingsPage:AddSectionInRow(State.SettingsTopRow, "Paths", 0.34)
-State.SettingUiSec = State.SettingsPage:AddSectionInRow(State.SettingsTopRow, "UI", 0.33)
+State.SettingPathSec = State.SettingsPage:AddSectionInRow(State.SettingsTopRow, "Paths", 0.36)
+State.SettingUiSec = State.SettingsPage:AddSectionInRow(State.SettingsTopRow, "UI", 0.31)
 State.SettingActionSec = State.SettingsPage:AddSectionInRow(State.SettingsTopRow, "Actions", 0.33)
 
 State.FilterPathInput = State.SettingPathSec:AddInput("Filter Folder", getConfigFolder(), function(v)
@@ -6115,7 +6124,7 @@ State.ActivitySec = State.SettingsPage:AddSection("Activity Log")
 State.ActivityLog = State.ActivitySec:AddLog(170)
 
 State.ActivitySec:AddButton("Refresh Activity", function()
-    addLines(State.ActivityLog, State.Logs)
+    addLines(State.ActivityLog, State.Logs, true)
 end)
 
 --// Public helpers
