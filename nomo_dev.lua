@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V7.3 CONFIG COMPAT"
+local VERSION = "V7.4 LIVE DEFAULTS"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
