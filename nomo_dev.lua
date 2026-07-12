@@ -221,6 +221,8 @@ local State = {
     KnownMyListings = {},
     KnownMyListingsReady = false,
     MissingMyListings = {},
+    BoothHistoryCache = {},
+    LastBoothHistoryFetchAt = 0,
     SentSoldWebhooks = {},
     SentSnipeWebhooks = {},
     WebhookQueue = {},
@@ -2153,43 +2155,109 @@ State.SendSnipeWebhook = function(match)
     return sent
 end
 
+local function listingFromBoothHistory(history)
+    if type(history) ~= "table" then return nil end
+    if type(history.status) == "table" and tostring(history.status.result or "") == "Failed" then return nil end
+    local seller = type(history.seller) == "table" and history.seller or {}
+    local buyer = type(history.buyer) == "table" and history.buyer or {}
+    if tostring(seller.userId or "") ~= tostring(LocalPlayer.UserId) then return nil end
+    local item = type(history.item) == "table" and history.item or {}
+    local data = type(item.data) == "table" and item.data or {}
+    local itemData = type(data.ItemData) == "table" and data.ItemData or {}
+    local petType = tostring(data.PetType or data.SkinID or itemData.ItemName or data.ItemName or "Unknown")
+    local itemId = tostring(data.UUID or data.ItemId or data.ItemID or history.itemId or history.id or "")
+    local historyId = tostring(history.id or history.listingId or history.listingUUID or itemId or "")
+    if historyId == "" and itemId == "" then return nil end
+    local grossPrice = tonumber(history.price) or tonumber(history.grossPrice) or 0
+    local netPrice = tonumber(history.netPrice) or tonumber(history.NetPrice) or grossPrice
+    return {
+        ListingUUID = historyId ~= "" and historyId or itemId,
+        ItemId = itemId ~= "" and itemId or historyId,
+        PetType = petType,
+        Price = netPrice,
+        GrossPrice = grossPrice,
+        NetPrice = netPrice,
+        FinishTime = tonumber(history.finishTime),
+        Status = type(history.status) == "table" and tostring(history.status.result or "") or "",
+        OwnerName = tostring(seller.username or LocalPlayer.Name or ""),
+        BuyerName = tostring(buyer.username or ""),
+        Item = data,
+        History = history,
+    }
+end
+
+local function historyMatchesListing(historyListing, oldListing)
+    if type(historyListing) ~= "table" or type(oldListing) ~= "table" then return false end
+    local oldListingId = tostring(oldListing.ListingUUID or "")
+    local oldItemId = tostring(oldListing.ItemId or "")
+    local historyListingId = tostring(historyListing.ListingUUID or "")
+    local historyItemId = tostring(historyListing.ItemId or "")
+    if oldListingId ~= "" and (historyListingId == oldListingId or historyItemId == oldListingId) then return true end
+    if oldItemId ~= "" and (historyItemId == oldItemId or historyListingId == oldItemId) then return true end
+    if norm(historyListing.PetType) == norm(oldListing.PetType) and clampPrice(historyListing.Price) == clampPrice(oldListing.Price) then
+        return true
+    end
+    return false
+end
+
+local function collectHistoryRows(root, out, depth)
+    if type(root) ~= "table" or depth > 3 then return end
+    local parsed = listingFromBoothHistory(root)
+    if parsed then
+        table.insert(out, parsed)
+        return
+    end
+    for k, v in pairs(root) do
+        if type(v) == "table" and (type(k) == "number" or k == "History" or k == "history" or k == "Data" or k == "data" or k == "Result" or k == "result" or k == "Entries" or k == "entries" or k == "Sales" or k == "sales") then
+            collectHistoryRows(v, out, depth + 1)
+        end
+    end
+end
+
+State.FetchBoothHistorySales = function(force)
+    local now = os.clock()
+    if not force and type(State.BoothHistoryCache) == "table" and now - (State.LastBoothHistoryFetchAt or 0) < 8 then
+        return State.BoothHistoryCache
+    end
+    State.LastBoothHistoryFetchAt = now
+    local FetchHistory = BoothRemotes:FindFirstChild("FetchHistory")
+    if not FetchHistory or type(FetchHistory.InvokeServer) ~= "function" then
+        return State.BoothHistoryCache or {}
+    end
+    local ok, result = pcall(function()
+        return FetchHistory:InvokeServer()
+    end)
+    if not ok then
+        dlog("FetchHistory failed", tostring(result))
+        return State.BoothHistoryCache or {}
+    end
+    local rows = {}
+    collectHistoryRows(result, rows, 0)
+    State.BoothHistoryCache = rows
+    return rows
+end
+
+State.FindHistorySaleForListing = function(oldListing)
+    for _, row in ipairs(State.FetchBoothHistorySales(true)) do
+        if historyMatchesListing(row, oldListing) then
+            return row
+        end
+    end
+    return nil
+end
+
 State.ConnectBoothHistory = function()
     if State.BoothHistoryConnected then return end
     local AddToHistory = BoothRemotes:FindFirstChild("AddToHistory")
     if not AddToHistory or not AddToHistory.OnClientEvent then return end
     State.BoothHistoryConnected = true
     AddToHistory.OnClientEvent:Connect(function(history)
-        if type(history) ~= "table" then return end
-        if type(history.status) == "table" and tostring(history.status.result or "") == "Failed" then return end
-        local seller = type(history.seller) == "table" and history.seller or {}
-        local buyer = type(history.buyer) == "table" and history.buyer or {}
-        if tostring(seller.userId or "") ~= tostring(LocalPlayer.UserId) then return end
-        local item = type(history.item) == "table" and history.item or {}
-        local data = type(item.data) == "table" and item.data or {}
-        local itemData = type(data.ItemData) == "table" and data.ItemData or {}
-        local petType = tostring(data.PetType or data.SkinID or itemData.ItemName or data.ItemName or "Unknown")
-        local itemId = tostring(data.UUID or data.ItemId or data.ItemID or history.itemId or history.id or "")
-        local historyId = tostring(history.id or itemId or "")
-        if historyId == "" and itemId == "" then return end
-        local grossPrice = tonumber(history.price) or tonumber(history.grossPrice) or 0
-        local netPrice = tonumber(history.netPrice) or tonumber(history.NetPrice) or grossPrice
-        local listing = {
-            ListingUUID = historyId ~= "" and historyId or itemId,
-            ItemId = itemId ~= "" and itemId or historyId,
-            PetType = petType,
-            Price = netPrice,
-            GrossPrice = grossPrice,
-            NetPrice = netPrice,
-            FinishTime = tonumber(history.finishTime),
-            Status = type(history.status) == "table" and tostring(history.status.result or "") or "",
-            OwnerName = tostring(seller.username or LocalPlayer.Name or ""),
-            BuyerName = tostring(buyer.username or ""),
-            Item = data,
-            History = history,
-        }
-        local buyerName = tostring(buyer.username or "")
+        local listing = listingFromBoothHistory(history)
         if not listing then return end
+        local buyer = type(history.buyer) == "table" and history.buyer or {}
+        local buyerName = tostring(buyer.username or "")
         local sent = State.SendSoldWebhook(listing, {User = buyerName, Source = "history"})
+        table.insert(State.BoothHistoryCache, 1, listing)
         State.InvalidateListingCache()
         if sent then
             log("History sold webhook", tostring(listing.PetType), tostring(listing.Price), tostring(listing.ListingUUID))
@@ -2218,9 +2286,16 @@ State.TrackSoldListings = function(myListings)
             if not current[id] and not State.ManualRemoveUUIDs[id] then
                 local missing = State.MissingMyListings[id]
                 if missing and now - (tonumber(missing.At) or now) >= 8 then
-                    State.SendSoldWebhook(missing.Listing or oldListing)
+                    local listing = missing.Listing or oldListing
+                    local historySale = State.FindHistorySaleForListing(listing)
+                    if historySale then
+                        State.SendSoldWebhook(historySale, {User = historySale.BuyerName, Source = "history"})
+                        log("Webhook sold confirmed by history", tostring(historySale.PetType), tostring(historySale.Price), id)
+                    else
+                        State.SendSoldWebhook(listing, {Source = "inferred"})
+                        log("Webhook sold inferred", tostring(oldListing.PetType), tostring(oldListing.Price), id)
+                    end
                     State.MissingMyListings[id] = nil
-                    log("Webhook sold detected", tostring(oldListing.PetType), tostring(oldListing.Price), id)
                 else
                     State.MissingMyListings[id] = {At = now, Listing = oldListing}
                 end
