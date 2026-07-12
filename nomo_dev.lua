@@ -198,6 +198,8 @@ local State = {
     LastListings = {},
     LastMyListings = {},
     LastSniperMatches = {},
+    LastSniperSkipReasons = {},
+    LastSniperSkipTotal = 0,
     ListingsCache = nil,
     LastListingsCacheAt = 0,
     MyListingsCache = nil,
@@ -2946,6 +2948,18 @@ end
 local function snipeDryRun(force)
     local myId = tostring(getPlayerId())
     local watchNorm = {}
+    local skipReasons, skipTotal = {}, 0
+
+    local function recordSkip(l, why)
+        skipTotal += 1
+        if #skipReasons < 8 then
+            table.insert(skipReasons, string.format("%s | price %s | %s",
+                tostring(l and l.PetType or "?"),
+                tostring(l and l.Price or "?"),
+                tostring(why or "skipped")
+            ))
+        end
+    end
 
     for name, cfg in pairs(CFG.Sniper.Watchlist or {}) do
         watchNorm[norm(name)] = {
@@ -2966,19 +2980,16 @@ local function snipeDryRun(force)
             local w = watchNorm[norm(l.PetType)]
 
             if w then
-                local price = tonumber(l.Price) or 999999999
-
-                if w.MaxPrice <= 0 or price <= w.MaxPrice then
-                    local match = {
-                        Listing = l,
-                        Watch = w,
-                    }
-                    local safe, why = validateSniperMatch and validateSniperMatch(match)
-                    if safe then
-                        table.insert(raw, match)
-                    else
-                        dlog("sniper scan skipped", tostring(l.PetType), tostring(why))
-                    end
+                local match = {
+                    Listing = l,
+                    Watch = w,
+                }
+                local safe, why = validateSniperMatch and validateSniperMatch(match)
+                if safe then
+                    table.insert(raw, match)
+                else
+                    recordSkip(l, why)
+                    dlog("sniper scan skipped", tostring(l.PetType), tostring(why))
                 end
             end
         end
@@ -3026,6 +3037,8 @@ local function snipeDryRun(force)
 
     State.LastSniperMatches = filtered
     State.LastSniperRawCount = #raw
+    State.LastSniperSkipReasons = skipReasons
+    State.LastSniperSkipTotal = skipTotal
 
     local scanSig = tostring(#filtered) .. "/" .. tostring(#raw)
     local now = os.clock()
@@ -3065,6 +3078,10 @@ local function getCurrentSniperWatch(petType)
             return {
                 Name = tostring(name),
                 MaxPrice = tonumber(type(cfg) == "table" and cfg.MaxPrice or cfg) or 0,
+                MinWeight = type(cfg) == "table" and toNumber(cfg.MinWeight or cfg.minWeight) or 0,
+                MaxWeight = type(cfg) == "table" and toNumber(cfg.MaxWeight or cfg.maxWeight) or nil,
+                WeightMode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode or cfg.weightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode),
+                MaxMatchesPerPet = type(cfg) == "table" and (toInt(cfg.MaxMatchesPerPet or cfg.maxMatchesPerPet or cfg.PerPet or cfg.perPet) or toInt(CFG.Sniper.MaxMatchesPerPet) or 5) or (toInt(CFG.Sniper.MaxMatchesPerPet) or 5),
             }
         end
     end
@@ -3158,17 +3175,18 @@ local function buyFirstMatch()
     end
     local m = State.LastSniperMatches[1] or snipeDryRun()[1]
     if not m then log("No match to buy") return false end
+    local firstListing = m.Listing or {}
 
     local safeBefore, whyBefore = validateSniperMatch(m)
     if not safeBefore then
-        log("Buy blocked:", tostring(whyBefore))
+        log("Buy blocked:", tostring(whyBefore), tostring(firstListing.PetType), "price", tostring(firstListing.Price))
         return false
     end
 
     if CFG.Sniper.RescanBeforeBuy then
         local fresh = findFreshSniperMatch(m)
         if not fresh then
-            log("Buy blocked: listing no longer matches after rescan")
+            log("Buy blocked: listing no longer matches after rescan", tostring(firstListing.PetType), "price", tostring(firstListing.Price))
             return false
         end
         m = fresh
@@ -3177,13 +3195,13 @@ local function buyFirstMatch()
     local l = m.Listing
     local safeAfter, whyAfter = validateSniperMatch(m)
     if not safeAfter then
-        log("Buy blocked:", tostring(whyAfter))
+        log("Buy blocked:", tostring(whyAfter), tostring(l.PetType), "price", tostring(l.Price))
         return false
     end
 
     local canBuy, why = canBuyNow(l.Price)
     if not canBuy then
-        log("Buy blocked:", tostring(why))
+        log("Buy blocked:", tostring(why), tostring(l.PetType), "price", tostring(l.Price))
         return false
     end
 
@@ -6071,6 +6089,13 @@ State.RefreshSniperLog = function()
 
     table.insert(lines, "------------------------------")
     table.insert(lines, "Matches: " .. tostring(#State.LastSniperMatches) .. " shown / raw " .. tostring(State.LastSniperRawCount or #State.LastSniperMatches))
+
+    if #State.LastSniperMatches == 0 and (tonumber(State.LastSniperSkipTotal) or 0) > 0 then
+        table.insert(lines, "Skipped: " .. tostring(State.LastSniperSkipTotal) .. " safety reject(s)")
+        for i, why in ipairs(State.LastSniperSkipReasons or {}) do
+            table.insert(lines, string.format("%02d. %s", i, tostring(why)))
+        end
+    end
 
     for i, m in ipairs(State.LastSniperMatches) do
         if i > 18 then
