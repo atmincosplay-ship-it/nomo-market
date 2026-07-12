@@ -214,6 +214,10 @@ local State = {
     LastBoothDataAt = 0,
     LastClonePanelAt = 0,
     LastCloneInventoryAt = 0,
+    LastDashboardRefreshAt = 0,
+    LastPillRefreshAt = 0,
+    UiMinimized = false,
+    UiRefreshDirty = true,
     CloneInventoryCount = 0,
     ClonePanelDirty = true,
     CloneInventoryDirty = true,
@@ -3512,6 +3516,8 @@ function Library:CreateWindow(cfg)
 		main.Visible = not v
 		mini.Visible = v
 		clonePanel.Visible = v
+		State.UiMinimized = v == true
+		State.UiRefreshDirty = true
 	end
 
 	winBtn("–", -66, function()
@@ -4494,15 +4500,33 @@ State.RefreshDashboard = function()
 end
 
 local function refreshPills()
-    local best = findBestBooth()
-    local boothText = best and best.Status or "No Booth"
-    win.Pills.Booth:Set(boothText, boothText == "MINE" and T.Green or (boothText == "FREE" and T.Yellow or T.Sub))
-    win.Pills.Balance:Set(commaNumber(getTokenBalance()), T.Green)
-    State.UpdatePerfStats()
-    if State.ClonePanelDirty or os.clock() - (State.LastClonePanelAt or 0) >= 2 then
+    local now = os.clock()
+    local minimized = State.UiMinimized == true
+    local pillInterval = minimized and 5 or 1
+    local cloneInterval = minimized and 5 or 2
+    local dashboardInterval = minimized and 10 or 2
+
+    if State.UiRefreshDirty or now - (State.LastPillRefreshAt or 0) >= pillInterval then
+        State.LastPillRefreshAt = now
+        local best = findBestBooth()
+        local boothText = best and best.Status or "No Booth"
+        if not minimized or State.UiRefreshDirty then
+            win.Pills.Booth:Set(boothText, boothText == "MINE" and T.Green or (boothText == "FREE" and T.Yellow or T.Sub))
+            win.Pills.Balance:Set(commaNumber(getTokenBalance()), T.Green)
+        end
+        State.UpdatePerfStats()
+    end
+
+    if State.ClonePanelDirty or now - (State.LastClonePanelAt or 0) >= cloneInterval then
         State.RefreshCloneStatus(State.CloneInventoryDirty)
     end
-    State.RefreshDashboard()
+
+    if (not minimized) and (State.UiRefreshDirty or now - (State.LastDashboardRefreshAt or 0) >= dashboardInterval) then
+        State.LastDashboardRefreshAt = now
+        State.RefreshDashboard()
+    end
+
+    State.UiRefreshDirty = false
 end
 
 
