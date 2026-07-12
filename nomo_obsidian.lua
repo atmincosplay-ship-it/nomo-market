@@ -144,6 +144,7 @@ CFG.UI = CFG.UI or {
     FilterGameSpam = true,
 }
 CFG.UI.MaxDropdownRows = CFG.UI.MaxDropdownRows or 80
+CFG.UI.FilterGameSpam = true
 if CFG.UI.AutoMinimized == nil then
     CFG.UI.AutoMinimized = (getgenv().nomo_auto_minimized == true or getgenv().NOMO_AUTO_MINIMIZED == true)
 end
@@ -622,7 +623,6 @@ State.LoadRuntimeSettings = function()
     if type(data.UI) == "table" then
         if data.UI.AutoMinimized ~= nil then CFG.UI.AutoMinimized = data.UI.AutoMinimized == true end
         if data.UI.CompactBoothData ~= nil then CFG.UI.CompactBoothData = data.UI.CompactBoothData == true end
-        if data.UI.FilterGameSpam ~= nil then CFG.UI.FilterGameSpam = data.UI.FilterGameSpam == true end
     end
     if tostring(CFG.Webhook.DeviceName or "") == "" then CFG.Webhook.DeviceName = tostring(getgenv().nomo_device_name or getgenv().NOMO_DEVICE_NAME or "") end
     if tostring(CFG.Webhook.SnipeUrl or "") == "" then CFG.Webhook.SnipeUrl = tostring(CFG.Webhook.Url or "") end
@@ -663,7 +663,6 @@ State.SaveRuntimeSettings = function()
         UI = {
             AutoMinimized = CFG.UI.AutoMinimized == true,
             CompactBoothData = CFG.UI.CompactBoothData ~= false,
-            FilterGameSpam = CFG.UI.FilterGameSpam ~= false,
         },
     }
     return saveJson(State.GetSettingsPath(), data)
@@ -6093,17 +6092,6 @@ State.SettingUiSec:AddToggle("Auto Minimized", CFG.UI.AutoMinimized == true, fun
     CFG.UI.AutoMinimized = v
     State.SaveRuntimeSettings()
     log("AutoMinimized", tostring(v), "applies on next reload")
-end)
-
-State.SettingUiSec:AddToggle("Filter Warn Spam", CFG.UI.FilterGameSpam ~= false, function(v)
-    CFG.UI.FilterGameSpam = v
-    State.SaveRuntimeSettings()
-    if v then
-        local ok = installWarnFilter()
-        log("WarnFilter", tostring(ok))
-    else
-        log("WarnFilter disabled after next reload")
-    end
 end)
 
 State.SettingActionSec:AddButton("Reload Pet List", function()
