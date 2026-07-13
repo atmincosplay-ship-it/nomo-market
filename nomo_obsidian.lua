@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V8.5 SNIPER AUTO LOAD"
+local VERSION = "V8.6 ARCEUS STARTUP RETRY"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -659,7 +659,7 @@ end
 
 State.LoadRuntimeSettings = function()
     local data = readJson(State.GetSettingsPath())
-    local defaultsVersion = "v7_automation_live_defaults"
+    local defaultsVersion = "v8_6_arceus_startup_retry"
     local applyLiveAutomationDefaults = type(data.Meta) ~= "table" or data.Meta.DefaultsVersion ~= defaultsVersion
     if type(data.Booth) == "table" then
         if data.Booth.AutoClaim ~= nil then CFG.Booth.AutoClaim = data.Booth.AutoClaim == true end
@@ -700,6 +700,7 @@ State.LoadRuntimeSettings = function()
     end
     if applyLiveAutomationDefaults then
         CFG.Booth.AutoClaim = true
+        CFG.Booth.SmartReclaim = true
         CFG.Seller.AutoList = true
         CFG.Seller.PreviewOnly = false
         CFG.Sniper.Enabled = true
@@ -713,7 +714,7 @@ end
 State.SaveRuntimeSettings = function()
     local data = {
         Meta = {
-            DefaultsVersion = "v7_automation_live_defaults",
+            DefaultsVersion = "v8_6_arceus_startup_retry",
         },
         Booth = {
             AutoClaim = CFG.Booth.AutoClaim == true,
@@ -6561,16 +6562,46 @@ State.RefreshSniperLog()
 win:SelectPage("Dashboard")
 
 task.spawn(function()
-    task.wait(1)
-    if State.Running and CFG.Booth.AutoClaim then
-        log("Startup AutoClaim attempting")
-        local ok, result = pcall(claimBestFreeBooth)
-        if ok then
-            log("Startup AutoClaim result", tostring(result))
-        else
-            log("Startup AutoClaim error", tostring(result))
+    local attempts = 10
+    for attempt = 1, attempts do
+        if not State.Running then break end
+        task.wait(attempt == 1 and 1 or 2)
+
+        local filtersOk, sniperOk = false, false
+        local okFilters, filterData = pcall(reloadFilters)
+        if okFilters and type(filterData) == "table" then
+            filtersOk = type(filterData.Filters) == "table" and #filterData.Filters > 0
         end
-        State.LastAutoClaimAt = 0
+
+        local okSniper, sniperResult = pcall(State.ReloadSniperConfig)
+        sniperOk = okSniper and sniperResult == true and type(CFG.Sniper.Watchlist) == "table" and next(CFG.Sniper.Watchlist) ~= nil
+
+        log("Startup reload", "try", tostring(attempt) .. "/" .. tostring(attempts), "filters", tostring(filtersOk and #(State.FilterData.Filters or {}) or 0), "sniper", tostring(sniperOk))
+
+        if State.PendingRuntimeDefaultsSave then
+            State.PendingRuntimeDefaultsSave = false
+            State.SaveRuntimeSettings()
+        end
+
+        if CFG.Booth.AutoClaim then
+            local target, status = findBestBooth(true)
+            if status == "MINE" then
+                State.LastBooth = target
+                log("Startup AutoClaim already mine", tostring(target and target.Id or "?"))
+            else
+                log("Startup AutoClaim attempting", tostring(status), tostring(target and target.Id or "none"))
+                local okClaim, claimResult = pcall(claimBestFreeBooth)
+                log(okClaim and "Startup AutoClaim result" or "Startup AutoClaim error", tostring(claimResult))
+            end
+            State.LastAutoClaimAt = 0
+        end
+
+        State.LastSellerScanAt = 0
+        State.LastSniperScanAt = 0
+
+        if filtersOk and sniperOk and State.LastBooth then
+            break
+        end
     end
 end)
 
