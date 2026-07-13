@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V9.6 WEBHOOK DEFAULTS"
+local VERSION = "V9.7 FRUIT DIAG"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -1993,6 +1993,106 @@ local function getOwnPetsFromData(force)
     return out
 end
 
+State.DiagnoseFruits = function()
+    local function cleanShort(v)
+        local s = tostring(v or "")
+        s = s:gsub("\n", " "):gsub("\r", " ")
+        if #s > 80 then s = s:sub(1, 77) .. "..." end
+        return s
+    end
+
+    local function logFruitTool(tool, label)
+        if typeof(tool) ~= "Instance" or not tool:IsA("Tool") then return false end
+
+        local harvested = tool:GetAttribute("HarvestedFruit")
+        local itemType = tool:GetAttribute("ItemType")
+        local fruitId = tool:GetAttribute("Id") or tool:GetAttribute("UUID") or tool:GetAttribute("ItemId")
+        local fruitName = tool:GetAttribute("FruitName") or tool:GetAttribute("Fruit") or tool:GetAttribute("ItemName") or tool:GetAttribute("Name")
+        local kg = tool:GetAttribute("Weight") or tool:GetAttribute("KG") or tool:GetAttribute("Kilo")
+        local mutation = tool:GetAttribute("Mutation") or tool:GetAttribute("Variant")
+
+        local looksFruit = harvested == true or tostring(itemType or ""):lower():find("fruit", 1, true) ~= nil or fruitName ~= nil
+        if not looksFruit then return false end
+
+        log("Fruit tool", label, cleanShort(tool.Name), "type=" .. cleanShort(itemType), "id=" .. cleanShort(fruitId), "fruit=" .. cleanShort(fruitName), "kg=" .. cleanShort(kg), "mut=" .. cleanShort(mutation))
+        return true
+    end
+
+    log("Fruit diag started", "read-only")
+
+    local foundTools = 0
+    local backpack = LocalPlayer and LocalPlayer:FindFirstChildOfClass("Backpack")
+    local character = LocalPlayer and LocalPlayer.Character
+    local containers = {
+        {Name = "Backpack", Obj = backpack},
+        {Name = "Character", Obj = character},
+    }
+
+    for _, entry in ipairs(containers) do
+        local obj = entry.Obj
+        if typeof(obj) == "Instance" then
+            for _, child in ipairs(obj:GetChildren()) do
+                if logFruitTool(child, entry.Name) then
+                    foundTools = foundTools + 1
+                end
+            end
+        end
+    end
+    log("Fruit diag tools", tostring(foundTools), "candidate fruit tool(s)")
+
+    local okData, data = pcall(function()
+        return DataService:GetData()
+    end)
+    if okData and type(data) == "table" then
+        local foundData = 0
+        local function scanData(node, path, depth)
+            if foundData >= 20 or depth > 5 or type(node) ~= "table" then return end
+
+            local pathLower = tostring(path):lower()
+            local itemType = node.ItemType or node.Type
+            local fruitName = node.FruitName or node.Fruit or node.ItemName or node.Name
+            local fruitId = node.Id or node.UUID or node.ItemId
+            local kg = node.Weight or node.KG or node.Kilo
+            local looksFruit = pathLower:find("fruit", 1, true) ~= nil or tostring(itemType or ""):lower():find("fruit", 1, true) ~= nil or node.HarvestedFruit == true
+
+            if looksFruit and (fruitName ~= nil or fruitId ~= nil or itemType ~= nil) then
+                foundData = foundData + 1
+                log("Fruit data", tostring(path), "type=" .. cleanShort(itemType), "id=" .. cleanShort(fruitId), "name=" .. cleanShort(fruitName), "kg=" .. cleanShort(kg))
+            end
+
+            for k, v in pairs(node) do
+                if type(v) == "table" then
+                    local key = tostring(k)
+                    local keyLower = key:lower()
+                    if depth < 2 or keyLower:find("fruit", 1, true) or keyLower:find("inventory", 1, true) or keyLower:find("trade", 1, true) then
+                        scanData(v, tostring(path) .. "." .. key, depth + 1)
+                        if foundData >= 20 then return end
+                    end
+                end
+            end
+        end
+
+        scanData(data, "Data", 0)
+        log("Fruit diag data", tostring(foundData), "candidate data row(s)")
+    else
+        log("Fruit diag data failed", tostring(data))
+    end
+
+    local nonPet = 0
+    for _, l in ipairs(getAllListings(true, true)) do
+        if tostring(l.ItemType or "") ~= "Pet" then
+            nonPet = nonPet + 1
+            if nonPet <= 15 then
+                local item = l.Item or {}
+                log("Market non-pet", "type=" .. cleanShort(l.ItemType), "name=" .. cleanShort(item.FruitName or item.Fruit or item.ItemName or item.Name or l.PetType), "price=" .. cleanShort(l.Price), "id=" .. cleanShort(l.ItemId))
+            end
+        end
+    end
+    log("Fruit diag market", tostring(nonPet), "non-pet listing(s) visible")
+end
+
+_G.NOMO_DIAGNOSE_FRUITS = State.DiagnoseFruits
+getgenv().NOMO_DIAGNOSE_FRUITS = State.DiagnoseFruits
 local function findOwnPetByUUID(uuid, force)
     local target = tostring(uuid or "")
     if target == "" then return nil end
@@ -6583,6 +6683,10 @@ end)
 State.SettingActionSec:AddButton("Reload Pet List", function()
     loadGamePetList()
     log("PetList reloaded", tostring(#State.PetList))
+end, "outline")
+
+State.SettingActionSec:AddButton("Diagnose Fruits", function()
+    if State.DiagnoseFruits then State.DiagnoseFruits() end
 end, "outline")
 
 State.SettingPathSec:AddButton("Save / Reload Path", function()
