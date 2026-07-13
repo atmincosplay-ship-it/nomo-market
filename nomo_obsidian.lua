@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V9.3 LISTING LOAD FIX"
+local VERSION = "V9.4 SNIPER LOAD FIX"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -3013,8 +3013,8 @@ local function importSniperWatchlist(path)
 
         local minWeight, maxWeight, weightMode
         if type(cfg) == "table" then
-            minWeight = getSniperMinWeight(cfg)
-            maxWeight = getSniperMaxWeight(cfg)
+            minWeight = toNumber(cfg.MinWeight or cfg.minWeight or cfg.MinKG or cfg.minKG or cfg.minKg or cfg.MinBaseWeight) or 0
+            maxWeight = toNumber(cfg.MaxWeight or cfg.maxWeight or cfg.MaxKG or cfg.maxKG or cfg.maxKg or cfg.MaxBaseWeight)
             weightMode = tostring(cfg.WeightMode or cfg.weightMode or CFG.Sniper.WeightMode or "Base")
         end
         weightMode = weightMode:gsub("%s+", "")
@@ -3486,6 +3486,90 @@ local function pad(p, t, b, l, r)
 end
 local function vlist(p, gap)
 	return make("UIListLayout", {Padding = UDim.new(0, gap or 6), SortOrder = Enum.SortOrder.LayoutOrder}, p)
+end
+
+State.OpenConfirmPopup = function(titleText, bodyText, confirmText, onConfirm)
+    if not win or not win.Gui then
+        if onConfirm then onConfirm() end
+        return
+    end
+
+    local overlay = make("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.35,
+        BorderSizePixel = 0,
+        ZIndex = 120,
+    }, win.Gui)
+
+    local modal = make("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.fromOffset(360, 160),
+        BackgroundColor3 = T.Card,
+        BorderSizePixel = 0,
+        ZIndex = 121,
+    }, overlay)
+    corner(modal, 10); stroke(modal); pad(modal, 12)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, -8, 0, 24),
+        BackgroundTransparency = 1,
+        Text = tostring(titleText or "Confirm"),
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 122,
+    }, modal)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, -8, 0, 48),
+        Position = UDim2.fromOffset(0, 34),
+        BackgroundTransparency = 1,
+        Text = tostring(bodyText or "Are you sure?"),
+        TextColor3 = T.Sub,
+        Font = Enum.Font.Gotham,
+        TextSize = 12,
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        ZIndex = 122,
+    }, modal)
+
+    local cancelBtn = make("TextButton", {
+        Size = UDim2.fromOffset(130, 30),
+        Position = UDim2.new(1, -272, 1, -34),
+        BackgroundColor3 = T.Card2,
+        Text = "Cancel",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 122,
+    }, modal)
+    corner(cancelBtn, 7); stroke(cancelBtn)
+
+    local okBtn = make("TextButton", {
+        Size = UDim2.fromOffset(130, 30),
+        Position = UDim2.new(1, -134, 1, -34),
+        BackgroundColor3 = T.Red,
+        Text = tostring(confirmText or "Confirm"),
+        TextColor3 = Color3.new(1, 1, 1),
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 122,
+    }, modal)
+    corner(okBtn, 7)
+
+    cancelBtn.Activated:Connect(function()
+        overlay:Destroy()
+    end)
+    okBtn.Activated:Connect(function()
+        overlay:Destroy()
+        if onConfirm then onConfirm() end
+    end)
 end
 
 local function clampGuiPosition(frame, pos)
@@ -5352,10 +5436,12 @@ State.OpenFilterManager = function()
             State.OpenFilterEditPopup(f.Row or i, overlay)
         end)
         delBtn.Activated:Connect(function()
-            deleteFilter(f.Row or i)
-            refreshSellerLog(true)
-            overlay:Destroy()
-            State.OpenFilterManager()
+            State.OpenConfirmPopup("Delete Filter", "Remove this listing filter from config?", "Delete", function()
+                deleteFilter(f.Row or i)
+                refreshSellerLog(true)
+                overlay:Destroy()
+                State.OpenFilterManager()
+            end)
         end)
     end
 end
@@ -5543,8 +5629,10 @@ filterSec:AddButton("Preview Candidates", function()
 end, "outline")
 
 filterLogSec:AddButton("Clear All Filters", function()
-    clearFilters()
-    refreshSellerLog(false)
+    State.OpenConfirmPopup("Clear Filters", "Remove every listing filter from config?", "Clear", function()
+        clearFilters()
+        refreshSellerLog(false)
+    end)
 end, "outline")
 
 --// LISTINGS PAGE
@@ -6263,10 +6351,12 @@ State.OpenSniperWatchlistManager = function()
             State.OpenSniperWatchEditPopup(name, overlay)
         end)
         delBtn.Activated:Connect(function()
-            removeWatch(name)
-            State.RefreshSniperLog()
-            overlay:Destroy()
-            State.OpenSniperWatchlistManager()
+            State.OpenConfirmPopup("Delete Watch", "Remove this sniper watch from config?", "Delete", function()
+                removeWatch(name)
+                State.RefreshSniperLog()
+                overlay:Destroy()
+                State.OpenSniperWatchlistManager()
+            end)
         end)
     end
 end
@@ -6346,10 +6436,12 @@ State.SniperWatchSec:AddButton("Dry Run Scan", function()
 end, "outline")
 
 State.SniperLimitSec:AddButton("Clear Watchlist", function()
-    clearWatch()
-    State.LastSniperMatches = {}
-    State.LastSniperRawCount = 0
-    State.RefreshSniperLog()
+    State.OpenConfirmPopup("Clear Watchlist", "Remove every sniper watch from config?", "Clear", function()
+        clearWatch()
+        State.LastSniperMatches = {}
+        State.LastSniperRawCount = 0
+        State.RefreshSniperLog()
+    end)
 end, "outline")
 
 State.SniperLimitSec:AddButton("Buy First", function()
