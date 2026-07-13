@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V8.2 LANGUAGE SAFE NOTIFS"
+local VERSION = "V8.3 LIVE ACTIVITY LOG"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -381,6 +381,16 @@ local function log(...)
     end
     table.insert(State.Logs, 1, text)
     while #State.Logs > 50 do table.remove(State.Logs) end
+    State.ActivityLogDirty = true
+    if State.RefreshActivityLog and not State.ActivityLogRefreshQueued then
+        State.ActivityLogRefreshQueued = true
+        task.delay(1, function()
+            State.ActivityLogRefreshQueued = false
+            if State.RefreshActivityLog then
+                State.RefreshActivityLog()
+            end
+        end)
+    end
 end
 
 local function dlog(...)
@@ -6422,8 +6432,20 @@ end, "outline")
 State.ActivitySec = State.SettingsPage:AddSection("Activity Log")
 State.ActivityLog = State.ActivitySec:AddLog(170)
 
-State.ActivitySec:AddButton("Refresh Activity", function()
+State.RefreshActivityLog = function(force)
+    if not State.ActivityLog then return end
+    local now = os.clock()
+    if not force and not State.ActivityLogDirty then return end
+    if not force and now - (State.LastActivityLogRefreshAt or 0) < 0.75 then return end
+    State.LastActivityLogRefreshAt = now
+    State.ActivityLogDirty = false
     addLines(State.ActivityLog, State.Logs, true)
+end
+
+State.RefreshActivityLog(true)
+
+State.ActivitySec:AddButton("Refresh Activity", function()
+    State.RefreshActivityLog(true)
 end)
 
 --// Public helpers
