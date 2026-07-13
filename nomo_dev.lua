@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V8.8 CLEAN SNIPER CONFIG"
+local VERSION = "V8.9 STABILITY CONFIG LOAD"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -1586,7 +1586,7 @@ local function applyRemoteConfig(data)
         CFG.Seller.MaxAutoListSession = CFG.Seller.BoothCap or 50
     end
 
-    local filters = data.Filters
+    local filters = data.Filters or data.listing or data.Listing or data.listings
     if type(filters) == "table" then
         State.FilterData = {Filters = filters}
         if CFG.Seller.RemoteConfigSaveLocal then
@@ -1596,6 +1596,33 @@ local function applyRemoteConfig(data)
     end
 
     return false
+end
+
+State.NormalizeListingConfigData = function(data)
+    if type(data) ~= "table" then
+        return {Filters = {}}
+    end
+
+    if type(data.Filters) == "table" then
+        return data
+    end
+
+    if type(data.listing) == "table" then
+        data.Filters = data.listing
+        return data
+    end
+
+    if type(data.Listing) == "table" then
+        data.Filters = data.Listing
+        return data
+    end
+
+    if type(data.listings) == "table" then
+        data.Filters = data.listings
+        return data
+    end
+
+    return data
 end
 
 local function reloadFilters()
@@ -1611,11 +1638,11 @@ local function reloadFilters()
     end
 
     local path = getFilterPath()
-    State.FilterData = readJson(path)
+    State.FilterData = State.NormalizeListingConfigData(readJson(path))
     if type(State.FilterData.Filters) ~= "table" or #State.FilterData.Filters == 0 then
         local fallback = "Nomo/listing_filters.json"
         if path ~= fallback then
-            local fallbackData = readJson(fallback)
+            local fallbackData = State.NormalizeListingConfigData(readJson(fallback))
             if type(fallbackData.Filters) == "table" and #fallbackData.Filters > 0 then
                 State.FilterData = fallbackData
                 CFG.Seller.ListingFilterPath = "Nomo"
@@ -1630,11 +1657,13 @@ local function reloadFilters()
 end
 
 State.LoadLocalFilters = function()
-    State.FilterData = readJson(getFilterPath())
+    State.FilterData = State.NormalizeListingConfigData(readJson(getFilterPath()))
     return State.FilterData
 end
 
 saveFilters = function()
+    State.FilterData = State.NormalizeListingConfigData(State.FilterData)
+    State.FilterData.listing = State.FilterData.Filters or {}
     return saveJson(getFilterPath(), State.FilterData)
 end
 
@@ -1731,17 +1760,17 @@ local function getFilters()
                     Pet = tostring(exactPet or pet),
                     PetNorm = norm(exactPet or pet),
                     Price = clampPrice(row.Price or row.price or row.Tokens or row.tokens),
-                    MinWeight = toNumber(row.MinWeight or row.minWeight or row.MinKG or row.MinBaseWeight),
-                    MaxWeight = toNumber(row.MaxWeight or row.maxWeight or row.MaxKG or row.MaxBaseWeight),
-                    MinLevel = toInt(row.MinLevel or row.minLevel or row.MinAge),
-                    MaxLevel = toInt(row.MaxLevel or row.maxLevel or row.MaxAge),
+                    MinWeight = toNumber(row.MinWeight or row.minWeight or row.MinKG or row.minKG or row.minKg or row.MinBaseWeight),
+                    MaxWeight = toNumber(row.MaxWeight or row.maxWeight or row.MaxKG or row.maxKG or row.maxKg or row.MaxBaseWeight),
+                    MinLevel = toInt(row.MinLevel or row.minLevel or row.MinAge or row.minAge),
+                    MaxLevel = toInt(row.MaxLevel or row.maxLevel or row.MaxAge or row.maxAge),
                     Mutation = normalizeMutationConfig(row.Mutation or row.mutation or "Any"),
                     -- Hatch types like GIANT/Rainbow-hatched pets appear as different Pet names in the game API.
                     -- Keep Variant fields only for backward compatibility, but do not require them by default.
                     Variant = "Any",
                     ExcludeMutations = splitList(row.ExcludeMutations or row.ExcludedMutations or row.excludeMutations or row.excludedMutations),
                     ExcludeVariants = {},
-                    MaxListedPet = toInt(row.MaxListedPet or row.maxListedPet or row.MaxListed) or 0,
+                    MaxListedPet = toInt(row.MaxListedPet or row.maxListedPet or row.MaxListed or row.maxListed or row.MaxListing or row.maxListing) or 0,
                     Raw = row,
                 })
             end
