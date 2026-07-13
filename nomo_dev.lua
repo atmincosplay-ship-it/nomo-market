@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V9.2 STARTUP CALM"
+local VERSION = "V9.3 LISTING LOAD FIX"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -601,7 +601,6 @@ local function readJson(path)
         if ok and raw and raw ~= "" then
             local ok2, data = pcall(function() return HttpService:JSONDecode(raw) end)
             if ok2 and type(data) == "table" then
-                data.Filters = data.Filters or {}
                 return data
             end
         end
@@ -1603,7 +1602,7 @@ State.NormalizeListingConfigData = function(data)
         return {Filters = {}}
     end
 
-    if type(data.Filters) == "table" then
+    if type(data.Filters) == "table" and #data.Filters > 0 then
         return data
     end
 
@@ -1622,6 +1621,7 @@ State.NormalizeListingConfigData = function(data)
         return data
     end
 
+    data.Filters = type(data.Filters) == "table" and data.Filters or {}
     return data
 end
 
