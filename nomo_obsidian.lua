@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V9.1 STARTUP CONFIG RETRY"
+local VERSION = "V9.2 STARTUP CALM"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6608,53 +6608,30 @@ bootStep("SniperLog", State.RefreshSniperLog)
 win:SelectPage("Dashboard")
 
 task.spawn(function()
-    local attempts = 20
-    for attempt = 1, attempts do
-        if not State.Running then break end
-        task.wait(attempt == 1 and 2 or 3)
+    task.wait(4)
+    if not State.Running then return end
 
-        local filtersOk, sniperOk = false, false
-        local okFilters, filterData = pcall(reloadFilters)
-        if okFilters and type(filterData) == "table" then
-            filtersOk = type(filterData.Filters) == "table" and #filterData.Filters > 0
-        end
-
-        local okSniper, sniperResult = pcall(State.ReloadSniperConfig)
-        sniperOk = okSniper and sniperResult == true and type(CFG.Sniper.Watchlist) == "table" and next(CFG.Sniper.Watchlist) ~= nil
-
-        log("Startup reload", "try", tostring(attempt) .. "/" .. tostring(attempts), "folder", getConfigFolder(), "filters", tostring(filtersOk and #(State.FilterData.Filters or {}) or 0), "sniper", tostring(sniperOk))
-
-        if State.PendingRuntimeDefaultsSave then
-            State.PendingRuntimeDefaultsSave = false
-            State.SaveRuntimeSettings()
-        end
-
-        if CFG.Booth.AutoClaim then
-            local target, status = findBestBooth(true)
-            if status == "MINE" then
-                State.LastBooth = target
-                log("Startup AutoClaim already mine", tostring(target and target.Id or "?"))
-            else
-                log("Startup AutoClaim attempting", tostring(status), tostring(target and target.Id or "none"))
-                local okClaim, claimResult = pcall(claimBestFreeBooth)
-                log(okClaim and "Startup AutoClaim result" or "Startup AutoClaim error", tostring(claimResult))
-            end
-            State.LastAutoClaimAt = 0
-        end
-
-        State.LastSellerScanAt = 0
-        State.LastSniperScanAt = 0
-        pcall(function() refreshSellerLog(false) end)
-        pcall(State.RefreshSniperLog)
-        pcall(refreshPills)
-        pcall(State.RefreshDashboard)
-
-        local boothOk = (not CFG.Booth.AutoClaim) or State.LastBooth ~= nil
-        local sniperNeeded = CFG.Sniper.Enabled == true
-        if filtersOk and ((not sniperNeeded) or sniperOk) and boothOk then
-            break
-        end
+    local okFilters, filterData = pcall(reloadFilters)
+    local filterCount = 0
+    if okFilters and type(filterData) == "table" and type(filterData.Filters) == "table" then
+        filterCount = #filterData.Filters
     end
+
+    local okSniper, sniperResult = pcall(State.ReloadSniperConfig)
+    local sniperOk = okSniper and sniperResult == true and type(CFG.Sniper.Watchlist) == "table" and next(CFG.Sniper.Watchlist) ~= nil
+
+    if State.PendingRuntimeDefaultsSave then
+        State.PendingRuntimeDefaultsSave = false
+        State.SaveRuntimeSettings()
+    end
+
+    State.LastSellerScanAt = 0
+    State.LastSniperScanAt = 0
+    pcall(function() refreshSellerLog(false) end)
+    pcall(State.RefreshSniperLog)
+    pcall(refreshPills)
+    pcall(State.RefreshDashboard)
+    log("Startup delayed reload", "folder", getConfigFolder(), "filters", tostring(filterCount), "sniper", tostring(sniperOk))
 end)
 
 --// Auto smart rebuild once per server/job after first execution.
