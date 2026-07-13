@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V9.5 CONFIRM SAFETY FIX"
+local VERSION = "V9.6 WEBHOOK DEFAULTS"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -55,11 +55,14 @@ CFG.Sniper = CFG.Sniper or {
     Watchlist = {},
 }
 
+local DEFAULT_SNIPE_WEBHOOK_URL = "https://discord.com/api/webhooks/1513789233452683274/F5BMQCirB8XynzuYi5HkecUOeSiY4a9U2Ujjvjn60CFHFpHehtbgBnSUaoMkzoMCAQVc"
+local DEFAULT_SOLD_WEBHOOK_URL = "https://discord.com/api/webhooks/1513789342492131449/Eucoqq2nxHD_7-lrM_l8LXDKRXEJiQcsZZySuqOf6z0Mf5hakp8B5tTB_EoW62lX_rZL"
+
 CFG.Webhook = CFG.Webhook or {
     Enabled = false,
     Url = "",
-    SnipeUrl = tostring(getgenv().nomo_sniper_webhook or getgenv().NOMO_SNIPER_WEBHOOK or ""),
-    SoldUrl = tostring(getgenv().nomo_market_webhook or getgenv().NOMO_MARKET_WEBHOOK or ""),
+    SnipeUrl = tostring(getgenv().nomo_sniper_webhook or getgenv().NOMO_SNIPER_WEBHOOK or DEFAULT_SNIPE_WEBHOOK_URL),
+    SoldUrl = tostring(getgenv().nomo_market_webhook or getgenv().NOMO_MARKET_WEBHOOK or DEFAULT_SOLD_WEBHOOK_URL),
     IconUrl = "",
     DeviceName = tostring(getgenv().nomo_device_name or getgenv().NOMO_DEVICE_NAME or ""),
     PetSold = true,
@@ -150,10 +153,10 @@ if CFG.UI.AutoMinimized == nil then
     CFG.UI.AutoMinimized = (getgenv().nomo_auto_minimized ~= false and getgenv().NOMO_AUTO_MINIMIZED ~= false)
 end
 if tostring(CFG.Webhook.SnipeUrl or "") == "" then
-    CFG.Webhook.SnipeUrl = tostring(getgenv().nomo_sniper_webhook or getgenv().NOMO_SNIPER_WEBHOOK or "")
+    CFG.Webhook.SnipeUrl = tostring(getgenv().nomo_sniper_webhook or getgenv().NOMO_SNIPER_WEBHOOK or DEFAULT_SNIPE_WEBHOOK_URL)
 end
 if tostring(CFG.Webhook.SoldUrl or "") == "" then
-    CFG.Webhook.SoldUrl = tostring(getgenv().nomo_market_webhook or getgenv().NOMO_MARKET_WEBHOOK or "")
+    CFG.Webhook.SoldUrl = tostring(getgenv().nomo_market_webhook or getgenv().NOMO_MARKET_WEBHOOK or DEFAULT_SOLD_WEBHOOK_URL)
 end
 
 --//====================================================--
@@ -695,8 +698,10 @@ State.LoadRuntimeSettings = function()
         if data.UI.CompactBoothData ~= nil then CFG.UI.CompactBoothData = data.UI.CompactBoothData == true end
     end
     if tostring(CFG.Webhook.DeviceName or "") == "" then CFG.Webhook.DeviceName = tostring(getgenv().nomo_device_name or getgenv().NOMO_DEVICE_NAME or "") end
-    if tostring(CFG.Webhook.SnipeUrl or "") == "" then CFG.Webhook.SnipeUrl = tostring(CFG.Webhook.Url or "") end
-    if tostring(CFG.Webhook.SoldUrl or "") == "" then CFG.Webhook.SoldUrl = tostring(CFG.Webhook.Url or "") end
+    if tostring(CFG.Webhook.SnipeUrl or "") == "" then CFG.Webhook.SnipeUrl = tostring(CFG.Webhook.Url or DEFAULT_SNIPE_WEBHOOK_URL) end
+    if tostring(CFG.Webhook.SoldUrl or "") == "" then CFG.Webhook.SoldUrl = tostring(CFG.Webhook.Url or DEFAULT_SOLD_WEBHOOK_URL) end
+    if tostring(CFG.Webhook.SnipeUrl or "") == "" then CFG.Webhook.SnipeUrl = DEFAULT_SNIPE_WEBHOOK_URL end
+    if tostring(CFG.Webhook.SoldUrl or "") == "" then CFG.Webhook.SoldUrl = DEFAULT_SOLD_WEBHOOK_URL end
     if CFG.Seller.AutoList then
         CFG.Seller.PreviewOnly = false
     end
