@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V9.4 SNIPER LOAD FIX"
+local VERSION = "V9.5 CONFIRM SAFETY FIX"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -3488,6 +3488,8 @@ local function vlist(p, gap)
 	return make("UIListLayout", {Padding = UDim.new(0, gap or 6), SortOrder = Enum.SortOrder.LayoutOrder}, p)
 end
 
+local win
+
 State.OpenConfirmPopup = function(titleText, bodyText, confirmText, onConfirm)
     if not win or not win.Gui then
         if onConfirm then onConfirm() end
@@ -4641,7 +4643,7 @@ State.UpdatePerfStats = function()
     }, "\n")
 end
 
-local win = (CFG.Performance.NoUI and State.CreateHeadlessWindow() or Library:CreateWindow({
+win = (CFG.Performance.NoUI and State.CreateHeadlessWindow() or Library:CreateWindow({
     TitleAccent = "NOMO",
     Title = "MARKET",
     Subtitle = "SELLER LITE",
