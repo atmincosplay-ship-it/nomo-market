@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V7.9 SNIPER CONFIG COMPAT"
+local VERSION = "V8.0 LOCALIZED LOADING"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -293,14 +293,41 @@ State.ClearLoadingScreens = function()
         local pg = LocalPlayer:WaitForChild("PlayerGui", 15)
         if not pg then return end
 
+        local loadingWords = {
+            "loading",
+            "preload",
+            "intro",
+            "memuat",
+            "mohon tunggu",
+            "please wait",
+            "pleasewait",
+        }
+
+        local function looksLikeLoadingGui(gui)
+            local n = tostring(gui.Name or ""):lower()
+            for _, word in ipairs(loadingWords) do
+                if n:find(word, 1, true) then
+                    return true
+                end
+            end
+            for _, inst in ipairs(gui:GetDescendants()) do
+                if inst:IsA("TextLabel") or inst:IsA("TextButton") or inst:IsA("TextBox") then
+                    local text = tostring(inst.Text or ""):lower()
+                    for _, word in ipairs(loadingWords) do
+                        if text:find(word, 1, true) then
+                            return true
+                        end
+                    end
+                end
+            end
+            return false
+        end
+
         for _ = 1, 20 do
             for _, child in ipairs(pg:GetChildren()) do
-                local n = tostring(child.Name or ""):lower()
-                if child.Name ~= "NomoHub" and child.Name ~= "NomoHeadless" and (n:find("loading", 1, true) or n:find("preload", 1, true) or n:find("intro", 1, true)) then
+                if child.Name ~= "NomoHub" and child.Name ~= "NomoHeadless" and child:IsA("ScreenGui") and looksLikeLoadingGui(child) then
                     pcall(function()
-                        if child:IsA("ScreenGui") then
-                            child.Enabled = false
-                        end
+                        child.Enabled = false
                         child:Destroy()
                     end)
                 end
