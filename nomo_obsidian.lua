@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V8.4 AUTO START FIXES"
+local VERSION = "V8.5 SNIPER AUTO LOAD"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -2942,7 +2942,7 @@ local function importSniperWatchlist(path)
     local source = extractSniperWatchSource(data)
     if type(source) ~= "table" then
         log("Sniper config import failed", "no Watchlists[" .. tostring(CFG.Sniper.WatchlistId or "1") .. "]", path)
-        return false
+        return false, 0
     end
 
     local imported, skipped = 0, 0
@@ -3007,12 +3007,29 @@ local function importSniperWatchlist(path)
     CFG.Sniper.Watchlist = nextWatch
     State.SaveSniperWatchlist()
     log("Sniper config imported", tostring(imported), "watch(es)", "skipped", tostring(skipped), path)
-    return true
+    return imported > 0, imported
 end
 
 State.ReloadSniperConfig = function()
     CFG.Sniper.WatchlistId = tostring(CFG.Sniper.WatchlistId or "1")
-    return importSniperWatchlist(getSniperFilterPath())
+    local path = getSniperFilterPath()
+    local ok, count = importSniperWatchlist(path)
+    if ok and (tonumber(count) or 0) > 0 then
+        return true
+    end
+
+    local fallback = "Nomo/sniper_filters.json"
+    if path ~= fallback then
+        local fbOk, fbCount = importSniperWatchlist(fallback)
+        if fbOk and (tonumber(fbCount) or 0) > 0 then
+            CFG.Seller.ListingFilterPath = "Nomo"
+            State.PendingRuntimeDefaultsSave = true
+            log("Sniper config fallback", fallback, tostring(fbCount) .. " watch(es)")
+            return true
+        end
+    end
+
+    return false
 end
 
 local function removeWatch(name)
