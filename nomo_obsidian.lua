@@ -2918,39 +2918,50 @@ end
 
 local function extractSniperWatchSource(data)
     if type(data) ~= "table" then
-        return nil
+        return nil, nil
     end
 
     local watchlists = data.Watchlists or data.watchlists
     if type(watchlists) == "table" then
-        local id = tostring(CFG.Sniper.WatchlistId or "1")
-        if type(watchlists[id]) == "table" then
-            return watchlists[id]
+        local preferredId = tostring(CFG.Sniper.WatchlistId or "1")
+        if type(watchlists[preferredId]) == "table" and next(watchlists[preferredId]) ~= nil then
+            return watchlists[preferredId], preferredId
         end
-        if type(watchlists[tonumber(id)]) == "table" then
-            return watchlists[tonumber(id)]
+        if tonumber(preferredId) and type(watchlists[tonumber(preferredId)]) == "table" and next(watchlists[tonumber(preferredId)]) ~= nil then
+            return watchlists[tonumber(preferredId)], preferredId
+        end
+        if preferredId ~= "1" and type(watchlists["1"]) == "table" and next(watchlists["1"]) ~= nil then
+            return watchlists["1"], "1"
+        end
+        if preferredId ~= "1" and type(watchlists[1]) == "table" and next(watchlists[1]) ~= nil then
+            return watchlists[1], "1"
+        end
+        for id, source in pairs(watchlists) do
+            if type(source) == "table" and next(source) ~= nil then
+                return source, tostring(id)
+            end
         end
     end
 
-    if type(data.Watchlist) == "table" then
-        return data.Watchlist
+    if type(data.Watchlist) == "table" and next(data.Watchlist) ~= nil then
+        return data.Watchlist, "single"
     end
-    if type(data.watchlist) == "table" then
-        return data.watchlist
+    if type(data.watchlist) == "table" and next(data.watchlist) ~= nil then
+        return data.watchlist, "single"
     end
-    if type(data.Sniper) == "table" and type(data.Sniper.Watchlist) == "table" then
-        return data.Sniper.Watchlist
+    if type(data.Sniper) == "table" and type(data.Sniper.Watchlist) == "table" and next(data.Sniper.Watchlist) ~= nil then
+        return data.Sniper.Watchlist, "single"
     end
 
-    return nil
+    return nil, nil
 end
 
 local function importSniperWatchlist(path)
     path = tostring(path or getSniperFilterPath())
     local data = readJson(path)
-    local source = extractSniperWatchSource(data)
+    local source, usedId = extractSniperWatchSource(data)
     if type(source) ~= "table" then
-        log("Sniper config import failed", "no Watchlists[" .. tostring(CFG.Sniper.WatchlistId or "1") .. "]", path)
+        log("Sniper config import failed", "no non-empty watchlist", "id", tostring(CFG.Sniper.WatchlistId or "1"), path)
         return false, 0
     end
 
@@ -3013,10 +3024,17 @@ local function importSniperWatchlist(path)
         end
     end
 
+    if imported <= 0 then
+        log("Sniper config import empty", "id", tostring(usedId), "skipped", tostring(skipped), path)
+        return false, 0
+    end
+
     CFG.Sniper.Watchlist = nextWatch
-    State.SaveSniperWatchlist()
-    log("Sniper config imported", tostring(imported), "watch(es)", "skipped", tostring(skipped), path)
-    return imported > 0, imported
+    if usedId and usedId ~= "single" then
+        CFG.Sniper.WatchlistId = tostring(usedId)
+    end
+    log("Sniper config imported", tostring(imported), "watch(es)", "skipped", tostring(skipped), "id", tostring(usedId), path)
+    return true, imported
 end
 
 State.ReloadSniperConfig = function()
