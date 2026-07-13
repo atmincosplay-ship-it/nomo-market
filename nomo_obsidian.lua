@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V9.8 FRUIT LISTING BETA"
+local VERSION = "V9.9 FRUIT PERF OFF"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -116,8 +116,8 @@ CFG.Seller.MinPetCountKeep = 0
 CFG.Seller.MaxListPerMinute = 999
 CFG.Seller.MaxAutoListSession = 50
 CFG.Fruit = CFG.Fruit or {}
-CFG.Fruit.Enabled = CFG.Fruit.Enabled ~= false
-CFG.Fruit.AutoList = CFG.Fruit.AutoList ~= false
+CFG.Fruit.Enabled = CFG.Fruit.Enabled == true
+CFG.Fruit.AutoList = CFG.Fruit.AutoList == true
 CFG.Fruit.RequireExactName = CFG.Fruit.RequireExactName ~= false
 CFG.Fruit.ItemType = tostring(CFG.Fruit.ItemType or "Holdable")
 CFG.Listings.RemoveCooldown = CFG.Listings.RemoveCooldown or 1.2
@@ -681,7 +681,7 @@ end
 
 State.LoadRuntimeSettings = function()
     local data = readJson(State.GetSettingsPath())
-    local defaultsVersion = "v8_6_arceus_startup_retry"
+    local defaultsVersion = "v9_9_fruit_perf_off"
     local applyLiveAutomationDefaults = type(data.Meta) ~= "table" or data.Meta.DefaultsVersion ~= defaultsVersion
     if type(data.Booth) == "table" then
         if data.Booth.AutoClaim ~= nil then CFG.Booth.AutoClaim = data.Booth.AutoClaim == true end
@@ -733,6 +733,8 @@ State.LoadRuntimeSettings = function()
         CFG.Sniper.Enabled = true
         CFG.Sniper.DryRun = false
         CFG.UI.AutoMinimized = true
+        CFG.Fruit.Enabled = false
+        CFG.Fruit.AutoList = false
         State.PendingRuntimeDefaultsSave = true
     end
     return data
@@ -741,7 +743,7 @@ end
 State.SaveRuntimeSettings = function()
     local data = {
         Meta = {
-            DefaultsVersion = "v8_6_arceus_startup_retry",
+            DefaultsVersion = "v9_9_fruit_perf_off",
         },
         Booth = {
             AutoClaim = CFG.Booth.AutoClaim == true,
@@ -6704,6 +6706,13 @@ State.SettingUiSec:AddToggle("Auto Minimized", CFG.UI.AutoMinimized == true, fun
     log("AutoMinimized", tostring(v), "applies on next reload")
 end)
 
+State.SettingUiSec:AddToggle("Fruit Listing", CFG.Fruit.Enabled == true, function(v)
+    CFG.Fruit.Enabled = v == true
+    CFG.Fruit.AutoList = v == true
+    State.SaveRuntimeSettings()
+    log("FruitListing", tostring(v), "path", State.GetFruitFilterPath())
+end)
+
 State.SettingActionSec:AddButton("Reload Pet List", function()
     loadGamePetList()
     log("PetList reloaded", tostring(#State.PetList))
@@ -6859,10 +6868,23 @@ local function normalizeFruitConfigData(data)
     return data
 end
 
-local function reloadFruitFilters()
+local function reloadFruitFilters(force)
     local path = State.GetFruitFilterPath()
+    local now = os.clock()
+    if not force and State.FruitFilterData and State.LastFruitFilterPath == path and now - (State.LastFruitFilterLoadAt or 0) < 5 then
+        return State.FruitFilterData
+    end
+
     State.FruitFilterData = normalizeFruitConfigData(readJson(path))
-    log("Fruit filters loaded", path, tostring(#(State.FruitFilterData.Fruit or {})) .. " filters")
+    State.LastFruitFilterPath = path
+    State.LastFruitFilterLoadAt = now
+
+    local countNow = #(State.FruitFilterData.Fruit or {})
+    if force or State.LastFruitFilterLogCount ~= countNow or State.LastFruitFilterLogPath ~= path then
+        State.LastFruitFilterLogCount = countNow
+        State.LastFruitFilterLogPath = path
+        log("Fruit filters loaded", path, tostring(countNow) .. " filters")
+    end
     return State.FruitFilterData
 end
 
@@ -6875,7 +6897,7 @@ local function saveFruitFilters()
 end
 
 local function getFruitFilters()
-    reloadFruitFilters()
+    reloadFruitFilters(false)
     local out = {}
     for i, row in ipairs(State.FruitFilterData.Fruit or {}) do
         if type(row) == "table" and row.Enabled ~= false then
