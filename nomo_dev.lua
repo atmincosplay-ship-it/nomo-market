@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V8.1 BOOTH OWNER COMPAT"
+local VERSION = "V8.2 LANGUAGE SAFE NOTIFS"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -516,11 +516,28 @@ end
 
 if NotificationRemote and NotificationRemote.OnClientEvent then
     pcall(function()
+        local createWaitNeedles = {
+            "please wait before trying to create another listing",
+            "wait before trying to create another listing",
+            "create another listing",
+            "membuat listing",
+            "membuat daftar",
+            "buat listing",
+            "buat daftar",
+            "tunggu sebelum",
+            "harap tunggu",
+            "coba lagi",
+            "listing lain",
+            "daftar lain",
+        }
         NotificationRemote.OnClientEvent:Connect(function(message)
             if type(message) ~= "string" then return end
             local text = string.lower(message)
-            if text:find("please wait before trying to create another listing", 1, true) then
-                registerCreateWait("game notification")
+            for _, needle in ipairs(createWaitNeedles) do
+                if text:find(needle, 1, true) then
+                    registerCreateWait("game notification")
+                    return
+                end
             end
         end)
     end)
