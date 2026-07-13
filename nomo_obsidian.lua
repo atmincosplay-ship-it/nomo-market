@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V8.6 ARCEUS STARTUP RETRY"
+local VERSION = "V8.7 REDFINGER BOOT SAFE"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -358,7 +358,12 @@ local DataService = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChi
 
 local PetUtilities
 pcall(function()
-    PetUtilities = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PetServices"):WaitForChild("PetUtilities"))
+    local modules = ReplicatedStorage:WaitForChild("Modules", 20)
+    local petServices = modules and modules:WaitForChild("PetServices", 10)
+    local petUtilities = petServices and petServices:WaitForChild("PetUtilities", 10)
+    if petUtilities then
+        PetUtilities = require(petUtilities)
+    end
 end)
 
 --//====================================================--
@@ -762,7 +767,11 @@ end
 local function loadGamePetList()
     local names, seen = {}, {}
     local ok, petList = pcall(function()
-        return require(ReplicatedStorage:WaitForChild("Data"):WaitForChild("PetRegistry"):WaitForChild("PetList"))
+        local data = ReplicatedStorage:WaitForChild("Data", 20)
+        local registry = data and data:WaitForChild("PetRegistry", 10)
+        local petListModule = registry and registry:WaitForChild("PetList", 10)
+        if not petListModule then return nil end
+        return require(petListModule)
     end)
 
     if ok and type(petList) == "table" then
@@ -824,12 +833,11 @@ local function loadGameMutationList()
     add("Mutated Only")
 
     local ok, registry = pcall(function()
-        return require(
-            ReplicatedStorage
-                :WaitForChild("Data")
-                :WaitForChild("PetRegistry")
-                :WaitForChild("PetMutationRegistry")
-        )
+        local data = ReplicatedStorage:WaitForChild("Data", 20)
+        local petRegistry = data and data:WaitForChild("PetRegistry", 10)
+        local mutationRegistry = petRegistry and petRegistry:WaitForChild("PetMutationRegistry", 10)
+        if not mutationRegistry then return nil end
+        return require(mutationRegistry)
     end)
 
     if ok and type(registry) == "table" then
@@ -3488,7 +3496,8 @@ function Library:CreateWindow(cfg)
 	gui.ResetOnSpawn = false
 	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	-- Arceus-safe: PlayerGui first. CoreGui can trigger capability errors on some executors.
-	local pg = Players.LocalPlayer:WaitForChild("PlayerGui")
+	local pg = Players.LocalPlayer:WaitForChild("PlayerGui", 20)
+	if not pg then error("PlayerGui not ready") end
 	gui.Parent = pg
 
 	local main = make("Frame", {
@@ -4462,7 +4471,9 @@ State.CreateHeadlessWindow = function()
     gui.ResetOnSpawn = false
     gui.IgnoreGuiInset = true
     gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+    local pg = Players.LocalPlayer:WaitForChild("PlayerGui", 20)
+    if not pg then error("PlayerGui not ready") end
+    gui.Parent = pg
 
     local bg = Instance.new("Frame")
     bg.Size = UDim2.fromScale(1, 1)
@@ -6539,25 +6550,36 @@ getgenv().NOMO_V32_STOP = function() State.Stop("manual") end
 
 --// startup
 ensureFolder()
-loadGamePetList()
-loadGameMutationList()
-reloadFilters()
+local function bootStep(name, fn)
+    log("Boot step", tostring(name))
+    local ok, result = pcall(fn)
+    if ok then
+        log("Boot ok", tostring(name))
+        return result
+    end
+    log("Boot failed", tostring(name), tostring(result))
+    return nil
+end
+
+bootStep("PetList", loadGamePetList)
+bootStep("MutationList", loadGameMutationList)
+bootStep("ListingFilters", reloadFilters)
 if State.PendingRuntimeDefaultsSave then
     State.PendingRuntimeDefaultsSave = false
     State.SaveRuntimeSettings()
 end
-State.ReloadSniperConfig()
-installWarnFilter()
+bootStep("SniperFilters", State.ReloadSniperConfig)
+bootStep("WarnFilter", installWarnFilter)
 
 log("Started", VERSION .. " PRIVATE UI")
 refreshPills()
 log("PetList", #State.PetList, "| ConfigFolder", getConfigFolder(), "| Listing", getFilterPath())
 
-refreshBoothLog()
-refreshSellerLog(false)
-refreshMyListingsLog()
-refreshMarketSample()
-State.RefreshSniperLog()
+bootStep("BoothLog", refreshBoothLog)
+bootStep("SellerLog", function() refreshSellerLog(false) end)
+bootStep("MyListingsLog", refreshMyListingsLog)
+bootStep("MarketSample", refreshMarketSample)
+bootStep("SniperLog", State.RefreshSniperLog)
 
 win:SelectPage("Dashboard")
 
