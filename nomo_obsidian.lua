@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V8.9 STABILITY CONFIG LOAD"
+local VERSION = "V9.0 SIMPLE CONFIG"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -610,7 +610,7 @@ local function readJson(path)
 end
 
 local function saveJson(path, data)
-    data.Filters = data.Filters or {}
+    data = type(data) == "table" and data or {}
     if type(writefile) ~= "function" then
         log("writefile unsupported")
         return false
@@ -1663,8 +1663,10 @@ end
 
 saveFilters = function()
     State.FilterData = State.NormalizeListingConfigData(State.FilterData)
-    State.FilterData.listing = State.FilterData.Filters or {}
-    return saveJson(getFilterPath(), State.FilterData)
+    return saveJson(getFilterPath(), {
+        version = 1,
+        listing = State.FilterData.Filters or {},
+    })
 end
 
 local function traitWantedAny(v)
@@ -2961,29 +2963,11 @@ local function extractSniperWatchSource(data)
         return data.Sniper, "sniper"
     end
 
-    local watchlists = data.Watchlists or data.watchlists
-    if type(watchlists) == "table" then
-        if type(watchlists["1"]) == "table" and next(watchlists["1"]) ~= nil then
-            return watchlists["1"], "legacy-1"
-        end
-        if type(watchlists[1]) == "table" and next(watchlists[1]) ~= nil then
-            return watchlists[1], "legacy-1"
-        end
-        for id, source in pairs(watchlists) do
-            if type(source) == "table" and next(source) ~= nil then
-                return source, "legacy-" .. tostring(id)
-            end
-        end
-    end
-
     if type(data.Watchlist) == "table" and next(data.Watchlist) ~= nil then
-        return data.Watchlist, "legacy"
+        return data.Watchlist, "legacy-watchlist"
     end
     if type(data.watchlist) == "table" and next(data.watchlist) ~= nil then
-        return data.watchlist, "legacy"
-    end
-    if type(data.Sniper) == "table" and type(data.Sniper.Watchlist) == "table" and next(data.Sniper.Watchlist) ~= nil then
-        return data.Sniper.Watchlist, "legacy"
+        return data.watchlist, "legacy-watchlist"
     end
 
     return nil, nil
