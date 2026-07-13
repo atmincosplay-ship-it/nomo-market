@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V8.0 LOCALIZED LOADING"
+local VERSION = "V8.1 BOOTH OWNER COMPAT"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -929,6 +929,27 @@ local function getPlayerById(id)
     return nil
 end
 
+local function boothOwnerStatus(owner)
+    if owner == nil or owner == false then
+        return "FREE"
+    end
+
+    local ownerText = trim(tostring(owner))
+    local ownerNorm = ownerText:lower()
+    if ownerText == "" or ownerNorm == "nil" or ownerNorm == "none" or ownerNorm == "false" or ownerNorm == "0"
+        or ownerNorm == "free" or ownerNorm == "empty" or ownerNorm == "kosong" or ownerNorm == "tidak ada"
+    then
+        return "FREE"
+    end
+
+    local myId = tostring(getPlayerId())
+    if ownerText == myId or ownerText == tostring(LocalPlayer.UserId) or ownerText == tostring(LocalPlayer.Name) then
+        return "MINE"
+    end
+
+    return "TAKEN"
+end
+
 local function getBoothsFolder()
     local tw = workspace:FindFirstChild("TradeWorld")
     return tw and tw:FindFirstChild("Booths") or nil
@@ -959,7 +980,6 @@ local function getBoothSnapshot(force)
     local folder = getBoothsFolder()
     if not folder then return {} end
 
-    local myId = tostring(getPlayerId())
     local items = {}
 
     for boothId, bd in pairs(data.Booths) do
@@ -968,14 +988,7 @@ local function getBoothSnapshot(force)
         local pos = inst and getPos(inst)
         if pos then
             local owner = bd.Owner
-            local status = "FREE"
-            if owner ~= nil then
-                if tostring(owner) == myId or tostring(owner) == LocalPlayer.Name then
-                    status = "MINE"
-                else
-                    status = "TAKEN"
-                end
-            end
+            local status = boothOwnerStatus(owner)
             table.insert(items, {
                 Id = id,
                 Instance = inst,
@@ -1105,30 +1118,50 @@ local function claimBestFreeBooth()
         return true
     end
 
-    log("Claiming FREE booth", target.Id, "dist", math.floor(target.MiddleDistance or 0))
-    local ok, err = pcall(function()
-        ClaimBooth:FireServer(target.Instance)
-    end)
-    if not ok then
-        log("ClaimBooth failed", tostring(err))
-        return false
-    end
-
-    task.wait(tonumber(CFG.Booth.ClaimVerifyDelay) or 0.35)
-    equipSkin()
-
     local attempts = math.max(1, toInt(CFG.Booth.ClaimVerifyAttempts) or 6)
-    for attempt = 1, attempts do
-        task.wait(tonumber(CFG.Booth.ClaimVerifyDelay) or 0.35)
+    local delay = tonumber(CFG.Booth.ClaimVerifyDelay) or 0.35
+
+    local function verifyClaim(label)
+        task.wait(delay)
         for _, item in ipairs(getBoothSnapshot(true)) do
             if item.Id == target.Id then
-                log("Post claim", item.Id, item.Status, "owner", item.OwnerText, "try", tostring(attempt))
+                log("Post claim", item.Id, item.Status, "owner", item.OwnerText, tostring(label))
                 if item.Status == "MINE" then
                     State.LastBooth = item
                     getgenv().NOMO_BOOTH_LAST_CLAIMED = item
                     return true
                 end
             end
+        end
+        return false
+    end
+
+    local function sendClaim(arg, label)
+        log("Claiming FREE booth", target.Id, "dist", math.floor(target.MiddleDistance or 0), tostring(label))
+        local ok, err = pcall(function()
+            ClaimBooth:FireServer(arg)
+        end)
+        if not ok then
+            log("ClaimBooth failed", tostring(label), tostring(err))
+            return false
+        end
+        return verifyClaim(label)
+    end
+
+    if sendClaim(target.Instance, "instance") then
+        equipSkin()
+        return true
+    end
+
+    if sendClaim(target.Id, "id") then
+        equipSkin()
+        return true
+    end
+
+    for attempt = 1, attempts do
+        if verifyClaim("retry " .. tostring(attempt)) then
+            equipSkin()
+            return true
         end
     end
 
