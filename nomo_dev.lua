@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V8.7 REDFINGER BOOT SAFE"
+local VERSION = "V8.8 CLEAN SNIPER CONFIG"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -137,7 +137,6 @@ CFG.Performance.AntiAfk = CFG.Performance.AntiAfk ~= false
 CFG.Performance.ClearLoadingScreens = CFG.Performance.ClearLoadingScreens ~= false
 CFG.Performance.ConsoleLogs = CFG.Performance.ConsoleLogs == true
 CFG.Sniper.BuyCooldown = 0
-CFG.Sniper.WatchlistId = tostring(CFG.Sniper.WatchlistId or "1")
 CFG.Sniper.WeightMode = CFG.Sniper.WeightMode or "Base"
 CFG.Sniper.MaxMatchesPerPet = 0
 CFG.Sniper.MaxMatchesPerOwner = 0
@@ -681,7 +680,6 @@ State.LoadRuntimeSettings = function()
         if data.Sniper.Enabled ~= nil then CFG.Sniper.Enabled = data.Sniper.Enabled == true end
         if data.Sniper.DryRun ~= nil then CFG.Sniper.DryRun = data.Sniper.DryRun == true end
         if data.Sniper.RescanBeforeBuy ~= nil then CFG.Sniper.RescanBeforeBuy = data.Sniper.RescanBeforeBuy == true end
-        if data.Sniper.WatchlistId ~= nil then CFG.Sniper.WatchlistId = tostring(data.Sniper.WatchlistId) end
     end
     if type(data.Webhook) == "table" then
         if data.Webhook.Enabled ~= nil then CFG.Webhook.Enabled = data.Webhook.Enabled == true end
@@ -734,7 +732,6 @@ State.SaveRuntimeSettings = function()
             Enabled = CFG.Sniper.Enabled == true,
             DryRun = CFG.Sniper.DryRun == true,
             RescanBeforeBuy = CFG.Sniper.RescanBeforeBuy == true,
-            WatchlistId = tostring(CFG.Sniper.WatchlistId or "1"),
         },
         Webhook = {
             Enabled = CFG.Webhook.Enabled == true,
@@ -2909,10 +2906,17 @@ local function getSniperFilterPath()
 end
 
 State.SaveSniperWatchlist = function()
-    local id = tostring(CFG.Sniper.WatchlistId or "1")
-    local data = readJson(getSniperFilterPath())
-    data.Watchlists = type(data.Watchlists) == "table" and data.Watchlists or {}
-    data.Watchlists[id] = CFG.Sniper.Watchlist or {}
+    local data = { version = 1, sniper = {} }
+    for name, cfg in pairs(CFG.Sniper.Watchlist or {}) do
+        table.insert(data.sniper, {
+            pet = tostring(name),
+            price = type(cfg) == "table" and (cfg.MaxPrice or cfg.maxPrice or cfg.Price or cfg.price) or cfg,
+            weightMode = type(cfg) == "table" and tostring(cfg.WeightMode or cfg.weightMode or CFG.Sniper.WeightMode or "Base") or tostring(CFG.Sniper.WeightMode or "Base"),
+            minKg = type(cfg) == "table" and (toNumber(cfg.MinWeight or cfg.minWeight or cfg.MinKG or cfg.minKG or cfg.minKg or cfg.MinBaseWeight) or 0) or 0,
+            maxKg = type(cfg) == "table" and toNumber(cfg.MaxWeight or cfg.maxWeight or cfg.MaxKG or cfg.maxKG or cfg.maxKg or cfg.MaxBaseWeight) or nil,
+            priority = type(cfg) == "table" and toInt(cfg.Priority or cfg.priority) or nil,
+        })
+    end
     return saveJson(getSniperFilterPath(), data)
 end
 
@@ -2921,36 +2925,36 @@ local function extractSniperWatchSource(data)
         return nil, nil
     end
 
+    if type(data.sniper) == "table" and next(data.sniper) ~= nil then
+        return data.sniper, "sniper"
+    end
+    if type(data.Sniper) == "table" and next(data.Sniper) ~= nil and type(data.Sniper.Watchlist) ~= "table" then
+        return data.Sniper, "sniper"
+    end
+
     local watchlists = data.Watchlists or data.watchlists
     if type(watchlists) == "table" then
-        local preferredId = tostring(CFG.Sniper.WatchlistId or "1")
-        if type(watchlists[preferredId]) == "table" and next(watchlists[preferredId]) ~= nil then
-            return watchlists[preferredId], preferredId
+        if type(watchlists["1"]) == "table" and next(watchlists["1"]) ~= nil then
+            return watchlists["1"], "legacy-1"
         end
-        if tonumber(preferredId) and type(watchlists[tonumber(preferredId)]) == "table" and next(watchlists[tonumber(preferredId)]) ~= nil then
-            return watchlists[tonumber(preferredId)], preferredId
-        end
-        if preferredId ~= "1" and type(watchlists["1"]) == "table" and next(watchlists["1"]) ~= nil then
-            return watchlists["1"], "1"
-        end
-        if preferredId ~= "1" and type(watchlists[1]) == "table" and next(watchlists[1]) ~= nil then
-            return watchlists[1], "1"
+        if type(watchlists[1]) == "table" and next(watchlists[1]) ~= nil then
+            return watchlists[1], "legacy-1"
         end
         for id, source in pairs(watchlists) do
             if type(source) == "table" and next(source) ~= nil then
-                return source, tostring(id)
+                return source, "legacy-" .. tostring(id)
             end
         end
     end
 
     if type(data.Watchlist) == "table" and next(data.Watchlist) ~= nil then
-        return data.Watchlist, "single"
+        return data.Watchlist, "legacy"
     end
     if type(data.watchlist) == "table" and next(data.watchlist) ~= nil then
-        return data.watchlist, "single"
+        return data.watchlist, "legacy"
     end
     if type(data.Sniper) == "table" and type(data.Sniper.Watchlist) == "table" and next(data.Sniper.Watchlist) ~= nil then
-        return data.Sniper.Watchlist, "single"
+        return data.Sniper.Watchlist, "legacy"
     end
 
     return nil, nil
@@ -2961,7 +2965,7 @@ local function importSniperWatchlist(path)
     local data = readJson(path)
     local source, usedId = extractSniperWatchSource(data)
     if type(source) ~= "table" then
-        log("Sniper config import failed", "no non-empty watchlist", "id", tostring(CFG.Sniper.WatchlistId or "1"), path)
+        log("Sniper config import failed", "no sniper entries", path)
         return false, 0
     end
 
@@ -3030,15 +3034,11 @@ local function importSniperWatchlist(path)
     end
 
     CFG.Sniper.Watchlist = nextWatch
-    if usedId and usedId ~= "single" then
-        CFG.Sniper.WatchlistId = tostring(usedId)
-    end
     log("Sniper config imported", tostring(imported), "watch(es)", "skipped", tostring(skipped), "id", tostring(usedId), path)
     return true, imported
 end
 
 State.ReloadSniperConfig = function()
-    CFG.Sniper.WatchlistId = tostring(CFG.Sniper.WatchlistId or "1")
     local path = getSniperFilterPath()
     local ok, count = importSniperWatchlist(path)
     if ok and (tonumber(count) or 0) > 0 then
@@ -3099,12 +3099,12 @@ end
 
 local function getSniperMinWeight(cfg)
     if type(cfg) ~= "table" then return 0 end
-    return toNumber(cfg.MinWeight or cfg.minWeight or cfg.MinKG or cfg.minKG or cfg.MinBaseWeight) or 0
+    return toNumber(cfg.MinWeight or cfg.minWeight or cfg.MinKG or cfg.minKG or cfg.minKg or cfg.MinBaseWeight) or 0
 end
 
 local function getSniperMaxWeight(cfg)
     if type(cfg) ~= "table" then return nil end
-    return toNumber(cfg.MaxWeight or cfg.maxWeight or cfg.MaxKG or cfg.maxKG or cfg.MaxBaseWeight)
+    return toNumber(cfg.MaxWeight or cfg.maxWeight or cfg.MaxKG or cfg.maxKG or cfg.maxKg or cfg.MaxBaseWeight)
 end
 
 State.FormatSniperKgRange = function(mode, minKg, maxKg)
@@ -5984,13 +5984,6 @@ end)
 local sShow = State.SniperLimitSec:AddInput("Show", tostring(CFG.Sniper.MaxMatchesShown or 20), function(v)
     CFG.Sniper.MaxMatchesShown = toInt(v) or CFG.Sniper.MaxMatchesShown or 20
 end)
-State.SniperWatchlistIdInput = State.SniperLimitSec:AddInput("Watchlist ID", tostring(CFG.Sniper.WatchlistId or "1"), function(v)
-    CFG.Sniper.WatchlistId = tostring(v or "1")
-    State.SaveRuntimeSettings()
-    State.ReloadSniperConfig()
-    State.RefreshSniperLog()
-end)
-
 local sniperLog = State.SniperResultSec:AddLog(138)
 
 State.ApplySniperLimits = function()
