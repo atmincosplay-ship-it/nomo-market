@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V9.0 SIMPLE CONFIG"
+local VERSION = "V9.1 STARTUP CONFIG RETRY"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6608,10 +6608,10 @@ bootStep("SniperLog", State.RefreshSniperLog)
 win:SelectPage("Dashboard")
 
 task.spawn(function()
-    local attempts = 10
+    local attempts = 20
     for attempt = 1, attempts do
         if not State.Running then break end
-        task.wait(attempt == 1 and 1 or 2)
+        task.wait(attempt == 1 and 2 or 3)
 
         local filtersOk, sniperOk = false, false
         local okFilters, filterData = pcall(reloadFilters)
@@ -6622,7 +6622,7 @@ task.spawn(function()
         local okSniper, sniperResult = pcall(State.ReloadSniperConfig)
         sniperOk = okSniper and sniperResult == true and type(CFG.Sniper.Watchlist) == "table" and next(CFG.Sniper.Watchlist) ~= nil
 
-        log("Startup reload", "try", tostring(attempt) .. "/" .. tostring(attempts), "filters", tostring(filtersOk and #(State.FilterData.Filters or {}) or 0), "sniper", tostring(sniperOk))
+        log("Startup reload", "try", tostring(attempt) .. "/" .. tostring(attempts), "folder", getConfigFolder(), "filters", tostring(filtersOk and #(State.FilterData.Filters or {}) or 0), "sniper", tostring(sniperOk))
 
         if State.PendingRuntimeDefaultsSave then
             State.PendingRuntimeDefaultsSave = false
@@ -6644,8 +6644,14 @@ task.spawn(function()
 
         State.LastSellerScanAt = 0
         State.LastSniperScanAt = 0
+        pcall(function() refreshSellerLog(false) end)
+        pcall(State.RefreshSniperLog)
+        pcall(refreshPills)
+        pcall(State.RefreshDashboard)
 
-        if filtersOk and sniperOk and State.LastBooth then
+        local boothOk = (not CFG.Booth.AutoClaim) or State.LastBooth ~= nil
+        local sniperNeeded = CFG.Sniper.Enabled == true
+        if filtersOk and ((not sniperNeeded) or sniperOk) and boothOk then
             break
         end
     end
