@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V8.3 LIVE ACTIVITY LOG"
+local VERSION = "V8.4 AUTO START FIXES"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -699,6 +699,7 @@ State.LoadRuntimeSettings = function()
         CFG.Seller.PreviewOnly = false
     end
     if applyLiveAutomationDefaults then
+        CFG.Booth.AutoClaim = true
         CFG.Seller.AutoList = true
         CFG.Seller.PreviewOnly = false
         CFG.Sniper.Enabled = true
@@ -1603,7 +1604,22 @@ local function reloadFilters()
         end
     end
 
-    State.FilterData = readJson(getFilterPath())
+    local path = getFilterPath()
+    State.FilterData = readJson(path)
+    if type(State.FilterData.Filters) ~= "table" or #State.FilterData.Filters == 0 then
+        local fallback = "Nomo/listing_filters.json"
+        if path ~= fallback then
+            local fallbackData = readJson(fallback)
+            if type(fallbackData.Filters) == "table" and #fallbackData.Filters > 0 then
+                State.FilterData = fallbackData
+                CFG.Seller.ListingFilterPath = "Nomo"
+                State.PendingRuntimeDefaultsSave = true
+                log("Local filters fallback", fallback, tostring(#fallbackData.Filters) .. " filters")
+                return State.FilterData
+            end
+        end
+    end
+    log("Local filters loaded", path, tostring(#(State.FilterData.Filters or {})) .. " filters")
     return State.FilterData
 end
 
@@ -6508,6 +6524,10 @@ ensureFolder()
 loadGamePetList()
 loadGameMutationList()
 reloadFilters()
+if State.PendingRuntimeDefaultsSave then
+    State.PendingRuntimeDefaultsSave = false
+    State.SaveRuntimeSettings()
+end
 State.ReloadSniperConfig()
 installWarnFilter()
 
@@ -6522,6 +6542,20 @@ refreshMarketSample()
 State.RefreshSniperLog()
 
 win:SelectPage("Dashboard")
+
+task.spawn(function()
+    task.wait(1)
+    if State.Running and CFG.Booth.AutoClaim then
+        log("Startup AutoClaim attempting")
+        local ok, result = pcall(claimBestFreeBooth)
+        if ok then
+            log("Startup AutoClaim result", tostring(result))
+        else
+            log("Startup AutoClaim error", tostring(result))
+        end
+        State.LastAutoClaimAt = 0
+    end
+end)
 
 --// Auto smart rebuild once per server/job after first execution.
 task.spawn(function()
@@ -6583,7 +6617,7 @@ task.spawn(function()
         if CFG.Booth.AutoClaim and now - (State.LastAutoClaimAt or 0) >= (tonumber(CFG.Booth.ClaimInterval) or 10) then
             State.LastAutoClaimAt = now
             local ok, err = pcall(function()
-                local target, status = findBestBooth()
+                local target, status = findBestBooth(true)
                 if status == "MINE" then
                     State.LastBooth = target
                 elseif status == "FREE" then
