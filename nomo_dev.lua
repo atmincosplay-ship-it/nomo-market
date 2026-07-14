@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V9.9 FRUIT PERF OFF"
+local VERSION = "V10.0 DEV FRUIT TAB"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6616,6 +6616,95 @@ State.SniperLimitSec:AddButton("Buy First", function()
     State.RefreshSniperLog()
 end, "outline")
 
+--// FRUIT PAGE
+State.FruitPage = win:CreatePage("Fruit")
+State.FruitTopRow = State.FruitPage:AddRow()
+State.FruitControlSec = State.FruitPage:AddSectionInRow(State.FruitTopRow, "Fruit Control", 0.42)
+State.FruitFilterSec = State.FruitPage:AddSectionInRow(State.FruitTopRow, "Fruit Filter", 0.58)
+State.FruitLogSec = State.FruitPage:AddSection("Fruit Status")
+State.FruitLog = State.FruitLogSec:AddLog(112)
+
+State.FruitControlSec:AddToggle("Enabled", CFG.Fruit.Enabled == true, function(v)
+    CFG.Fruit.Enabled = v == true
+    CFG.Fruit.AutoList = v == true
+    State.SaveRuntimeSettings()
+    log("FruitListing", tostring(v), "path", State.GetFruitFilterPath())
+end)
+State.FruitControlSec:AddButton("Scan Fruits", function()
+    if State.BuildFruitCandidates then
+        local ok, scan = pcall(State.BuildFruitCandidates)
+        if ok and type(scan) == "table" then
+            State.RefreshFruitLog(scan)
+            log("Fruit scan", "filters", tostring(#(scan.Filters or {})), "fruits", tostring(#(scan.Fruits or {})), "candidates", tostring(#(scan.Candidates or {})))
+        else
+            log("Fruit scan error", tostring(scan))
+        end
+    else
+        log("Fruit scan unavailable")
+    end
+end)
+State.FruitControlSec:AddButton("Reload Fruit Config", function()
+    if State.ReloadFruitFilters then State.ReloadFruitFilters(true) end
+    if State.BuildFruitCandidates then
+        local ok, scan = pcall(State.BuildFruitCandidates)
+        if ok then State.RefreshFruitLog(scan) end
+    end
+end, "outline")
+
+State.FruitNameInput = State.FruitFilterSec:AddInput("Fruit", "Bone Blossom")
+State.FruitPriceInput = State.FruitFilterSec:AddInput("Price", "11")
+State.FruitMinInput = State.FruitFilterSec:AddInput("Min KG/Size", "0")
+State.FruitMaxInput = State.FruitFilterSec:AddInput("Max KG/Size", "999")
+State.FruitMutInput = State.FruitFilterSec:AddInput("Mutation", "Any")
+State.FruitCapInput = State.FruitFilterSec:AddInput("Max Listed", "5")
+State.FruitFilterSec:AddButton("+ Add Fruit Filter", function()
+    if State.AddFruitFilter then
+        State.AddFruitFilter(
+            State.FruitNameInput:Get(),
+            State.FruitPriceInput:Get(),
+            State.FruitMinInput:Get(),
+            State.FruitMaxInput:Get(),
+            State.FruitMutInput:Get(),
+            State.FruitCapInput:Get()
+        )
+    end
+    if State.BuildFruitCandidates then
+        local ok, scan = pcall(State.BuildFruitCandidates)
+        if ok then State.RefreshFruitLog(scan) end
+    end
+end)
+
+State.RefreshFruitLog = function(scan)
+    scan = scan or State.LastFruitScan
+    local lines = {
+        "Enabled: " .. tostring(CFG.Fruit.Enabled == true),
+        "Path: " .. tostring(State.GetFruitFilterPath()),
+    }
+    if type(scan) == "table" then
+        table.insert(lines, "Filters: " .. tostring(#(scan.Filters or {})))
+        table.insert(lines, "Fruits: " .. tostring(#(scan.Fruits or {})))
+        table.insert(lines, "Candidates: " .. tostring(#(scan.Candidates or {})))
+        table.insert(lines, "------------------------------")
+        for i, c in ipairs(scan.Candidates or {}) do
+            if i > 10 then table.insert(lines, "... +" .. tostring(#scan.Candidates - 10) .. " more") break end
+            local fruit = c.Fruit or {}
+            local filter = c.Filter or {}
+            table.insert(lines, string.format("%02d. %s | Price %s | KG/Size %s | Mut %s", i, tostring(fruit.Name or "?"), tostring(filter.Price or "?"), fmtKg(fruit.Weight), tostring(fruit.Mutation or "Normal")))
+        end
+        if #(scan.Candidates or {}) == 0 and #(scan.Skipped or {}) > 0 then
+            table.insert(lines, "Skipped sample:")
+            for i, s in ipairs(scan.Skipped or {}) do
+                if i > 8 then break end
+                local fruit = s.Fruit or {}
+                table.insert(lines, string.format("%02d. %s | %s", i, tostring(fruit.Name or "?"), tostring(s.Reason or "?")))
+            end
+        end
+    else
+        table.insert(lines, "Press Scan Fruits to inspect current fruit tools.")
+    end
+    addLines(State.FruitLog, lines)
+end
+State.RefreshFruitLog()
 --// WEBHOOK PAGE
 State.WebhookPage = win:CreatePage("Webhook")
 State.WebhookTopRow = State.WebhookPage:AddRow()
