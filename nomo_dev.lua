@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V12.4 DEV FIND SELLER DIAG"
+local VERSION = "V12.5 DEV FIND SELLER TEST"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6495,6 +6495,7 @@ State.FindIndexSellerForPet = function(petName)
     log("Find Seller sent", tostring(petName), tostring(result))
     return true
 end
+getgenv().NOMO_FIND_SELLER = State.FindIndexSellerForPet
 
 State.OpenSniperWatchEditPopup = function(name, managerOverlay)
     local cfg = CFG.Sniper.Watchlist and CFG.Sniper.Watchlist[name]
@@ -6836,8 +6837,9 @@ State.SniperWatchSec:AddButton("Dry Run Scan", function()
     State.RefreshSniperLog()
 end, "outline")
 
-State.SniperLimitSec:AddButton("Find Seller Hop", function()
+State.SniperWatchSec:AddButton("Find Seller Hop", function()
     local petName = trim(sPet:Get())
+    log("Find Seller button", tostring(petName))
     State.OpenConfirmPopup("Find Seller Hop", "Use in-game Index Find Seller for " .. tostring(petName) .. "?", "Find", function()
         State.FindIndexSellerForPet(petName)
     end)
