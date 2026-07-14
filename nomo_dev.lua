@@ -6864,6 +6864,7 @@ State.RefreshFruitLog = function(scan)
     local lines = {
         string.format("Fruit: %s | Cap %s | Filters %s | Inventory %s | Ready %s",
             CFG.Fruit.Enabled == true and "ON" or "OFF",
+            tostring(CFG.Fruit.MaxListed or 10),
             tostring(type(scan) == "table" and #(scan.Filters or {}) or 0),
             tostring(type(scan) == "table" and #(scan.Fruits or {}) or 0),
             tostring(type(scan) == "table" and #(scan.Candidates or {}) or 0)
