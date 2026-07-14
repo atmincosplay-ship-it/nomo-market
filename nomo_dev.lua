@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V12.7 DEV FIND SELLER DASH"
+local VERSION = "V12.8 DEV FIND SELLER INPUT"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -7152,6 +7152,7 @@ State.FilterPathInput = State.SettingPathSec:AddInput("Filter Folder", getConfig
     CFG.Seller.ListingFilterPath = v
     reloadFilters()
 end)
+State.FindSellerPetInput = State.SettingPathSec:AddInput("Find Seller Pet", "Rainbow Bacon Pig")
 
 State.SettingUiSec:AddToggle("Compact Booth Data", CFG.UI.CompactBoothData ~= false, function(v)
     CFG.UI.CompactBoothData = v
@@ -7182,16 +7183,7 @@ State.SettingActionSec:AddButton("Diagnose Fruits", function()
 end, "outline")
 
 State.SettingActionSec:AddButton("Find Seller Test", function()
-    local petName = ""
-    if State.SniperPetInput and State.SniperPetInput.Get then
-        petName = trim(State.SniperPetInput:Get())
-    end
-    if petName == "" and CFG.Sniper.Watchlist then
-        for name in pairs(CFG.Sniper.Watchlist) do
-            petName = tostring(name)
-            break
-        end
-    end
+    local petName = State.FindSellerPetInput and trim(State.FindSellerPetInput:Get()) or ""
     log("Find Seller test button", tostring(petName))
     if petName ~= "" then
         State.FindIndexSellerForPet(petName)
@@ -7213,6 +7205,14 @@ State.SettingPathSec:AddButton("Save / Reload Path", function()
     State.ReloadSniperConfig()
     log("Config path set", tostring(CFG.Seller.ListingFilterPath), "listing", getFilterPath(), "sniper", getSniperFilterPath())
 end)
+
+State.SettingPathSec:AddButton("Test Find Seller", function()
+    local petName = State.FindSellerPetInput and trim(State.FindSellerPetInput:Get()) or ""
+    log("Path Find Seller test", tostring(petName))
+    if petName ~= "" then
+        State.FindIndexSellerForPet(petName)
+    end
+end, "outline")
 
 State.SettingActionSec:AddButton("Stop Script", function()
     State.Stop("settings stop")
