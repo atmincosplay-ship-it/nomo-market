@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V10.8 DEV FRUIT UNLI KG"
+local VERSION = "V10.9 DEV FRUIT EDIT FIX"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -2030,7 +2030,7 @@ local function getOwnPetsFromData(force)
             Variant = traits.Variant,
             VariantNorm = traits.VariantNorm,
             Favorited = isPetFavorite(petData),
-            Locked = tradeLock ~= nil,
+            Locked = (tradeLock == true or type(tradeLock) == "table" or type(tradeLock) == "string"),
             AlreadyListed = listed[tostring(uuid)] == true,
             Raw = petData,
         })
@@ -5068,26 +5068,13 @@ State.DashSniperNavSec:AddButton("Manage", function()
     end
 end, "outline")
 
-State.DashFruitSec:AddButton(CFG.Fruit.Enabled and "Disable" or "Enable", function()
-    CFG.Fruit.Enabled = not CFG.Fruit.Enabled
-    CFG.Fruit.AutoList = CFG.Fruit.Enabled
-    State.SaveRuntimeSettings()
-    log("FruitListing", tostring(CFG.Fruit.Enabled), "path", State.GetFruitFilterPath())
-    if State.RefreshDashboard then State.RefreshDashboard() end
-end)
-State.DashFruitSec:AddButton("Scan", function()
-    if State.BuildFruitCandidates then
-        local ok, scan = pcall(State.BuildFruitCandidates)
-        if ok and type(scan) == "table" then
-            log("Fruit scan", "filters", tostring(#(scan.Filters or {})), "fruits", tostring(#(scan.Fruits or {})), "candidates", tostring(#(scan.Candidates or {})))
-        else
-            log("Fruit scan error", tostring(scan))
-        end
+State.DashFruitSec:AddButton("Manage", function()
+    if State.OpenFruitFilterManager then
+        State.OpenFruitFilterManager()
     else
-        log("Fruit scan unavailable")
+        win:SelectPage("Fruit")
     end
 end, "outline")
-
 State.DashEventsSec = State.DashboardPage:AddSection("Recent Events")
 State.DashLog = State.DashEventsSec:AddLog(64)
 
@@ -7119,7 +7106,7 @@ end
 
 State.AddFruitFilter = function(fruit, price, minKg, maxKg, variant, cap)
     State.FruitFilterData = normalizeFruitConfigData(State.FruitFilterData or readJson(State.GetFruitFilterPath()))
-    table.insert(State.FruitFilterData.Fruit, {
+    local row = {
         Enabled = true,
         Fruit = tostring(fruit or ""),
         Price = clampPrice(price) or 1,
@@ -7127,9 +7114,19 @@ State.AddFruitFilter = function(fruit, price, minKg, maxKg, variant, cap)
         MaxWeight = toNumber(maxKg),
         Variant = tostring(variant or "Any"),
         MaxListedFruit = toInt(cap) or 5,
-    })
-    saveFruitFilters()
-    log("Added fruit filter", tostring(fruit), "price", tostring(price), "saved=true")
+    }
+    local editIndex = toInt(State.EditingFruitFilterRow)
+    if editIndex and State.FruitFilterData.Fruit and State.FruitFilterData.Fruit[editIndex] then
+        State.FruitFilterData.Fruit[editIndex] = row
+        State.EditingFruitFilterRow = nil
+        saveFruitFilters()
+        log("Updated fruit filter", tostring(fruit), "price", tostring(price), "saved=true")
+    else
+        State.EditingFruitFilterRow = nil
+        table.insert(State.FruitFilterData.Fruit, row)
+        saveFruitFilters()
+        log("Added fruit filter", tostring(fruit), "price", tostring(price), "saved=true")
+    end
 end
 State.OpenFruitFilterManager = function()
     reloadFruitFilters(true)
@@ -7265,8 +7262,10 @@ State.OpenFruitFilterManager = function()
             if State.FruitMaxInput and State.FruitMaxInput.Set then State.FruitMaxInput:Set(tostring(f.MaxWeight or "")) end
             if State.FruitMutInput and State.FruitMutInput.Set then State.FruitMutInput:Set(tostring(f.Variant or "Any")) end
             if State.FruitCapInput and State.FruitCapInput.Set then State.FruitCapInput:Set(tostring(f.MaxListedFruit or 5)) end
+            State.EditingFruitFilterRow = f.Row or i
+            if win and win.SelectPage then win:SelectPage("Fruit") end
             overlay:Destroy()
-            log("Loaded fruit filter for edit", tostring(f.Fruit or "?"))
+            log("Loaded fruit filter for edit", tostring(f.Fruit or "?"), "row", tostring(State.EditingFruitFilterRow))
         end)
         delBtn.Activated:Connect(function()
             State.OpenConfirmPopup("Delete Fruit Filter", "Remove this fruit filter from config?", "Delete", function()
@@ -7372,7 +7371,7 @@ local function getOwnFruitsFromInventoryData()
                     Variant = variant,
                     Mutation = getFruitMutationText(itemData),
                     Favorited = itemData.IsFavorite == true,
-                    Locked = tradeLock ~= nil,
+                    Locked = (tradeLock == true or type(tradeLock) == "table" or type(tradeLock) == "string"),
                     AlreadyListed = listed[tostring(id)] == true,
                     Raw = item,
                     ItemData = itemData,
