@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V12.1 DEV MANUAL REJOIN"
+local VERSION = "V12.2 DEV FIND SELLER"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6409,6 +6409,49 @@ State.ApplySniperLimits = function()
     CFG.Sniper.MaxMatchesPerPet = 0
 end
 
+State.FindIndexSellerForPet = function(petName)
+    petName = trim(petName)
+    if petName == "" then
+        log("Find Seller blocked", "empty pet")
+        return false
+    end
+    if os.clock() - (tonumber(State.LastFindSellerAt) or 0) < 10 then
+        log("Find Seller cooldown", tostring(petName))
+        return false
+    end
+    State.LastFindSellerAt = os.clock()
+
+    local tradeEvents = GameEvents:FindFirstChild("TradeEvents")
+    local tokenRaps = tradeEvents and tradeEvents:FindFirstChild("TokenRAPs")
+    local findSellers = tokenRaps and tokenRaps:FindFirstChild("FindSellers")
+    if not findSellers then
+        log("Find Seller failed", "FindSellers remote missing")
+        return false
+    end
+
+    log("Find Seller", tostring(petName), "using in-game index")
+    local ok, result = pcall(function()
+        return findSellers:InvokeServer("Pet", {
+            PetType = tostring(petName),
+            PetAbility = {},
+            PetData = {
+                MutationType = "Normal",
+                LevelProgress = 0,
+                Hunger = 0,
+                Level = 0,
+                BaseWeight = 1,
+                Boosts = {},
+            },
+        })
+    end)
+    if not ok then
+        log("Find Seller error", tostring(result))
+        return false
+    end
+    log("Find Seller sent", tostring(petName), tostring(result))
+    return true
+end
+
 State.OpenSniperWatchEditPopup = function(name, managerOverlay)
     local cfg = CFG.Sniper.Watchlist and CFG.Sniper.Watchlist[name]
     if not cfg then
@@ -6747,6 +6790,13 @@ State.SniperWatchSec:AddButton("Dry Run Scan", function()
     State.ApplySniperLimits()
     snipeDryRun()
     State.RefreshSniperLog()
+end, "outline")
+
+State.SniperLimitSec:AddButton("Find Seller Hop", function()
+    local petName = trim(sPet:Get())
+    State.OpenConfirmPopup("Find Seller Hop", "Use in-game Index Find Seller for " .. tostring(petName) .. "?", "Find", function()
+        State.FindIndexSellerForPet(petName)
+    end)
 end, "outline")
 
 State.SniperLimitSec:AddButton("Clear Watchlist", function()
