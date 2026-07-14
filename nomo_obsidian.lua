@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V9.9 FRUIT PERF OFF"
+local VERSION = "V9.6 WEBHOOK DEFAULTS"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -38,13 +38,6 @@ CFG.Seller = CFG.Seller or {
 
 CFG.Listings = CFG.Listings or {
     RemoveCooldown = 1.2,
-}
-
-CFG.Fruit = CFG.Fruit or {
-    Enabled = true,
-    AutoList = true,
-    RequireExactName = true,
-    ItemType = "Holdable",
 }
 
 CFG.Sniper = CFG.Sniper or {
@@ -115,11 +108,6 @@ CFG.Seller.CreateWaitBackoff = math.clamp(tonumber(CFG.Seller.CreateWaitBackoff)
 CFG.Seller.MinPetCountKeep = 0
 CFG.Seller.MaxListPerMinute = 999
 CFG.Seller.MaxAutoListSession = 50
-CFG.Fruit = CFG.Fruit or {}
-CFG.Fruit.Enabled = CFG.Fruit.Enabled == true
-CFG.Fruit.AutoList = CFG.Fruit.AutoList == true
-CFG.Fruit.RequireExactName = CFG.Fruit.RequireExactName ~= false
-CFG.Fruit.ItemType = tostring(CFG.Fruit.ItemType or "Holdable")
 CFG.Listings.RemoveCooldown = CFG.Listings.RemoveCooldown or 1.2
 CFG.Listings.RemoveAllMax = CFG.Listings.RemoveAllMax or 50
 CFG.Listings.VerifyRemoveDelay = CFG.Listings.VerifyRemoveDelay or 0.45
@@ -671,17 +659,13 @@ local function getFilterPath()
     return joinConfigPath(path, "listing_filters.json")
 end
 
-State.GetFruitFilterPath = function()
-    return joinConfigPath(getConfigFolder(), "fruit_listing_filters.json")
-end
-
 State.GetSettingsPath = function()
     return joinConfigPath(getConfigFolder(), "settings.json")
 end
 
 State.LoadRuntimeSettings = function()
     local data = readJson(State.GetSettingsPath())
-    local defaultsVersion = "v9_9_fruit_perf_off"
+    local defaultsVersion = "v8_6_arceus_startup_retry"
     local applyLiveAutomationDefaults = type(data.Meta) ~= "table" or data.Meta.DefaultsVersion ~= defaultsVersion
     if type(data.Booth) == "table" then
         if data.Booth.AutoClaim ~= nil then CFG.Booth.AutoClaim = data.Booth.AutoClaim == true end
@@ -698,10 +682,6 @@ State.LoadRuntimeSettings = function()
         if data.Sniper.Enabled ~= nil then CFG.Sniper.Enabled = data.Sniper.Enabled == true end
         if data.Sniper.DryRun ~= nil then CFG.Sniper.DryRun = data.Sniper.DryRun == true end
         if data.Sniper.RescanBeforeBuy ~= nil then CFG.Sniper.RescanBeforeBuy = data.Sniper.RescanBeforeBuy == true end
-    end
-    if type(data.Fruit) == "table" then
-        if data.Fruit.Enabled ~= nil then CFG.Fruit.Enabled = data.Fruit.Enabled == true end
-        if data.Fruit.AutoList ~= nil then CFG.Fruit.AutoList = data.Fruit.AutoList == true end
     end
     if type(data.Webhook) == "table" then
         if data.Webhook.Enabled ~= nil then CFG.Webhook.Enabled = data.Webhook.Enabled == true end
@@ -733,8 +713,6 @@ State.LoadRuntimeSettings = function()
         CFG.Sniper.Enabled = true
         CFG.Sniper.DryRun = false
         CFG.UI.AutoMinimized = true
-        CFG.Fruit.Enabled = false
-        CFG.Fruit.AutoList = false
         State.PendingRuntimeDefaultsSave = true
     end
     return data
@@ -743,7 +721,7 @@ end
 State.SaveRuntimeSettings = function()
     local data = {
         Meta = {
-            DefaultsVersion = "v9_9_fruit_perf_off",
+            DefaultsVersion = "v8_6_arceus_startup_retry",
         },
         Booth = {
             AutoClaim = CFG.Booth.AutoClaim == true,
@@ -758,10 +736,6 @@ State.SaveRuntimeSettings = function()
             Enabled = CFG.Sniper.Enabled == true,
             DryRun = CFG.Sniper.DryRun == true,
             RescanBeforeBuy = CFG.Sniper.RescanBeforeBuy == true,
-        },
-        Fruit = {
-            Enabled = CFG.Fruit.Enabled == true,
-            AutoList = CFG.Fruit.AutoList == true,
         },
         Webhook = {
             Enabled = CFG.Webhook.Enabled == true,
@@ -1656,13 +1630,7 @@ State.NormalizeListingConfigData = function(data)
     return data
 end
 
-local function reloadFilters(force)
-    local path = getFilterPath()
-    local now = os.clock()
-    if not force and State.FilterData and State.LastFilterPath == path and now - (State.LastFilterLoadAt or 0) < 5 then
-        return State.FilterData
-    end
-
+local function reloadFilters()
     local remoteURL = tostring(CFG.Seller.RemoteConfigURL or "")
     if CFG.Seller.RemoteConfigEnabled and remoteURL ~= "" then
         local remoteData, remoteErr = fetchRemoteConfig()
@@ -1674,6 +1642,7 @@ local function reloadFilters(force)
         end
     end
 
+    local path = getFilterPath()
     State.FilterData = State.NormalizeListingConfigData(readJson(path))
     if type(State.FilterData.Filters) ~= "table" or #State.FilterData.Filters == 0 then
         local fallback = "Nomo/listing_filters.json"
@@ -1688,14 +1657,7 @@ local function reloadFilters(force)
             end
         end
     end
-    local countNow = #(State.FilterData.Filters or {})
-    State.LastFilterPath = path
-    State.LastFilterLoadAt = now
-    if force or State.LastFilterLogPath ~= path or State.LastFilterLogCount ~= countNow then
-        State.LastFilterLogPath = path
-        State.LastFilterLogCount = countNow
-        log("Local filters loaded", path, tostring(countNow) .. " filters")
-    end
+    log("Local filters loaded", path, tostring(#(State.FilterData.Filters or {})) .. " filters")
     return State.FilterData
 end
 
@@ -2031,106 +1993,6 @@ local function getOwnPetsFromData(force)
     return out
 end
 
-State.DiagnoseFruits = function()
-    local function cleanShort(v)
-        local s = tostring(v or "")
-        s = s:gsub("\n", " "):gsub("\r", " ")
-        if #s > 80 then s = s:sub(1, 77) .. "..." end
-        return s
-    end
-
-    local function logFruitTool(tool, label)
-        if typeof(tool) ~= "Instance" or not tool:IsA("Tool") then return false end
-
-        local harvested = tool:GetAttribute("HarvestedFruit")
-        local itemType = tool:GetAttribute("ItemType")
-        local fruitId = tool:GetAttribute("Id") or tool:GetAttribute("UUID") or tool:GetAttribute("ItemId")
-        local fruitName = tool:GetAttribute("FruitName") or tool:GetAttribute("Fruit") or tool:GetAttribute("ItemName") or tool:GetAttribute("Name")
-        local kg = tool:GetAttribute("Weight") or tool:GetAttribute("KG") or tool:GetAttribute("Kilo")
-        local mutation = tool:GetAttribute("Mutation") or tool:GetAttribute("Variant")
-
-        local looksFruit = harvested == true or tostring(itemType or ""):lower():find("fruit", 1, true) ~= nil or fruitName ~= nil
-        if not looksFruit then return false end
-
-        log("Fruit tool", label, cleanShort(tool.Name), "type=" .. cleanShort(itemType), "id=" .. cleanShort(fruitId), "fruit=" .. cleanShort(fruitName), "kg=" .. cleanShort(kg), "mut=" .. cleanShort(mutation))
-        return true
-    end
-
-    log("Fruit diag started", "read-only")
-
-    local foundTools = 0
-    local backpack = LocalPlayer and LocalPlayer:FindFirstChildOfClass("Backpack")
-    local character = LocalPlayer and LocalPlayer.Character
-    local containers = {
-        {Name = "Backpack", Obj = backpack},
-        {Name = "Character", Obj = character},
-    }
-
-    for _, entry in ipairs(containers) do
-        local obj = entry.Obj
-        if typeof(obj) == "Instance" then
-            for _, child in ipairs(obj:GetChildren()) do
-                if logFruitTool(child, entry.Name) then
-                    foundTools = foundTools + 1
-                end
-            end
-        end
-    end
-    log("Fruit diag tools", tostring(foundTools), "candidate fruit tool(s)")
-
-    local okData, data = pcall(function()
-        return DataService:GetData()
-    end)
-    if okData and type(data) == "table" then
-        local foundData = 0
-        local function scanData(node, path, depth)
-            if foundData >= 20 or depth > 5 or type(node) ~= "table" then return end
-
-            local pathLower = tostring(path):lower()
-            local itemType = node.ItemType or node.Type
-            local fruitName = node.FruitName or node.Fruit or node.ItemName or node.Name
-            local fruitId = node.Id or node.UUID or node.ItemId
-            local kg = node.Weight or node.KG or node.Kilo
-            local looksFruit = pathLower:find("fruit", 1, true) ~= nil or tostring(itemType or ""):lower():find("fruit", 1, true) ~= nil or node.HarvestedFruit == true
-
-            if looksFruit and (fruitName ~= nil or fruitId ~= nil or itemType ~= nil) then
-                foundData = foundData + 1
-                log("Fruit data", tostring(path), "type=" .. cleanShort(itemType), "id=" .. cleanShort(fruitId), "name=" .. cleanShort(fruitName), "kg=" .. cleanShort(kg))
-            end
-
-            for k, v in pairs(node) do
-                if type(v) == "table" then
-                    local key = tostring(k)
-                    local keyLower = key:lower()
-                    if depth < 2 or keyLower:find("fruit", 1, true) or keyLower:find("inventory", 1, true) or keyLower:find("trade", 1, true) then
-                        scanData(v, tostring(path) .. "." .. key, depth + 1)
-                        if foundData >= 20 then return end
-                    end
-                end
-            end
-        end
-
-        scanData(data, "Data", 0)
-        log("Fruit diag data", tostring(foundData), "candidate data row(s)")
-    else
-        log("Fruit diag data failed", tostring(data))
-    end
-
-    local nonPet = 0
-    for _, l in ipairs(getAllListings(true, true)) do
-        if tostring(l.ItemType or "") ~= "Pet" then
-            nonPet = nonPet + 1
-            if nonPet <= 15 then
-                local item = l.Item or {}
-                log("Market non-pet", "type=" .. cleanShort(l.ItemType), "name=" .. cleanShort(item.FruitName or item.Fruit or item.ItemName or item.Name or l.PetType), "price=" .. cleanShort(l.Price), "id=" .. cleanShort(l.ItemId))
-            end
-        end
-    end
-    log("Fruit diag market", tostring(nonPet), "non-pet listing(s) visible")
-end
-
-_G.NOMO_DIAGNOSE_FRUITS = State.DiagnoseFruits
-getgenv().NOMO_DIAGNOSE_FRUITS = State.DiagnoseFruits
 local function findOwnPetByUUID(uuid, force)
     local target = tostring(uuid or "")
     if target == "" then return nil end
@@ -4995,11 +4857,10 @@ State.DashWebhookSec:AddToggle("Enabled", CFG.Webhook.Enabled == true, function(
 end)
 
 State.DashActionRow = State.DashboardPage:AddRow()
-State.DashRebuildSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Rebuild", 0.20)
-State.DashListingsSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "My Listing", 0.20)
-State.DashFiltersSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Filters", 0.20)
-State.DashSniperNavSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Sniper", 0.20)
-State.DashFruitSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Fruit", 0.20)
+State.DashRebuildSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Rebuild", 0.25)
+State.DashListingsSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "My Listing", 0.25)
+State.DashFiltersSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Filters", 0.25)
+State.DashSniperNavSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Sniper", 0.25)
 
 State.DashRebuildSec:AddButton("Smart Rebuild", function()
     task.spawn(function()
@@ -5030,26 +4891,6 @@ State.DashSniperNavSec:AddButton("Manage", function()
     end
 end, "outline")
 
-State.DashFruitSec:AddButton(CFG.Fruit.Enabled and "Disable" or "Enable", function()
-    CFG.Fruit.Enabled = not CFG.Fruit.Enabled
-    CFG.Fruit.AutoList = CFG.Fruit.Enabled
-    State.SaveRuntimeSettings()
-    log("FruitListing", tostring(CFG.Fruit.Enabled), "path", State.GetFruitFilterPath())
-    if State.RefreshDashboard then State.RefreshDashboard() end
-end)
-State.DashFruitSec:AddButton("Scan", function()
-    if State.BuildFruitCandidates then
-        local ok, scan = pcall(State.BuildFruitCandidates)
-        if ok and type(scan) == "table" then
-            log("Fruit scan", "filters", tostring(#(scan.Filters or {})), "fruits", tostring(#(scan.Fruits or {})), "candidates", tostring(#(scan.Candidates or {})))
-        else
-            log("Fruit scan error", tostring(scan))
-        end
-    else
-        log("Fruit scan unavailable")
-    end
-end, "outline")
-
 State.DashEventsSec = State.DashboardPage:AddSection("Recent Events")
 State.DashLog = State.DashEventsSec:AddLog(64)
 
@@ -5065,7 +4906,6 @@ State.BoothAutoSec:AddToggle("Enabled", CFG.Booth.AutoClaim, function(v)
     State.SaveRuntimeSettings()
     log("AutoClaim", tostring(v))
 end)
-
 
 State.BoothReclaimSec:AddToggle("Enabled", CFG.Booth.SmartReclaim, function(v)
     CFG.Booth.SmartReclaim = v
@@ -6740,20 +6580,9 @@ State.SettingUiSec:AddToggle("Auto Minimized", CFG.UI.AutoMinimized == true, fun
     log("AutoMinimized", tostring(v), "applies on next reload")
 end)
 
-State.SettingUiSec:AddToggle("Fruit Listing", CFG.Fruit.Enabled == true, function(v)
-    CFG.Fruit.Enabled = v == true
-    CFG.Fruit.AutoList = v == true
-    State.SaveRuntimeSettings()
-    log("FruitListing", tostring(v), "path", State.GetFruitFilterPath())
-end)
-
 State.SettingActionSec:AddButton("Reload Pet List", function()
     loadGamePetList()
     log("PetList reloaded", tostring(#State.PetList))
-end, "outline")
-
-State.SettingActionSec:AddButton("Diagnose Fruits", function()
-    if State.DiagnoseFruits then State.DiagnoseFruits() end
 end, "outline")
 
 State.SettingPathSec:AddButton("Save / Reload Path", function()
@@ -6858,19 +6687,6 @@ end
 bootStep("PetList", loadGamePetList)
 bootStep("MutationList", loadGameMutationList)
 bootStep("ListingFilters", reloadFilters)
-bootStep("SniperFilters", State.ReloadSniperConfig)
-bootStep("WarnFilter", installWarnFilter)
-
-log("Started", VERSION .. " PRIVATE UI")
-
-bootStep("BoothLog", refreshBoothLog)
-bootStep("SellerLog", function() refreshSellerLog(false) end)
-bootStep("MyListingsLog", refreshMyListingsLog)
-bootStep("MarketSample", refreshMarketSample)
-bootStep("SniperLog", State.RefreshSniperLog)
-
-win:SelectPage("Dashboard")
-
 if State.PendingRuntimeDefaultsSave then
     State.PendingRuntimeDefaultsSave = false
     State.SaveRuntimeSettings()
@@ -6889,340 +6705,6 @@ bootStep("MarketSample", refreshMarketSample)
 bootStep("SniperLog", State.RefreshSniperLog)
 
 win:SelectPage("Dashboard")
-
-State.InstallFruitListing = function()
-local function normalizeFruitConfigData(data)
-    if type(data) ~= "table" then return {Fruit = {}} end
-    if type(data.fruit) == "table" then data.Fruit = data.fruit end
-    if type(data.Fruits) == "table" then data.Fruit = data.Fruits end
-    if type(data.filters) == "table" then data.Fruit = data.filters end
-    if type(data.Filters) == "table" then data.Fruit = data.Filters end
-    if type(data[1]) == "table" then data.Fruit = data end
-    data.Fruit = type(data.Fruit) == "table" and data.Fruit or {}
-    return data
-end
-
-local function reloadFruitFilters(force)
-    local path = State.GetFruitFilterPath()
-    local now = os.clock()
-    if not force and State.FruitFilterData and State.LastFruitFilterPath == path and now - (State.LastFruitFilterLoadAt or 0) < 5 then
-        return State.FruitFilterData
-    end
-
-    State.FruitFilterData = normalizeFruitConfigData(readJson(path))
-    State.LastFruitFilterPath = path
-    State.LastFruitFilterLoadAt = now
-
-    local countNow = #(State.FruitFilterData.Fruit or {})
-    if force or State.LastFruitFilterLogCount ~= countNow or State.LastFruitFilterLogPath ~= path then
-        State.LastFruitFilterLogCount = countNow
-        State.LastFruitFilterLogPath = path
-        log("Fruit filters loaded", path, tostring(countNow) .. " filters")
-    end
-    return State.FruitFilterData
-end
-
-local function saveFruitFilters()
-    State.FruitFilterData = normalizeFruitConfigData(State.FruitFilterData)
-    return saveJson(State.GetFruitFilterPath(), {
-        version = 1,
-        fruit = State.FruitFilterData.Fruit or {},
-    })
-end
-
-local function getFruitFilters()
-    reloadFruitFilters(false)
-    local out = {}
-    for i, row in ipairs(State.FruitFilterData.Fruit or {}) do
-        if type(row) == "table" and row.Enabled ~= false then
-            local fruit = row.Fruit or row.fruit or row.Name or row.name or row.ItemName or row.itemName
-            if fruit and tostring(fruit) ~= "" then
-                table.insert(out, {
-                    Row = i,
-                    Fruit = tostring(fruit),
-                    FruitNorm = norm(fruit),
-                    Price = clampPrice(row.Price or row.price or row.Tokens or row.tokens),
-                    MinWeight = toNumber(row.MinWeight or row.minWeight or row.MinKG or row.minKG or row.minKg or row.MinSize or row.minSize),
-                    MaxWeight = toNumber(row.MaxWeight or row.maxWeight or row.MaxKG or row.maxKG or row.maxKg or row.MaxSize or row.maxSize),
-                    Mutation = normalizeMutationConfig(row.Mutation or row.mutation or row.Variant or row.variant or "Any"),
-                    MaxListedFruit = toInt(row.MaxListedFruit or row.maxListedFruit or row.MaxListedPet or row.maxListedPet or row.MaxListed or row.maxListed) or 0,
-                    Raw = row,
-                })
-            end
-        end
-    end
-    return out
-end
-
-local function parseKgFromText(text)
-    text = tostring(text or "")
-    local n = text:match("([%d%.]+)%s*[Kk][Gg]")
-    return n and tonumber(n) or nil
-end
-
-local function getFruitToolInfo(tool)
-    if typeof(tool) ~= "Instance" or not tool:IsA("Tool") then return nil end
-    if tool:GetAttribute("HarvestedFruit") ~= true then return nil end
-
-    local id = tool:GetAttribute("Id") or tool:GetAttribute("UUID") or tool:GetAttribute("ItemId")
-    if id == nil or tostring(id) == "" then return nil end
-
-    local name = tool:GetAttribute("FruitName") or tool:GetAttribute("Fruit") or tool:GetAttribute("ItemName") or tool:GetAttribute("Name")
-    if name == nil or tostring(name) == "" then
-        name = tostring(tool.Name or ""):gsub("%s*%b[]", "")
-    end
-    name = trim(name)
-    if name == "" then return nil end
-
-    local weight = toNumber(tool:GetAttribute("Weight") or tool:GetAttribute("KG") or tool:GetAttribute("Kilo") or tool:GetAttribute("SizeMulti")) or parseKgFromText(tool.Name)
-    local mutation = tool:GetAttribute("Mutation") or tool:GetAttribute("Variant") or "Normal"
-
-    return {
-        UUID = tostring(id),
-        Type = tostring(CFG.Fruit.ItemType or "Holdable"),
-        Name = tostring(name),
-        NameNorm = norm(name),
-        Weight = weight,
-        Mutation = tostring(mutation or "Normal"),
-        Tool = tool,
-    }
-end
-
-local function getOwnFruitsFromTools()
-    local listed = {}
-    local okData, data = pcall(function() return DataService:GetData() end)
-    if okData and type(data) == "table" and data.TradeData and type(data.TradeData.Listings) == "table" then
-        for _, l in pairs(data.TradeData.Listings) do
-            if type(l) == "table" and l.ItemId then listed[tostring(l.ItemId)] = true end
-        end
-    end
-
-    local out = {}
-    local function scan(container)
-        if typeof(container) ~= "Instance" then return end
-        for _, child in ipairs(container:GetChildren()) do
-            local info = getFruitToolInfo(child)
-            if info then
-                info.AlreadyListed = listed[tostring(info.UUID)] == true
-                table.insert(out, info)
-            end
-        end
-    end
-
-    scan(LocalPlayer and LocalPlayer:FindFirstChildOfClass("Backpack"))
-    scan(LocalPlayer and LocalPlayer.Character)
-    table.sort(out, function(a, b)
-        if a.NameNorm ~= b.NameNorm then return a.NameNorm < b.NameNorm end
-        return (a.Weight or 999999) < (b.Weight or 999999)
-    end)
-    State.FruitInventoryCache = out
-    return out
-end
-
-local function fruitMatchesFilter(fruit, f)
-    if not fruit or not f then return false, "missing" end
-    if fruit.NameNorm ~= f.FruitNorm then return false, "name" end
-    if f.MinWeight ~= nil and (fruit.Weight == nil or fruit.Weight < f.MinWeight) then return false, "min kg" end
-    if f.MaxWeight ~= nil and (fruit.Weight == nil or fruit.Weight > f.MaxWeight) then return false, "max kg" end
-    if not traitWantedAny(f.Mutation) and norm(fruit.Mutation) ~= norm(f.Mutation) then return false, "mutation" end
-    return true
-end
-
-local function listingToPseudoFruit(l)
-    local item = l and l.Item or {}
-    local name = item.FruitName or item.Fruit or item.ItemName or item.Name or l.PetType or "Unknown"
-    return {
-        UUID = tostring(l and l.ItemId or ""),
-        Name = tostring(name),
-        NameNorm = norm(name),
-        Weight = toNumber(item.Weight or item.KG or item.Kilo or item.SizeMulti),
-        Mutation = tostring(item.Mutation or item.Variant or "Normal"),
-    }
-end
-
-local function findFruitFilterForListing(l, filters, requirePrice)
-    if tostring(l and l.ItemType or "") ~= tostring(CFG.Fruit.ItemType or "Holdable") then return nil, nil, "wrong item type" end
-    local pseudo = listingToPseudoFruit(l)
-    for _, f in ipairs(filters or getFruitFilters()) do
-        local ok = fruitMatchesFilter(pseudo, f)
-        if ok then
-            if requirePrice then
-                local listingPrice = clampPrice(l.Price)
-                local filterPrice = clampPrice(f.Price)
-                if not listingPrice or not filterPrice or listingPrice ~= filterPrice then
-                    return nil, pseudo, "wrong price"
-                end
-            end
-            return f, pseudo, nil
-        end
-    end
-    return nil, pseudo, "no filter"
-end
-
-local function countMyGoodFruitListingsByFilter(filters, myListings)
-    local counts = {}
-    for _, l in ipairs(myListings or getMyListings()) do
-        local f = findFruitFilterForListing(l, filters, true)
-        if f then
-            local key = tostring(f.FruitNorm) .. "|" .. tostring(f.Price) .. "|" .. tostring(f.MinWeight) .. "|" .. tostring(f.MaxWeight) .. "|" .. tostring(f.Mutation)
-            counts[key] = (counts[key] or 0) + 1
-        end
-    end
-    return counts
-end
-
-local function buildFruitCandidates()
-    local fruits = getOwnFruitsFromTools()
-    local filters = getFruitFilters()
-    local myListings = getMyListings()
-    local alreadyListedByFilter = countMyGoodFruitListingsByFilter(filters, myListings)
-    local currentBoothListings = #myListings
-    local chosenFilter = {}
-    local candidates, skipped = {}, {}
-
-    for _, fruit in ipairs(fruits) do
-        local reason, matched = nil, nil
-        if fruit.AlreadyListed then
-            reason = "already listed"
-        else
-            for _, f in ipairs(filters) do
-                local ok, why = fruitMatchesFilter(fruit, f)
-                if ok then matched = f; break end
-                reason = why or "no filter"
-            end
-            if not matched then reason = "no filter" end
-        end
-
-        if matched and not matched.Price then reason = "filter no price" end
-        if matched and not reason then
-            local boothCap = tonumber(CFG.Seller.BoothCap) or 50
-            local remainingBoothSlots = math.max(0, boothCap - currentBoothListings)
-            local key = tostring(matched.FruitNorm) .. "|" .. tostring(matched.Price) .. "|" .. tostring(matched.MinWeight) .. "|" .. tostring(matched.MaxWeight) .. "|" .. tostring(matched.Mutation)
-            local maxListed = tonumber(matched.MaxListedFruit) or 0
-            local currentListed = alreadyListedByFilter[key] or 0
-            local chosen = chosenFilter[key] or 0
-
-            if remainingBoothSlots <= 0 then
-                reason = "booth full"
-            elseif maxListed > 0 and currentListed >= maxListed then
-                reason = "filter cap reached"
-            elseif maxListed > 0 and chosen >= math.max(0, maxListed - currentListed) then
-                reason = "filter cap"
-            else
-                chosenFilter[key] = chosen + 1
-                table.insert(candidates, {Fruit = fruit, Filter = matched})
-            end
-        end
-
-        if reason then table.insert(skipped, {Fruit = fruit, Reason = reason}) end
-    end
-
-    State.LastFruitScan = {Fruits = fruits, Filters = filters, Candidates = candidates, Skipped = skipped}
-    return State.LastFruitScan
-end
-
-local function verifyFruitListingAfterList(fruit, price, f)
-    local targetId = tostring(fruit and fruit.UUID or "")
-    local targetPrice = clampPrice(price)
-    local attempts = math.max(1, toInt(CFG.Seller.VerifyAfterListAttempts) or 4)
-    local delay = tonumber(CFG.Seller.VerifyAfterListDelay) or 0.75
-
-    for attempt = 1, attempts do
-        task.wait(delay)
-        local listing = findMyListingByItemAndPrice(targetId, targetPrice, true, true)
-        if listing then
-            local matched = findFruitFilterForListing(listing, {f}, true)
-            if not matched then
-                log("UNSAFE fruit listing verified mismatch, removing", tostring(listing.PetType), "price", tostring(listing.Price), "uuid", tostring(listing.ListingUUID))
-                removeListingUUID(listing.ListingUUID)
-                clearPendingList(targetId)
-                return false, "verified fruit listing failed exact filter check"
-            end
-            clearPendingList(targetId)
-            return true, listing
-        end
-
-        local wrongPrice = findMyListingByItem(targetId, true, true)
-        if wrongPrice then
-            log("UNSAFE fruit listing wrong price, removing", tostring(wrongPrice.PetType), "expected", tostring(targetPrice), "got", tostring(wrongPrice.Price), "uuid", tostring(wrongPrice.ListingUUID))
-            removeListingUUID(wrongPrice.ListingUUID)
-            clearPendingList(targetId)
-            return false, "listed at wrong price"
-        end
-    end
-
-    return false, "not found in booth data"
-end
-
-local function listFruit(fruit, price, boothReady, f)
-    if not fruit or not fruit.UUID then return false, "missing fruit id" end
-    local fruitId = tostring(fruit.UUID)
-    if not f or fruit.NameNorm ~= f.FruitNorm then return false, "fruit safety mismatch" end
-    if State.PendingListUUIDs[fruitId] then return false, "pending" end
-    if findMyListingByItemAndPrice(fruitId, price, true, true) then return false, "already listed" end
-    local canSession, sessionWhy = canListSession()
-    if not canSession then return false, sessionWhy end
-    if CFG.Seller.RequireBoothBeforeList and not boothReady and not ensureBoothForListing() then return false, "no booth" end
-
-    markPendingList(fruitId)
-    local ok, result = pcall(function()
-        return CreateListing:InvokeServer(tostring(CFG.Fruit.ItemType or "Holdable"), fruitId, clampPrice(price))
-    end)
-    if ok and result ~= false then
-        State.InvalidateListingCache()
-        State.LastListAt = os.clock()
-        State.ListedThisSession = (State.ListedThisSession or 0) + 1
-        table.insert(State.ListTimes, os.clock())
-        local verified, verifyInfo = verifyFruitListingAfterList(fruit, price, f)
-        if verified then
-            registerCreateSuccess()
-            log("Fruit listed OK + verified", fruit.Name, "price", tostring(price), "session", tostring(State.ListedThisSession))
-        else
-            log("Fruit list sent but NOT verified", fruit.Name, "price", tostring(price), tostring(verifyInfo))
-        end
-        return true
-    end
-
-    if ok and result == false and (os.clock() - (tonumber(State.LastCreateWaitSignal) or 0)) < 1.5 then
-        registerCreateWait("CreateListing returned false")
-        clearPendingList(fruitId)
-        return false, "server wait"
-    end
-
-    clearPendingList(fruitId)
-    log("Fruit listing failed", tostring(fruit.Name), tostring(result))
-    return false, result
-end
-
-local function autoListFruits(scan)
-    if not CFG.Fruit.Enabled or not CFG.Fruit.AutoList or CFG.Seller.PreviewOnly or not CFG.Seller.AutoList then return end
-    scan = scan or buildFruitCandidates()
-    if #scan.Filters == 0 or #scan.Candidates == 0 then return end
-    local boothReady = ensureBoothForListing()
-    if not boothReady then log("Fruit AutoList blocked", "no booth") return end
-
-    local i = 1
-    while i <= #scan.Candidates do
-        local c = scan.Candidates[i]
-        local serverWait = createWaitRemaining()
-        if serverWait > 0 then task.wait(math.min(serverWait, 1)); continue end
-        local can, why = canListNow()
-        if not can then dlog("fruit list wait", why); break end
-        local ok, whyList = listFruit(c.Fruit, c.Filter.Price, true, c.Filter)
-        if ok then i += 1 elseif whyList == "server wait" then task.wait(math.min(math.max(createWaitRemaining(), 0.15), 1)) else i += 1 end
-        local waitTime = tonumber(CFG.Seller.ListCooldown) or 0
-        if waitTime > 0 then task.wait(waitTime) else task.wait() end
-    end
-end
-
-State.BuildFruitCandidates = buildFruitCandidates
-State.AutoListFruits = autoListFruits
-_G.NOMO_FRUIT_SCAN = buildFruitCandidates
-getgenv().NOMO_FRUIT_SCAN = buildFruitCandidates
-end
-State.InstallFruitListing()
-
-
 
 task.spawn(function()
     task.wait(4)
@@ -7329,10 +6811,6 @@ task.spawn(function()
             local ok, scan = pcall(buildCandidates)
             if ok then
                 autoList(scan)
-                if State.AutoListFruits then
-                    local okFruit, fruitErr = pcall(State.AutoListFruits)
-                    if not okFruit then log("Fruit scan error", tostring(fruitErr)) end
-                end
             else
                 log("Seller scan error", tostring(scan))
             end
