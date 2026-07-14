@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V11.7 DEV BOOT SAFE"
+local VERSION = "V11.8 DEV READY STATUS"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -4881,7 +4881,7 @@ State.Gui = win.Gui
 State.SetBootStatus = function(step)
     State.LastBootStep = tostring(step or "?")
     local text = "Boot: " .. State.LastBootStep
-    if win and win.CloneStatusText then
+    if not State.BootComplete and win and win.CloneStatusText then
         pcall(function()
             win.CloneStatusText.Text = text
         end)
@@ -7911,6 +7911,10 @@ end)
 
 --// Main background loops
 State.SetBootStatus("automation loop")
+State.BootComplete = true
+win.Pills.Status:Set("Ready", T.Green)
+State.ClonePanelDirty = true
+pcall(State.RefreshCloneStatus, true)
 task.spawn(function()
     while State.Running do
         local now = os.clock()
