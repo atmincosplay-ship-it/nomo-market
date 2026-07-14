@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V10.0 DEV FRUIT TAB"
+local VERSION = "V10.1 DEV FRUIT DROPDOWN"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6647,11 +6647,53 @@ State.FruitControlSec:AddButton("Reload Fruit Config", function()
     if State.ReloadFruitFilters then State.ReloadFruitFilters(true) end
     if State.BuildFruitCandidates then
         local ok, scan = pcall(State.BuildFruitCandidates)
-        if ok then State.RefreshFruitLog(scan) end
+        if ok then State.RefreshFruitOptions(scan); State.RefreshFruitLog(scan) end
     end
 end, "outline")
 
-State.FruitNameInput = State.FruitFilterSec:AddInput("Fruit", "Bone Blossom")
+State.RefreshFruitOptions = function(scan)
+    local seen, names = {}, {}
+    local function addName(v)
+        v = trim(v)
+        if v ~= "" and not seen[v] then
+            seen[v] = true
+            table.insert(names, v)
+        end
+    end
+
+    if type(scan) == "table" then
+        for _, fruit in ipairs(scan.Fruits or {}) do
+            addName(fruit.Name)
+        end
+        for _, f in ipairs(scan.Filters or {}) do
+            addName(f.Fruit)
+        end
+    end
+
+    if State.FruitFilterData and type(State.FruitFilterData.Fruit) == "table" then
+        for _, row in ipairs(State.FruitFilterData.Fruit) do
+            if type(row) == "table" then
+                addName(row.Fruit or row.fruit or row.Name or row.name)
+            end
+        end
+    end
+
+    for _, l in ipairs(getAllListings(false, true)) do
+        if tostring(l.ItemType or "") == tostring(CFG.Fruit.ItemType or "Holdable") then
+            local item = l.Item or {}
+            addName(item.FruitName or item.Fruit or item.ItemName or item.Name or l.PetType)
+        end
+    end
+
+    table.sort(names)
+    State.FruitNameOptions = names
+    if State.FruitNameInput and State.FruitNameInput.SetOptions then
+        State.FruitNameInput:SetOptions(names)
+    end
+    return names
+end
+
+State.FruitNameInput = State.FruitFilterSec:AddSearchDropdown("Fruit", State.RefreshFruitOptions(), "Bone Blossom")
 State.FruitPriceInput = State.FruitFilterSec:AddInput("Price", "11")
 State.FruitMinInput = State.FruitFilterSec:AddInput("Min KG/Size", "0")
 State.FruitMaxInput = State.FruitFilterSec:AddInput("Max KG/Size", "999")
@@ -6670,7 +6712,7 @@ State.FruitFilterSec:AddButton("+ Add Fruit Filter", function()
     end
     if State.BuildFruitCandidates then
         local ok, scan = pcall(State.BuildFruitCandidates)
-        if ok then State.RefreshFruitLog(scan) end
+        if ok then State.RefreshFruitOptions(scan); State.RefreshFruitLog(scan) end
     end
 end)
 
