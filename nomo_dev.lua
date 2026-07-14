@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V11.2 DEV MINI NEWLINES"
+local VERSION = "V11.3 DEV LAZY UI CONFIG"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -4981,7 +4981,7 @@ local function refreshPills()
     local minimized = State.UiMinimized == true
     local pillInterval = minimized and 10 or 1
     local cloneInterval = minimized and 10 or 2
-    local dashboardInterval = minimized and 20 or 2
+    local dashboardInterval = minimized and 30 or 10
 
     if State.UiRefreshDirty or now - (State.LastPillRefreshAt or 0) >= pillInterval then
         State.LastPillRefreshAt = now
@@ -5496,6 +5496,7 @@ State.OpenFilterEditPopup = function(index, managerOverlay)
 end
 
 State.OpenFilterManager = function()
+    State.LoadLocalFilters()
     local overlay = make("Frame", {
         Size = UDim2.new(1, 0, 1, 0),
         BackgroundColor3 = Color3.new(0, 0, 0),
@@ -6424,6 +6425,7 @@ State.OpenSniperWatchEditPopup = function(name, managerOverlay)
 end
 
 State.OpenSniperWatchlistManager = function()
+    State.ReloadSniperConfig()
     local watches = State.GetSortedSniperWatches()
     local overlay = make("Frame", {
         Size = UDim2.new(1, 0, 1, 0),
