@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V11.8 DEV STARTUP WATCHDOG"
+local VERSION = "V11.7 DEV BOOT SAFE"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -153,8 +153,6 @@ end
 CFG.Performance.AntiAfk = CFG.Performance.AntiAfk ~= false
 CFG.Performance.ClearLoadingScreens = CFG.Performance.ClearLoadingScreens ~= false
 CFG.Performance.ConsoleLogs = CFG.Performance.ConsoleLogs == true
-CFG.Performance.StartupWatchdog = CFG.Performance.StartupWatchdog ~= false
-CFG.Performance.StartupWatchdogSeconds = tonumber(CFG.Performance.StartupWatchdogSeconds) or 180
 CFG.Sniper.BuyCooldown = 0
 CFG.Sniper.WeightMode = CFG.Sniper.WeightMode or "Base"
 CFG.Sniper.MaxMatchesPerPet = 0
@@ -280,7 +278,6 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local UserInputService = game:GetService("UserInputService")
-State.TeleportService = game:GetService("TeleportService")
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -430,28 +427,6 @@ local function log(...)
             end
         end)
     end
-end
-
-State.RequestRejoin = function(reason)
-    if State.RejoinRequested then return false end
-    State.RejoinRequested = true
-    State.Running = false
-    log("Rejoin requested", tostring(reason or "unknown"), "place", tostring(game.PlaceId), "job", tostring(game.JobId))
-
-    task.spawn(function()
-        task.wait(3)
-        local ok, err = pcall(function()
-            State.TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
-        end)
-        if not ok then
-            log("Rejoin same server failed", tostring(err), "trying place teleport")
-            pcall(function()
-                State.TeleportService:Teleport(game.PlaceId, LocalPlayer)
-            end)
-        end
-    end)
-
-    return true
 end
 
 local function dlog(...)
@@ -7932,48 +7907,6 @@ task.spawn(function()
 
     getgenv()[runningKey] = nil
     log("Auto Smart Rebuild gave up", "will retry next reload/server")
-end)
-
---// Redfinger/client startup watchdog.
---// Some clones can half-load the world/render while scripts keep running. If no usable booth
---// state appears after a conservative delay, reload the clone once instead of idling forever.
-task.spawn(function()
-    if not CFG.Performance.StartupWatchdog or not CFG.Booth.AutoClaim then return end
-    local watchdogKey = "__NOMO_MARKET_STARTUP_WATCHDOG_" .. tostring(LocalPlayer.UserId) .. "_" .. tostring(game.JobId)
-    if getgenv()[watchdogKey] then return end
-
-    local delaySeconds = math.max(60, tonumber(CFG.Performance.StartupWatchdogSeconds) or 180)
-    task.wait(delaySeconds)
-    if not State.Running or State.RejoinRequested then return end
-
-    local healthy = false
-    if State.LastBooth and State.LastBooth.Status == "MINE" then
-        healthy = true
-    end
-
-    if not healthy then
-        local okBooth, booth, status = pcall(findBestBooth, true)
-        if okBooth and status == "MINE" then
-            State.LastBooth = booth
-            healthy = true
-        end
-    end
-
-    if not healthy then
-        local okListings, listings = pcall(getMyListings, true)
-        if okListings and type(listings) == "table" and #listings > 0 then
-            healthy = true
-        end
-    end
-
-    if healthy then
-        log("Startup watchdog OK", "booth", tostring(State.LastBooth and State.LastBooth.Status or "active"))
-        return
-    end
-
-    getgenv()[watchdogKey] = true
-    log("Startup watchdog", "no usable booth after", tostring(delaySeconds) .. "s", "rejoining once")
-    State.RequestRejoin("startup watchdog no booth")
 end)
 
 --// Main background loops
