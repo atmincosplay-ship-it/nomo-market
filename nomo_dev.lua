@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V11.3 DEV LAZY UI CONFIG"
+local VERSION = "V11.4 DEV FRUIT UI CLEANUP"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6760,26 +6760,39 @@ end)
 State.RefreshFruitLog = function(scan)
     scan = scan or State.LastFruitScan
     local lines = {
-        "Enabled: " .. tostring(CFG.Fruit.Enabled == true),
+        string.format("Fruit: %s | Filters %s | Inventory %s | Ready %s",
+            CFG.Fruit.Enabled == true and "ON" or "OFF",
+            tostring(type(scan) == "table" and #(scan.Filters or {}) or 0),
+            tostring(type(scan) == "table" and #(scan.Fruits or {}) or 0),
+            tostring(type(scan) == "table" and #(scan.Candidates or {}) or 0)
+        ),
         "Path: " .. tostring(State.GetFruitFilterPath()),
     }
     if type(scan) == "table" then
-        table.insert(lines, "Filters: " .. tostring(#(scan.Filters or {})))
-        table.insert(lines, "Fruits: " .. tostring(#(scan.Fruits or {})))
-        table.insert(lines, "Candidates: " .. tostring(#(scan.Candidates or {})))
         table.insert(lines, "------------------------------")
-        for i, c in ipairs(scan.Candidates or {}) do
-            if i > 10 then table.insert(lines, "... +" .. tostring(#scan.Candidates - 10) .. " more") break end
-            local fruit = c.Fruit or {}
-            local filter = c.Filter or {}
-            table.insert(lines, string.format("%02d. %s | Price %s | KG %s | Variant %s", i, tostring(fruit.Name or "?"), tostring(filter.Price or "?"), fmtKg(fruit.Weight), tostring(fruit.Variant or "Normal")))
+        if #(scan.Candidates or {}) > 0 then
+            table.insert(lines, "Ready to list:")
+            for i, c in ipairs(scan.Candidates or {}) do
+                if i > 6 then table.insert(lines, "... +" .. tostring(#scan.Candidates - 6) .. " more ready") break end
+                local fruit = c.Fruit or {}
+                local filter = c.Filter or {}
+                table.insert(lines, string.format("%02d. %s | %s KG | %s tokens", i, tostring(fruit.Name or "?"), fmtKg(fruit.Weight), tostring(filter.Price or "?")))
+            end
+        else
+            table.insert(lines, "Ready to list: 0")
         end
-        if #(scan.Candidates or {}) == 0 and #(scan.Skipped or {}) > 0 then
-            table.insert(lines, "Skipped sample:")
-            for i, s in ipairs(scan.Skipped or {}) do
-                if i > 8 then break end
-                local fruit = s.Fruit or {}
-                table.insert(lines, string.format("%02d. %s | %s", i, tostring(fruit.Name or "?"), tostring(s.Reason or "?")))
+
+        local reasonCounts, reasonOrder = {}, {}
+        for _, s in ipairs(scan.Skipped or {}) do
+            local reason = tostring(s.Reason or "unknown")
+            if not reasonCounts[reason] then table.insert(reasonOrder, reason) end
+            reasonCounts[reason] = (reasonCounts[reason] or 0) + 1
+        end
+        if #reasonOrder > 0 then
+            table.insert(lines, "Skipped:")
+            for i, reason in ipairs(reasonOrder) do
+                if i > 5 then table.insert(lines, "... +" .. tostring(#reasonOrder - 5) .. " more reason(s)") break end
+                table.insert(lines, string.format("- %s: %s", reason, tostring(reasonCounts[reason] or 0)))
             end
         end
     else
@@ -7277,7 +7290,7 @@ State.OpenFruitFilterManager = function()
     make("TextLabel", {
         Size = UDim2.new(1, -74, 0, 26),
         BackgroundTransparency = 1,
-        Text = "Manage Fruit Filters (" .. tostring(#filters) .. ")",
+        Text = "Fruit Filters (" .. tostring(#filters) .. ")",
         TextColor3 = T.Text,
         Font = Enum.Font.GothamBold,
         TextSize = 14,
@@ -7344,7 +7357,7 @@ State.OpenFruitFilterManager = function()
             Position = UDim2.fromOffset(8, 24),
             BackgroundTransparency = 1,
             RichText = true,
-            Text = string.format('Variant <font color="#%s">%s</font> | <font color="#%s">Max %s</font> per filter',
+            Text = string.format('Var <font color="#%s">%s</font> | <font color="#%s">Cap %s</font>',
                 T.Text:ToHex(),
                 tostring(f.Variant or "Any"):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"),
                 T.Green:ToHex(),
