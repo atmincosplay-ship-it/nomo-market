@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V12.6 DEV FIND SELLER HOOK"
+local VERSION = "V12.7 DEV FIND SELLER DASH"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -5180,6 +5180,24 @@ State.DashSniperNavSec:AddButton("Manage", function()
         win:SelectPage("Sniper")
     end
 end, "outline")
+State.DashSniperNavSec:AddButton("Find Seller", function()
+    local petName = ""
+    if State.SniperPetInput and State.SniperPetInput.Get then
+        petName = trim(State.SniperPetInput:Get())
+    end
+    if petName == "" and CFG.Sniper.Watchlist then
+        for name in pairs(CFG.Sniper.Watchlist) do
+            petName = tostring(name)
+            break
+        end
+    end
+    log("Dashboard Find Seller", tostring(petName))
+    if petName ~= "" then
+        State.FindIndexSellerForPet(petName)
+    else
+        win:SelectPage("Sniper")
+    end
+end, "outline")
 
 State.DashFruitSec:AddButton("Manage", function()
     if State.OpenFruitFilterManager then
@@ -6411,6 +6429,8 @@ end
 
 State.FindIndexSellerForPet = function(petName)
     petName = trim(petName)
+    print("[NOMO FIND SELLER]", petName)
+    log("Find Seller called", tostring(petName))
     if petName == "" then
         log("Find Seller blocked", "empty pet")
         return false
