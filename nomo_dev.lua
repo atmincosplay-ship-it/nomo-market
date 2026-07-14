@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V13.0 DEV BOOTH CLAIM ROTATE"
+local VERSION = "V13.1 DEV FIND SELLER RESULT"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6496,11 +6496,11 @@ State.FindIndexSellerForPet = function(petName)
     if type(State.FindSellerController) == "function" then
         log("Find Seller prompt fn", tostring(petName))
         local okPrompt, promptResult = pcall(State.FindSellerController, "Pet", payload)
-        if okPrompt then
+        if okPrompt and promptResult ~= false and promptResult ~= nil then
             log("Find Seller prompt fn opened", tostring(petName), tostring(promptResult))
             return true
         end
-        log("Find Seller prompt fn failed", tostring(promptResult), "falling back")
+        log("Find Seller prompt fn result", tostring(promptResult), "falling back")
     end
     if State.FindSellerController and type(State.FindSellerController.Prompt) == "function" then
         log("Find Seller prompt", tostring(petName))
@@ -6508,11 +6508,11 @@ State.FindIndexSellerForPet = function(petName)
         if not okPrompt then
             okPrompt, promptResult = pcall(State.FindSellerController.Prompt, State.FindSellerController, "Pet", payload)
         end
-        if okPrompt then
+        if okPrompt and promptResult ~= false and promptResult ~= nil then
             log("Find Seller prompt opened", tostring(petName), tostring(promptResult))
             return true
         end
-        log("Find Seller prompt failed", tostring(promptResult), "falling back remote")
+        log("Find Seller prompt result", tostring(promptResult), "falling back remote")
     end
 
     local tradeEvents = GameEvents:FindFirstChild("TradeEvents")
@@ -6523,6 +6523,34 @@ State.FindIndexSellerForPet = function(petName)
         return false
     end
 
+    local function summarizeFindResult(value)
+        local kind = type(value)
+        if kind ~= "table" then
+            return kind .. ":" .. tostring(value)
+        end
+        local parts = {}
+        local count = 0
+        for k, v in pairs(value) do
+            count += 1
+            if #parts < 8 then
+                local desc = type(v)
+                if type(v) ~= "table" then
+                    desc = tostring(v)
+                else
+                    local sub = {}
+                    for kk, vv in pairs(v) do
+                        if #sub < 4 then
+                            table.insert(sub, tostring(kk) .. "=" .. tostring(vv))
+                        end
+                    end
+                    desc = "{" .. table.concat(sub, ",") .. "}"
+                end
+                table.insert(parts, tostring(k) .. "=" .. desc)
+            end
+        end
+        return "table#" .. tostring(count) .. " " .. table.concat(parts, " | ")
+    end
+
     log("Find Seller", tostring(petName), "using in-game index")
     local ok, result = pcall(function()
         return findSellers:InvokeServer("Pet", payload)
@@ -6531,8 +6559,8 @@ State.FindIndexSellerForPet = function(petName)
         log("Find Seller error", tostring(result))
         return false
     end
-    log("Find Seller sent", tostring(petName), tostring(result))
-    return true
+    log("Find Seller result", tostring(petName), summarizeFindResult(result))
+    return result ~= false and result ~= nil
 end
 getgenv().NOMO_FIND_SELLER = State.FindIndexSellerForPet
 _G.NOMO_FIND_SELLER = State.FindIndexSellerForPet
