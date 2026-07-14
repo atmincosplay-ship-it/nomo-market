@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V12.3 DEV FIND SELLER PROMPT"
+local VERSION = "V12.4 DEV FIND SELLER DIAG"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6435,9 +6435,33 @@ State.FindIndexSellerForPet = function(petName)
     }
 
     if not State.FindSellerController then
-        pcall(function()
+        local okRequire, requireResult = pcall(function()
             State.FindSellerController = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("TradeControllers"):WaitForChild("TradeFindSellerController"))
         end)
+        if not okRequire then
+            log("Find Seller controller require failed", tostring(requireResult))
+        end
+    end
+    if State.FindSellerController then
+        local shape = type(State.FindSellerController)
+        if shape == "table" then
+            local keys = {}
+            for k in pairs(State.FindSellerController) do
+                if #keys < 5 then table.insert(keys, tostring(k)) end
+            end
+            log("Find Seller controller", shape, table.concat(keys, ","))
+        else
+            log("Find Seller controller", shape)
+        end
+    end
+    if type(State.FindSellerController) == "function" then
+        log("Find Seller prompt fn", tostring(petName))
+        local okPrompt, promptResult = pcall(State.FindSellerController, "Pet", payload)
+        if okPrompt then
+            log("Find Seller prompt fn opened", tostring(petName), tostring(promptResult))
+            return true
+        end
+        log("Find Seller prompt fn failed", tostring(promptResult), "falling back")
     end
     if State.FindSellerController and type(State.FindSellerController.Prompt) == "function" then
         log("Find Seller prompt", tostring(petName))
