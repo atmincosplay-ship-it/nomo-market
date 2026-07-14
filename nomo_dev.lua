@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V11.6 DEV FRUIT CAP HOTFIX"
+local VERSION = "V11.7 DEV BOOT SAFE"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -4891,7 +4891,6 @@ State.SetBootStatus = function(step)
             win.Pills.Status:Set(State.LastBootStep, T.Accent)
         end)
     end
-    print("[NOMO BOOT]", State.LastBootStep)
 end
 
 State.SetBootStatus("window ready")
