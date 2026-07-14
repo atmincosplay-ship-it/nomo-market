@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V12.9 DEV BOOTH CLAIM FALLBACK"
+local VERSION = "V13.0 DEV BOOTH CLAIM ROTATE"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -1237,29 +1237,44 @@ local function equipSkin()
 end
 
 local function claimBestFreeBooth()
-    local target, status = findBestBooth(true)
-    if not target then
-        local fallbackTarget, fallbackStatus = findBestBooth(true, 999999)
-        if fallbackTarget and (fallbackStatus == "FREE" or fallbackStatus == "MINE") then
-            log("Booth distance fallback", tostring(CFG.Booth.MaxMiddleDistance), "->", tostring(math.floor(fallbackTarget.MiddleDistance or 0)), tostring(fallbackStatus))
-            target, status = fallbackTarget, fallbackStatus
-        else
-            log("No FREE/MINE booth in distance", tostring(CFG.Booth.MaxMiddleDistance))
-            return false
+    local maxDist = tonumber(CFG.Booth.MaxMiddleDistance) or 85
+    local candidates = {}
+    local seen = {}
+
+    local function addCandidates(limit, label)
+        for _, item in ipairs(getBoothSnapshot(true)) do
+            if (item.Status == "MINE" or item.Status == "FREE") and not seen[item.Id] then
+                if (item.MiddleDistance or 999999) <= limit then
+                    seen[item.Id] = true
+                    item.ClaimRangeLabel = label
+                    table.insert(candidates, item)
+                end
+            end
         end
     end
 
-    if status == "MINE" then
-        log("Already own booth", target.Id, "dist", math.floor(target.MiddleDistance or 0))
-        State.LastBooth = target
-        getgenv().NOMO_BOOTH_LAST_CLAIMED = target
-        return true
+    addCandidates(maxDist, "normal")
+    if #candidates == 0 then
+        addCandidates(999999, "fallback")
     end
 
-    local attempts = math.max(1, toInt(CFG.Booth.ClaimVerifyAttempts) or 6)
+    if #candidates == 0 then
+        log("No FREE/MINE booth in distance", tostring(CFG.Booth.MaxMiddleDistance))
+        return false
+    end
+
+    for _, target in ipairs(candidates) do
+        if target.Status == "MINE" then
+            log("Already own booth", target.Id, "dist", math.floor(target.MiddleDistance or 0))
+            State.LastBooth = target
+            getgenv().NOMO_BOOTH_LAST_CLAIMED = target
+            return true
+        end
+    end
+
     local delay = tonumber(CFG.Booth.ClaimVerifyDelay) or 0.35
 
-    local function verifyClaim(label)
+    local function verifyTarget(target, label)
         task.wait(delay)
         for _, item in ipairs(getBoothSnapshot(true)) do
             if item.Id == target.Id then
@@ -1269,13 +1284,14 @@ local function claimBestFreeBooth()
                     getgenv().NOMO_BOOTH_LAST_CLAIMED = item
                     return true
                 end
+                return false
             end
         end
         return false
     end
 
-    local function sendClaim(arg, label)
-        log("Claiming FREE booth", target.Id, "dist", math.floor(target.MiddleDistance or 0), tostring(label))
+    local function sendClaim(target, arg, label)
+        log("Claiming FREE booth", target.Id, "dist", math.floor(target.MiddleDistance or 0), tostring(target.ClaimRangeLabel or ""), tostring(label))
         local ok, err = pcall(function()
             ClaimBooth:FireServer(arg)
         end)
@@ -1283,30 +1299,27 @@ local function claimBestFreeBooth()
             log("ClaimBooth failed", tostring(label), tostring(err))
             return false
         end
-        return verifyClaim(label)
+        return verifyTarget(target, label)
     end
 
-    if sendClaim(target.Instance, "instance") then
-        equipSkin()
-        return true
-    end
-
-    if sendClaim(target.Id, "id") then
-        equipSkin()
-        return true
-    end
-
-    for attempt = 1, attempts do
-        if verifyClaim("retry " .. tostring(attempt)) then
-            equipSkin()
-            return true
+    local limit = math.min(#candidates, 8)
+    for i = 1, limit do
+        local target = candidates[i]
+        if target.Status == "FREE" then
+            if sendClaim(target, target.Instance, "instance") then
+                equipSkin()
+                return true
+            end
+            if sendClaim(target, target.Id, "id") then
+                equipSkin()
+                return true
+            end
         end
     end
 
-    log("Claim not verified", target.Id)
+    log("Claim not verified", tostring(limit) .. "/" .. tostring(#candidates), "candidate(s)")
     return false
 end
-
 local function hasOwnBooth(force)
     local target, status = findBestBooth(force)
     if status == "MINE" and target then
