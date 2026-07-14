@@ -835,7 +835,22 @@ local function loadGamePetList()
 end
 
 local function getPetList()
-    if #State.PetList == 0 then loadGamePetList() end
+    if #State.PetList == 0 and not State.PetListLoading then
+        State.PetListLoading = true
+        task.spawn(function()
+            local ok, result = pcall(loadGamePetList)
+            if not ok then
+                log("PetList background load failed", tostring(result))
+            end
+            State.PetListLoading = false
+            if State.PetNameInput and State.PetNameInput.SetOptions and type(State.PetList) == "table" then
+                pcall(function() State.PetNameInput:SetOptions(State.PetList) end)
+            end
+            if State.SniperPetInput and State.SniperPetInput.SetOptions and type(State.PetList) == "table" then
+                pcall(function() State.SniperPetInput:SetOptions(State.PetList) end)
+            end
+        end)
+    end
     return State.PetList
 end
 
@@ -919,7 +934,21 @@ end
 
 local function getMutationList()
     if type(State.MutationList) ~= "table" or #State.MutationList == 0 then
-        return loadGameMutationList()
+        if not State.MutationListLoading then
+            State.MutationListLoading = true
+            task.spawn(function()
+                local ok, result = pcall(loadGameMutationList)
+                if not ok then
+                    log("MutationList background load failed", tostring(result))
+                    State.MutationList = {"Any", "Normal", "Mutated Only"}
+                end
+                State.MutationListLoading = false
+                if State.MutationInput and State.MutationInput.SetOptions and type(State.MutationList) == "table" then
+                    pcall(function() State.MutationInput:SetOptions(State.MutationList) end)
+                end
+            end)
+        end
+        return {"Any", "Normal", "Mutated Only"}
     end
     return State.MutationList
 end
@@ -5364,9 +5393,11 @@ filterSec:AddDropdown("Listing Weight Mode", {"Base", "Visual"}, CFG.Seller.Weig
     log("ListingWeightMode", CFG.Seller.WeightMode)
 end)
 
-local petInput = filterSec:AddSearchDropdown("Pet", getPetList(), "Ankylosaurus")
+local petInput = filterSec:AddSearchDropdown("Pet", State.PetList or {}, "Ankylosaurus")
+State.PetNameInput = petInput
 local priceInput = filterSec:AddInput("Price", "111")
-local mutationInput = filterSec:AddSearchDropdown("Mutation", getMutationList(), "Any")
+local mutationInput = filterSec:AddSearchDropdown("Mutation", State.MutationList or {"Any", "Normal", "Mutated Only"}, "Any")
+State.MutationInput = mutationInput
 local minKgInput = filterRangeSec:AddInput("Min Base KG", "0")
 local maxKgInput = filterRangeSec:AddInput("Max Base KG", "3")
 local minAgeInput = filterRangeSec:AddInput("Min Age", "1")
@@ -6301,7 +6332,8 @@ State.SniperWatchSec:AddToggle("Rescan Before Buy", CFG.Sniper.RescanBeforeBuy, 
     log("Sniper RescanBeforeBuy", tostring(v))
 end)
 
-local sPet = State.SniperWatchSec:AddSearchDropdown("Pet", getPetList(), "Red Fox")
+local sPet = State.SniperWatchSec:AddSearchDropdown("Pet", State.PetList or {}, "Red Fox")
+State.SniperPetInput = sPet
 local sMax = State.SniperWatchSec:AddInput("Max Price", "6")
 State.SniperWeightModeInput = State.SniperLimitSec:AddDropdown("Weight Mode", {"Base", "Visual"}, CFG.Sniper.WeightMode or "Base", function(v)
     CFG.Sniper.WeightMode = normalizeSniperWeightMode(v)
@@ -7078,10 +7110,7 @@ local function bootStep(name, fn)
     return nil
 end
 
-bootStep("PetList", loadGamePetList)
-bootStep("MutationList", loadGameMutationList)
 bootStep("ListingFilters", reloadFilters)
-bootStep("SniperFilters", State.ReloadSniperConfig)
 bootStep("WarnFilter", installWarnFilter)
 
 log("Started", VERSION .. " PRIVATE UI")
