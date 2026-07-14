@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V10.1 DEV FRUIT DROPDOWN"
+local VERSION = "V10.2 DEV FRUIT INVENTORY SAFE"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -377,6 +377,17 @@ pcall(function()
     local petUtilities = petServices and petServices:WaitForChild("PetUtilities", 10)
     if petUtilities then
         PetUtilities = require(petUtilities)
+    end
+end)
+pcall(function()
+    State.FruitWeightCalculator = require(ReplicatedStorage:WaitForChild("Calculate_Weight", 20))
+end)
+
+pcall(function()
+    local dataFolder = ReplicatedStorage:WaitForChild("Data", 20)
+    local seedDataModule = dataFolder and dataFolder:WaitForChild("SeedData", 10)
+    if seedDataModule then
+        State.FruitSeedData = require(seedDataModule)
     end
 end)
 
@@ -6661,6 +6672,12 @@ State.RefreshFruitOptions = function(scan)
         end
     end
 
+    if type(State.FruitSeedData) == "table" then
+        for name in pairs(State.FruitSeedData) do
+            addName(name)
+        end
+    end
+
     if type(scan) == "table" then
         for _, fruit in ipairs(scan.Fruits or {}) do
             addName(fruit.Name)
@@ -6697,7 +6714,7 @@ State.FruitNameInput = State.FruitFilterSec:AddSearchDropdown("Fruit", State.Ref
 State.FruitPriceInput = State.FruitFilterSec:AddInput("Price", "11")
 State.FruitMinInput = State.FruitFilterSec:AddInput("Min KG/Size", "0")
 State.FruitMaxInput = State.FruitFilterSec:AddInput("Max KG/Size", "999")
-State.FruitMutInput = State.FruitFilterSec:AddInput("Mutation", "Any")
+State.FruitMutInput = State.FruitFilterSec:AddInput("Variant", "Any")
 State.FruitCapInput = State.FruitFilterSec:AddInput("Max Listed", "5")
 State.FruitFilterSec:AddButton("+ Add Fruit Filter", function()
     if State.AddFruitFilter then
@@ -6731,7 +6748,7 @@ State.RefreshFruitLog = function(scan)
             if i > 10 then table.insert(lines, "... +" .. tostring(#scan.Candidates - 10) .. " more") break end
             local fruit = c.Fruit or {}
             local filter = c.Filter or {}
-            table.insert(lines, string.format("%02d. %s | Price %s | KG/Size %s | Mut %s", i, tostring(fruit.Name or "?"), tostring(filter.Price or "?"), fmtKg(fruit.Weight), tostring(fruit.Mutation or "Normal")))
+            table.insert(lines, string.format("%02d. %s | Price %s | KG %s | Variant %s", i, tostring(fruit.Name or "?"), tostring(filter.Price or "?"), fmtKg(fruit.Weight), tostring(fruit.Variant or "Normal")))
         end
         if #(scan.Candidates or {}) == 0 and #(scan.Skipped or {}) > 0 then
             table.insert(lines, "Skipped sample:")
@@ -6742,7 +6759,7 @@ State.RefreshFruitLog = function(scan)
             end
         end
     else
-        table.insert(lines, "Press Scan Fruits to inspect current fruit tools.")
+        table.insert(lines, "Press Scan Fruits to inspect current inventory fruit.")
     end
     addLines(State.FruitLog, lines)
 end
@@ -7061,6 +7078,20 @@ local function saveFruitFilters()
     })
 end
 
+State.AddFruitFilter = function(fruit, price, minKg, maxKg, variant, cap)
+    State.FruitFilterData = normalizeFruitConfigData(State.FruitFilterData or readJson(State.GetFruitFilterPath()))
+    table.insert(State.FruitFilterData.Fruit, {
+        Enabled = true,
+        Fruit = tostring(fruit or ""),
+        Price = clampPrice(price) or 1,
+        MinWeight = toNumber(minKg) or 0,
+        MaxWeight = toNumber(maxKg),
+        Variant = tostring(variant or "Any"),
+        MaxListedFruit = toInt(cap) or 5,
+    })
+    saveFruitFilters()
+    log("Added fruit filter", tostring(fruit), "price", tostring(price), "saved=true")
+end
 local function getFruitFilters()
     reloadFruitFilters(false)
     local out = {}
@@ -7075,7 +7106,7 @@ local function getFruitFilters()
                     Price = clampPrice(row.Price or row.price or row.Tokens or row.tokens),
                     MinWeight = toNumber(row.MinWeight or row.minWeight or row.MinKG or row.minKG or row.minKg or row.MinSize or row.minSize),
                     MaxWeight = toNumber(row.MaxWeight or row.maxWeight or row.MaxKG or row.maxKG or row.maxKg or row.MaxSize or row.maxSize),
-                    Mutation = normalizeMutationConfig(row.Mutation or row.mutation or row.Variant or row.variant or "Any"),
+                    Variant = normalizeMutationConfig(row.Variant or row.variant or row.Mutation or row.mutation or "Any"),
                     MaxListedFruit = toInt(row.MaxListedFruit or row.maxListedFruit or row.MaxListedPet or row.maxListedPet or row.MaxListed or row.maxListed) or 0,
                     Raw = row,
                 })
@@ -7085,63 +7116,79 @@ local function getFruitFilters()
     return out
 end
 
-local function parseKgFromText(text)
-    text = tostring(text or "")
-    local n = text:match("([%d%.]+)%s*[Kk][Gg]")
-    return n and tonumber(n) or nil
-end
+local function calculateFruitWeight(itemData)
+    if type(itemData) ~= "table" then return nil end
+    local seed = itemData.Seed
+    local itemName = itemData.ItemName or itemData.Name
+    local multiplier = toNumber(itemData.WeightMultiplier) or 1
 
-local function getFruitToolInfo(tool)
-    if typeof(tool) ~= "Instance" or not tool:IsA("Tool") then return nil end
-    if tool:GetAttribute("HarvestedFruit") ~= true then return nil end
-
-    local id = tool:GetAttribute("Id") or tool:GetAttribute("UUID") or tool:GetAttribute("ItemId")
-    if id == nil or tostring(id) == "" then return nil end
-
-    local name = tool:GetAttribute("FruitName") or tool:GetAttribute("Fruit") or tool:GetAttribute("ItemName") or tool:GetAttribute("Name")
-    if name == nil or tostring(name) == "" then
-        name = tostring(tool.Name or ""):gsub("%s*%b[]", "")
+    if State.FruitWeightCalculator and type(State.FruitWeightCalculator.Calculate_Weight) == "function" then
+        local ok, base = pcall(State.FruitWeightCalculator.Calculate_Weight, seed, itemName)
+        if ok and tonumber(base) then
+            return (tonumber(base) or 0) * multiplier
+        end
+    elseif type(State.FruitWeightCalculator) == "function" then
+        local ok, base = pcall(State.FruitWeightCalculator, seed, itemName)
+        if ok and tonumber(base) then
+            return (tonumber(base) or 0) * multiplier
+        end
     end
-    name = trim(name)
-    if name == "" then return nil end
 
-    local weight = toNumber(tool:GetAttribute("Weight") or tool:GetAttribute("KG") or tool:GetAttribute("Kilo") or tool:GetAttribute("SizeMulti")) or parseKgFromText(tool.Name)
-    local mutation = tool:GetAttribute("Mutation") or tool:GetAttribute("Variant") or "Normal"
-
-    return {
-        UUID = tostring(id),
-        Type = tostring(CFG.Fruit.ItemType or "Holdable"),
-        Name = tostring(name),
-        NameNorm = norm(name),
-        Weight = weight,
-        Mutation = tostring(mutation or "Normal"),
-        Tool = tool,
-    }
+    return toNumber(itemData.Weight or itemData.KG or itemData.Kilo or itemData.SizeMulti or itemData.WeightMultiplier)
 end
 
-local function getOwnFruitsFromTools()
-    local listed = {}
+local function getFruitMutationText(itemData)
+    if type(itemData) ~= "table" then return "Normal" end
+    local mutation = itemData.MutationString or itemData.Mutation or itemData.Mutations or ""
+    mutation = tostring(mutation or "")
+    if mutation == "" then mutation = "Normal" end
+    return mutation
+end
+
+local function getOwnFruitsFromInventoryData()
     local okData, data = pcall(function() return DataService:GetData() end)
-    if okData and type(data) == "table" and data.TradeData and type(data.TradeData.Listings) == "table" then
+    if not okData or type(data) ~= "table" then
+        log("Fruit inventory data failed", tostring(data))
+        return {}
+    end
+
+    local listed = {}
+    if data.TradeData and type(data.TradeData.Listings) == "table" then
         for _, l in pairs(data.TradeData.Listings) do
             if type(l) == "table" and l.ItemId then listed[tostring(l.ItemId)] = true end
         end
     end
 
     local out = {}
-    local function scan(container)
-        if typeof(container) ~= "Instance" then return end
-        for _, child in ipairs(container:GetChildren()) do
-            local info = getFruitToolInfo(child)
-            if info then
-                info.AlreadyListed = listed[tostring(info.UUID)] == true
-                table.insert(out, info)
+    local inventory = data.InventoryData
+    if type(inventory) ~= "table" then return out end
+
+    for id, item in pairs(inventory) do
+        if type(item) == "table" and tostring(item.ItemType or "") == tostring(CFG.Fruit.ItemType or "Holdable") then
+            local itemData = item.ItemData or {}
+            local name = itemData.ItemName or itemData.Name
+            if type(name) == "string" and name ~= "" then
+                local tradeLock = data.TradeData and data.TradeData.TradeLocks and data.TradeData.TradeLocks[item.ItemType] and data.TradeData.TradeLocks[item.ItemType][id]
+                local variant = tostring(itemData.Variant or "Normal")
+                if variant == "" then variant = "Normal" end
+                table.insert(out, {
+                    UUID = tostring(id),
+                    Type = tostring(item.ItemType or "Holdable"),
+                    Name = tostring(name),
+                    NameNorm = norm(name),
+                    Weight = calculateFruitWeight(itemData),
+                    Variant = variant,
+                    Mutation = getFruitMutationText(itemData),
+                    Favorited = itemData.IsFavorite == true,
+                    Locked = tradeLock ~= nil,
+                    AlreadyListed = listed[tostring(id)] == true,
+                    Raw = item,
+                    ItemData = itemData,
+                })
             end
         end
     end
 
-    scan(LocalPlayer and LocalPlayer:FindFirstChildOfClass("Backpack"))
-    scan(LocalPlayer and LocalPlayer.Character)
     table.sort(out, function(a, b)
         if a.NameNorm ~= b.NameNorm then return a.NameNorm < b.NameNorm end
         return (a.Weight or 999999) < (b.Weight or 999999)
@@ -7149,25 +7196,24 @@ local function getOwnFruitsFromTools()
     State.FruitInventoryCache = out
     return out
 end
-
 local function fruitMatchesFilter(fruit, f)
     if not fruit or not f then return false, "missing" end
     if fruit.NameNorm ~= f.FruitNorm then return false, "name" end
     if f.MinWeight ~= nil and (fruit.Weight == nil or fruit.Weight < f.MinWeight) then return false, "min kg" end
     if f.MaxWeight ~= nil and (fruit.Weight == nil or fruit.Weight > f.MaxWeight) then return false, "max kg" end
-    if not traitWantedAny(f.Mutation) and norm(fruit.Mutation) ~= norm(f.Mutation) then return false, "mutation" end
+    if not traitWantedAny(f.Variant) and norm(fruit.Variant) ~= norm(f.Variant) then return false, "variant" end
     return true
 end
 
 local function listingToPseudoFruit(l)
     local item = l and l.Item or {}
-    local name = item.FruitName or item.Fruit or item.ItemName or item.Name or l.PetType or "Unknown"
+    local name = item.ItemName or item.Name or item.FruitName or item.Fruit or l.PetType or "Unknown"
     return {
         UUID = tostring(l and l.ItemId or ""),
         Name = tostring(name),
         NameNorm = norm(name),
         Weight = toNumber(item.Weight or item.KG or item.Kilo or item.SizeMulti),
-        Mutation = tostring(item.Mutation or item.Variant or "Normal"),
+        Variant = tostring(item.Variant or item.Mutation or "Normal"),
     }
 end
 
@@ -7195,7 +7241,7 @@ local function countMyGoodFruitListingsByFilter(filters, myListings)
     for _, l in ipairs(myListings or getMyListings()) do
         local f = findFruitFilterForListing(l, filters, true)
         if f then
-            local key = tostring(f.FruitNorm) .. "|" .. tostring(f.Price) .. "|" .. tostring(f.MinWeight) .. "|" .. tostring(f.MaxWeight) .. "|" .. tostring(f.Mutation)
+            local key = tostring(f.FruitNorm) .. "|" .. tostring(f.Price) .. "|" .. tostring(f.MinWeight) .. "|" .. tostring(f.MaxWeight) .. "|" .. tostring(f.Variant)
             counts[key] = (counts[key] or 0) + 1
         end
     end
@@ -7203,7 +7249,7 @@ local function countMyGoodFruitListingsByFilter(filters, myListings)
 end
 
 local function buildFruitCandidates()
-    local fruits = getOwnFruitsFromTools()
+    local fruits = getOwnFruitsFromInventoryData()
     local filters = getFruitFilters()
     local myListings = getMyListings()
     local alreadyListedByFilter = countMyGoodFruitListingsByFilter(filters, myListings)
@@ -7213,7 +7259,11 @@ local function buildFruitCandidates()
 
     for _, fruit in ipairs(fruits) do
         local reason, matched = nil, nil
-        if fruit.AlreadyListed then
+        if fruit.Favorited then
+            reason = "favorited"
+        elseif fruit.Locked then
+            reason = "trade locked"
+        elseif fruit.AlreadyListed then
             reason = "already listed"
         else
             for _, f in ipairs(filters) do
@@ -7228,7 +7278,7 @@ local function buildFruitCandidates()
         if matched and not reason then
             local boothCap = tonumber(CFG.Seller.BoothCap) or 50
             local remainingBoothSlots = math.max(0, boothCap - currentBoothListings)
-            local key = tostring(matched.FruitNorm) .. "|" .. tostring(matched.Price) .. "|" .. tostring(matched.MinWeight) .. "|" .. tostring(matched.MaxWeight) .. "|" .. tostring(matched.Mutation)
+            local key = tostring(matched.FruitNorm) .. "|" .. tostring(matched.Price) .. "|" .. tostring(matched.MinWeight) .. "|" .. tostring(matched.MaxWeight) .. "|" .. tostring(matched.Variant)
             local maxListed = tonumber(matched.MaxListedFruit) or 0
             local currentListed = alreadyListedByFilter[key] or 0
             local chosen = chosenFilter[key] or 0
@@ -7262,12 +7312,14 @@ local function verifyFruitListingAfterList(fruit, price, f)
         task.wait(delay)
         local listing = findMyListingByItemAndPrice(targetId, targetPrice, true, true)
         if listing then
-            local matched = findFruitFilterForListing(listing, {f}, true)
-            if not matched then
-                log("UNSAFE fruit listing verified mismatch, removing", tostring(listing.PetType), "price", tostring(listing.Price), "uuid", tostring(listing.ListingUUID))
+            local pseudo = listingToPseudoFruit(listing)
+            local listingPrice = clampPrice(listing.Price)
+            local filterPrice = clampPrice(f and f.Price)
+            if tostring(listing.ItemType or "") ~= tostring(CFG.Fruit.ItemType or "Holdable") or pseudo.NameNorm ~= tostring(f and f.FruitNorm or "") or not listingPrice or not filterPrice or listingPrice ~= filterPrice then
+                log("UNSAFE fruit listing verified mismatch, removing", tostring(pseudo.Name), "price", tostring(listing.Price), "uuid", tostring(listing.ListingUUID))
                 removeListingUUID(listing.ListingUUID)
                 clearPendingList(targetId)
-                return false, "verified fruit listing failed exact filter check"
+                return false, "verified fruit listing failed exact id/name/price check"
             end
             clearPendingList(targetId)
             return true, listing
