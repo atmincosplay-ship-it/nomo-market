@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V11.5 DEV FRUIT GLOBAL CAP"
+local VERSION = "V11.6 DEV FRUIT CAP HOTFIX"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -121,7 +121,7 @@ CFG.Fruit.Enabled = CFG.Fruit.Enabled == true
 CFG.Fruit.AutoList = CFG.Fruit.AutoList == true
 CFG.Fruit.RequireExactName = CFG.Fruit.RequireExactName ~= false
 CFG.Fruit.ItemType = tostring(CFG.Fruit.ItemType or "Holdable")
-CFG.Fruit.MaxListed = math.max(0, toInt(CFG.Fruit.MaxListed or CFG.Fruit.MaxListedFruit or CFG.Fruit.MaxFruitListings) or 10)
+CFG.Fruit.MaxListed = math.max(0, math.floor(tonumber(CFG.Fruit.MaxListed or CFG.Fruit.MaxListedFruit or CFG.Fruit.MaxFruitListings) or 10))
 CFG.Listings.RemoveCooldown = CFG.Listings.RemoveCooldown or 1.2
 CFG.Listings.RemoveAllMax = CFG.Listings.RemoveAllMax or 50
 CFG.Listings.VerifyRemoveDelay = CFG.Listings.VerifyRemoveDelay or 0.45
@@ -719,7 +719,7 @@ State.LoadRuntimeSettings = function()
     if type(data.Fruit) == "table" then
         if data.Fruit.Enabled ~= nil then CFG.Fruit.Enabled = data.Fruit.Enabled == true end
         if data.Fruit.AutoList ~= nil then CFG.Fruit.AutoList = data.Fruit.AutoList == true end
-        if data.Fruit.MaxListed ~= nil then CFG.Fruit.MaxListed = math.max(0, toInt(data.Fruit.MaxListed) or CFG.Fruit.MaxListed or 10) end
+        if data.Fruit.MaxListed ~= nil then CFG.Fruit.MaxListed = math.max(0, math.floor(tonumber(data.Fruit.MaxListed) or CFG.Fruit.MaxListed or 10)) end
     end
     if type(data.Webhook) == "table" then
         if data.Webhook.Enabled ~= nil then CFG.Webhook.Enabled = data.Webhook.Enabled == true end
