@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V10.3 DEV NO LOCALIZE"
+local VERSION = "V10.4 DEV FRUIT MANAGER"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -3628,8 +3628,18 @@ local function make(class, props, parent)
 	local o = Instance.new(class)
 	pcall(function() o.AutoLocalize = false end)
 	for k, v in pairs(props) do o[k] = v end
+	pcall(function() o.AutoLocalize = false end)
 	o.Parent = parent
 	return o
+end
+State.DisableAutoLocalize = function(root)
+    pcall(function() root.AutoLocalize = false end)
+    pcall(function() root.RootLocalizationTable = nil end)
+    if typeof(root) == "Instance" then
+        for _, child in ipairs(root:GetDescendants()) do
+            pcall(function() child.AutoLocalize = false end)
+        end
+    end
 end
 local function corner(p, r) make("UICorner", {CornerRadius = UDim.new(0, r or 8)}, p) end
 local function stroke(p, c, tr) make("UIStroke", {Color = c or T.Border, Thickness = 1, Transparency = tr or 0}, p) end
@@ -3765,6 +3775,8 @@ function Library:CreateWindow(cfg)
 	cfg = cfg or {}
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "NomoHub"
+	pcall(function() gui.AutoLocalize = false end)
+	pcall(function() gui.RootLocalizationTable = nil end)
 	gui.ResetOnSpawn = false
 	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	gui.DescendantAdded:Connect(function(child)
@@ -4503,6 +4515,7 @@ function Library:CreateWindow(cfg)
 
                 openBtn.Activated:Connect(function()
                     overlay.Visible = true
+                    if State.DisableAutoLocalize then State.DisableAutoLocalize(overlay) end
                     searchBox.Text = ""
                     rebuildList()
                     task.defer(function()
@@ -4534,7 +4547,7 @@ function Library:CreateWindow(cfg)
                     Get = function() return current end,
                     Set = function(_, v) current = tostring(v or ""); refreshButton() end,
                     SetOptions = function(_, opts) options = opts or {}; if overlay.Visible then rebuildList() end end,
-                    Open = function() overlay.Visible = true; searchBox.Text = ""; rebuildList() end,
+                    Open = function() overlay.Visible = true; if State.DisableAutoLocalize then State.DisableAutoLocalize(overlay) end; searchBox.Text = ""; rebuildList() end,
                 }
             end
 
@@ -6736,6 +6749,13 @@ State.FruitFilterSec:AddButton("+ Add Fruit Filter", function()
         if ok then State.RefreshFruitOptions(scan); State.RefreshFruitLog(scan) end
     end
 end)
+State.FruitFilterSec:AddButton("Manage Fruit Filters", function()
+    if State.OpenFruitFilterManager then
+        State.OpenFruitFilterManager()
+    else
+        log("Fruit filter manager not ready")
+    end
+end, "outline")
 
 State.RefreshFruitLog = function(scan)
     scan = scan or State.LastFruitScan
@@ -7095,6 +7115,159 @@ State.AddFruitFilter = function(fruit, price, minKg, maxKg, variant, cap)
     })
     saveFruitFilters()
     log("Added fruit filter", tostring(fruit), "price", tostring(price), "saved=true")
+end
+State.OpenFruitFilterManager = function()
+    reloadFruitFilters(true)
+    local filters = getFruitFilters()
+    local overlay = make("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.35,
+        BorderSizePixel = 0,
+        ZIndex = 90,
+    }, win.Gui)
+    local modal = make("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.fromOffset(540, 300),
+        BackgroundColor3 = T.Card,
+        BorderSizePixel = 0,
+        ZIndex = 91,
+    }, overlay)
+    corner(modal, 10); stroke(modal); pad(modal, 10)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, -74, 0, 26),
+        BackgroundTransparency = 1,
+        Text = "Manage Fruit Filters (" .. tostring(#filters) .. ")",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 92,
+    }, modal)
+    local closeBtn = make("TextButton", {
+        Size = UDim2.fromOffset(64, 24),
+        Position = UDim2.new(1, -64, 0, 0),
+        BackgroundColor3 = T.Card2,
+        Text = "Done",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 92,
+    }, modal)
+    corner(closeBtn, 7); stroke(closeBtn)
+
+    local list = make("ScrollingFrame", {
+        Size = UDim2.new(1, 0, 1, -34),
+        Position = UDim2.fromOffset(0, 32),
+        BackgroundColor3 = T.Card2,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 4,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = UDim2.new(),
+        ZIndex = 92,
+    }, modal)
+    corner(list, 8); pad(list, 5); vlist(list, 4)
+    closeBtn.Activated:Connect(function() overlay:Destroy() end)
+
+    for i, f in ipairs(filters) do
+        local row = make("Frame", {
+            Size = UDim2.new(1, 0, 0, 46),
+            BackgroundColor3 = T.Card,
+            BorderSizePixel = 0,
+            ZIndex = 93,
+        }, list)
+        corner(row, 7); stroke(row)
+        make("TextLabel", {
+            Size = UDim2.new(1, -116, 0, 20),
+            Position = UDim2.fromOffset(8, 5),
+            BackgroundTransparency = 1,
+            RichText = true,
+            Text = string.format('%02d. %s | <font color="#%s">P %s</font> | <font color="#%s">KG %s-%s</font>',
+                i,
+                tostring(f.Fruit or "?"):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"),
+                T.Yellow:ToHex(),
+                tostring(f.Price or "?"),
+                T.Accent:ToHex(),
+                tostring(f.MinWeight or 0),
+                tostring(f.MaxWeight or "unli")
+            ),
+            TextColor3 = T.Text,
+            Font = Enum.Font.Code,
+            TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 94,
+        }, row)
+        make("TextLabel", {
+            Size = UDim2.new(1, -116, 0, 18),
+            Position = UDim2.fromOffset(8, 24),
+            BackgroundTransparency = 1,
+            RichText = true,
+            Text = string.format('Variant <font color="#%s">%s</font> | <font color="#%s">Max %s</font> per filter',
+                T.Text:ToHex(),
+                tostring(f.Variant or "Any"):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"),
+                T.Green:ToHex(),
+                tostring(f.MaxListedFruit or 5)
+            ),
+            TextColor3 = T.Sub,
+            Font = Enum.Font.Code,
+            TextSize = 10,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 94,
+        }, row)
+        local editBtn = make("TextButton", {
+            Size = UDim2.fromOffset(50, 24),
+            Position = UDim2.new(1, -104, 0.5, -12),
+            BackgroundColor3 = T.Card2,
+            Text = "Edit",
+            TextColor3 = T.Accent,
+            Font = Enum.Font.GothamBold,
+            TextSize = 11,
+            BorderSizePixel = 0,
+            ZIndex = 94,
+        }, row)
+        corner(editBtn, 6); stroke(editBtn)
+        local delBtn = make("TextButton", {
+            Size = UDim2.fromOffset(36, 24),
+            Position = UDim2.new(1, -44, 0.5, -12),
+            BackgroundColor3 = Color3.fromRGB(255, 72, 86),
+            Text = "X",
+            TextColor3 = Color3.new(1, 1, 1),
+            Font = Enum.Font.GothamBold,
+            TextSize = 12,
+            BorderSizePixel = 0,
+            ZIndex = 94,
+        }, row)
+        corner(delBtn, 6)
+        editBtn.Activated:Connect(function()
+            if State.FruitNameInput and State.FruitNameInput.Set then State.FruitNameInput:Set(f.Fruit or "") end
+            if State.FruitPriceInput and State.FruitPriceInput.Set then State.FruitPriceInput:Set(tostring(f.Price or "")) end
+            if State.FruitMinInput and State.FruitMinInput.Set then State.FruitMinInput:Set(tostring(f.MinWeight or 0)) end
+            if State.FruitMaxInput and State.FruitMaxInput.Set then State.FruitMaxInput:Set(tostring(f.MaxWeight or "")) end
+            if State.FruitMutInput and State.FruitMutInput.Set then State.FruitMutInput:Set(tostring(f.Variant or "Any")) end
+            if State.FruitCapInput and State.FruitCapInput.Set then State.FruitCapInput:Set(tostring(f.MaxListedFruit or 5)) end
+            overlay:Destroy()
+            log("Loaded fruit filter for edit", tostring(f.Fruit or "?"))
+        end)
+        delBtn.Activated:Connect(function()
+            State.OpenConfirmPopup("Delete Fruit Filter", "Remove this fruit filter from config?", "Delete", function()
+                reloadFruitFilters(true)
+                if State.FruitFilterData and State.FruitFilterData.Fruit then
+                    table.remove(State.FruitFilterData.Fruit, f.Row or i)
+                    saveFruitFilters()
+                    log("Deleted fruit filter", tostring(f.Fruit or "?"))
+                end
+                overlay:Destroy()
+                State.OpenFruitFilterManager()
+            end)
+        end)
+    end
+
+    if State.DisableAutoLocalize then State.DisableAutoLocalize(overlay) end
 end
 local function getFruitFilters()
     reloadFruitFilters(false)
