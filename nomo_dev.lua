@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V12.8 DEV FIND SELLER INPUT"
+local VERSION = "V12.9 DEV BOOTH CLAIM FALLBACK"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -1146,13 +1146,13 @@ local function getBoothSnapshot(force)
     return items
 end
 
-local function findBestBooth(force)
+local function findBestBooth(force, maxDistOverride)
     local now = os.clock()
     if not force and type(State.BestBoothCache) == "table" and (now - (State.LastBestBoothCacheAt or 0)) <= (tonumber(CFG.Performance.BoothChoiceCacheSeconds) or 1) then
         return State.BestBoothCache.Target, State.BestBoothCache.Status
     end
 
-    local maxDist = tonumber(CFG.Booth.MaxMiddleDistance) or 200
+    local maxDist = tonumber(maxDistOverride) or tonumber(CFG.Booth.MaxMiddleDistance) or 200
     local mine, free
 
     for _, item in ipairs(getBoothSnapshot(force)) do
@@ -1239,8 +1239,14 @@ end
 local function claimBestFreeBooth()
     local target, status = findBestBooth(true)
     if not target then
-        log("No FREE/MINE booth in distance", tostring(CFG.Booth.MaxMiddleDistance))
-        return false
+        local fallbackTarget, fallbackStatus = findBestBooth(true, 999999)
+        if fallbackTarget and (fallbackStatus == "FREE" or fallbackStatus == "MINE") then
+            log("Booth distance fallback", tostring(CFG.Booth.MaxMiddleDistance), "->", tostring(math.floor(fallbackTarget.MiddleDistance or 0)), tostring(fallbackStatus))
+            target, status = fallbackTarget, fallbackStatus
+        else
+            log("No FREE/MINE booth in distance", tostring(CFG.Booth.MaxMiddleDistance))
+            return false
+        end
     end
 
     if status == "MINE" then
@@ -8084,6 +8090,9 @@ task.spawn(function()
             State.LastAutoClaimAt = now
             local ok, err = pcall(function()
                 local target, status = findBestBooth(true)
+                if status ~= "MINE" and status ~= "FREE" then
+                    target, status = findBestBooth(true, 999999)
+                end
                 if status == "MINE" then
                     State.LastBooth = target
                 elseif status == "FREE" then
