@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V12.2 DEV FIND SELLER"
+local VERSION = "V12.3 DEV FIND SELLER PROMPT"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6421,6 +6421,37 @@ State.FindIndexSellerForPet = function(petName)
     end
     State.LastFindSellerAt = os.clock()
 
+    local payload = {
+        PetType = tostring(petName),
+        PetAbility = {},
+        PetData = {
+            MutationType = "Normal",
+            LevelProgress = 0,
+            Hunger = 0,
+            Level = 0,
+            BaseWeight = 1,
+            Boosts = {},
+        },
+    }
+
+    if not State.FindSellerController then
+        pcall(function()
+            State.FindSellerController = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("TradeControllers"):WaitForChild("TradeFindSellerController"))
+        end)
+    end
+    if State.FindSellerController and type(State.FindSellerController.Prompt) == "function" then
+        log("Find Seller prompt", tostring(petName))
+        local okPrompt, promptResult = pcall(State.FindSellerController.Prompt, "Pet", payload)
+        if not okPrompt then
+            okPrompt, promptResult = pcall(State.FindSellerController.Prompt, State.FindSellerController, "Pet", payload)
+        end
+        if okPrompt then
+            log("Find Seller prompt opened", tostring(petName), tostring(promptResult))
+            return true
+        end
+        log("Find Seller prompt failed", tostring(promptResult), "falling back remote")
+    end
+
     local tradeEvents = GameEvents:FindFirstChild("TradeEvents")
     local tokenRaps = tradeEvents and tradeEvents:FindFirstChild("TokenRAPs")
     local findSellers = tokenRaps and tokenRaps:FindFirstChild("FindSellers")
@@ -6431,18 +6462,7 @@ State.FindIndexSellerForPet = function(petName)
 
     log("Find Seller", tostring(petName), "using in-game index")
     local ok, result = pcall(function()
-        return findSellers:InvokeServer("Pet", {
-            PetType = tostring(petName),
-            PetAbility = {},
-            PetData = {
-                MutationType = "Normal",
-                LevelProgress = 0,
-                Hunger = 0,
-                Level = 0,
-                BaseWeight = 1,
-                Boosts = {},
-            },
-        })
+        return findSellers:InvokeServer("Pet", payload)
     end)
     if not ok then
         log("Find Seller error", tostring(result))
