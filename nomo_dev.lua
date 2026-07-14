@@ -4878,13 +4878,39 @@ win = (CFG.Performance.NoUI and State.CreateHeadlessWindow() or Library:CreateWi
 }))
 State.Gui = win.Gui
 
+State.SetBootStatus = function(step)
+    State.LastBootStep = tostring(step or "?")
+    local text = "Boot: " .. State.LastBootStep
+    if win and win.CloneStatusText then
+        pcall(function()
+            win.CloneStatusText.Text = text
+        end)
+    end
+    if win and win.Pills and win.Pills.Status and win.Pills.Status.Set then
+        pcall(function()
+            win.Pills.Status:Set(State.LastBootStep, T.Accent)
+        end)
+    end
+    print("[NOMO BOOT]", State.LastBootStep)
+end
+
+State.SetBootStatus("window ready")
+
 if not CFG.Performance.NoUI then
+    State.SetBootStatus("performance")
     State.ApplyPerformanceMode()
 end
 
-win.Pills.Status:Set("Ready", T.Green)
+State.SetBootStatus("pills")
+win.Pills.Status:Set("Boot", T.Accent)
 win.Pills.Booth:Set("Data", T.Accent)
-win.Pills.Balance:Set(commaNumber(getTokenBalance()), T.Green)
+win.Pills.Balance:Set("...", T.Sub)
+task.defer(function()
+    local okBalance, balance = pcall(getTokenBalance)
+    if okBalance then
+        win.Pills.Balance:Set(commaNumber(balance), T.Green)
+    end
+end)
 
 local function richEscape(v)
     return tostring(v or ""):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
@@ -5075,6 +5101,7 @@ end
 
 
 --// DASHBOARD PAGE
+State.SetBootStatus("dashboard ui")
 State.DashboardPage = win:CreatePage("Dashboard")
 State.DashToggleRow = State.DashboardPage:AddRow()
 State.DashAutoSec = State.DashboardPage:AddSectionInRow(State.DashToggleRow, "Auto List", 1 / 3)
@@ -5146,6 +5173,7 @@ State.DashEventsSec = State.DashboardPage:AddSection("Recent Events")
 State.DashLog = State.DashEventsSec:AddLog(64)
 
 --// BOOTH PAGE
+State.SetBootStatus("booth ui")
 local boothPage = win:CreatePage("Booth")
 State.BoothControlRow = boothPage:AddRow()
 State.BoothAutoSec = boothPage:AddSectionInRow(State.BoothControlRow, "Auto Claim", 1 / 3)
@@ -5262,6 +5290,7 @@ State.BoothRebuildSec:AddButton("Smart Rebuild", function()
 end)
 
 --// SELLER PAGE
+State.SetBootStatus("seller ui")
 local sellerPage = win:CreatePage("Seller")
 local sellerCtrl = sellerPage:AddSection("Seller Control")
 sellerCtrl.Frame.LayoutOrder = 30
@@ -5898,6 +5927,7 @@ filterLogSec:AddButton("Clear All Filters", function()
 end, "outline")
 
 --// LISTINGS PAGE
+State.SetBootStatus("listings ui")
 local listingsPage = win:CreatePage("Listings")
 State.ListingActionRow = listingsPage:AddRow()
 State.ListingManageSec = listingsPage:AddSectionInRow(State.ListingActionRow, "My Listing", 0.25)
@@ -6307,6 +6337,7 @@ end, "outline")
 State.ListingMarketSec:AddButton("Price Check", refreshMarketSample, "outline")
 
 --// SNIPER PAGE
+State.SetBootStatus("sniper ui")
 local sniperPage = win:CreatePage("Sniper")
 State.SniperConfigRow = sniperPage:AddRow()
 State.SniperWatchSec = sniperPage:AddSectionInRow(State.SniperConfigRow, "Watch Builder", 0.5)
@@ -6714,6 +6745,7 @@ State.SniperLimitSec:AddButton("Buy First", function()
 end, "outline")
 
 --// FRUIT PAGE
+State.SetBootStatus("fruit ui")
 State.FruitPage = win:CreatePage("Fruit")
 State.FruitTopRow = State.FruitPage:AddRow()
 State.FruitControlSec = State.FruitPage:AddSectionInRow(State.FruitTopRow, "Fruit Control", 0.42)
@@ -6872,6 +6904,7 @@ State.RefreshFruitLog = function(scan)
 end
 State.RefreshFruitLog()
 --// WEBHOOK PAGE
+State.SetBootStatus("webhook ui")
 State.WebhookPage = win:CreatePage("Webhook")
 State.WebhookTopRow = State.WebhookPage:AddRow()
 State.WebhookSec = State.WebhookPage:AddSectionInRow(State.WebhookTopRow, "Delivery", 0.35)
@@ -6972,6 +7005,7 @@ State.WebhookTestSec:AddButton("Test Sale Webhook", function()
 end, "outline")
 
 --// SETTINGS PAGE
+State.SetBootStatus("settings ui")
 State.SettingsPage = win:CreatePage("Settings")
 State.SettingsTopRow = State.SettingsPage:AddRow()
 State.SettingPathSec = State.SettingsPage:AddSectionInRow(State.SettingsTopRow, "Paths", 0.36)
@@ -7098,6 +7132,7 @@ getgenv().NOMO_V32_REFRESH_SNIPER = State.RefreshSniperLog
 getgenv().NOMO_V32_STOP = function() State.Stop("manual") end
 
 --// startup
+State.SetBootStatus("startup")
 ensureFolder()
 local function bootStep(name, fn)
     log("Boot step", tostring(name))
@@ -7114,6 +7149,7 @@ bootStep("ListingFilters", reloadFilters)
 bootStep("WarnFilter", installWarnFilter)
 
 log("Started", VERSION .. " PRIVATE UI")
+State.SetBootStatus("select dashboard")
 
 win:SelectPage("Dashboard")
 
@@ -7125,6 +7161,7 @@ task.defer(function()
     pcall(refreshPills)
 end)
 log("PetList", #State.PetList, "| ConfigFolder", getConfigFolder(), "| Listing", getFilterPath())
+State.SetBootStatus("fruit install")
 
 State.InstallFruitListing = function()
 local function normalizeFruitConfigData(data)
@@ -7789,6 +7826,7 @@ _G.NOMO_FRUIT_SCAN = buildFruitCandidates
 getgenv().NOMO_FRUIT_SCAN = buildFruitCandidates
 end
 State.InstallFruitListing()
+State.SetBootStatus("post fruit")
 
 
 
@@ -7872,6 +7910,7 @@ task.spawn(function()
 end)
 
 --// Main background loops
+State.SetBootStatus("automation loop")
 task.spawn(function()
     while State.Running do
         local now = os.clock()
