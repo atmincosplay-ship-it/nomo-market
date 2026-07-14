@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V10.9 DEV FRUIT EDIT FIX"
+local VERSION = "V11.0 DEV FRUIT EDIT POPUP"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -7128,6 +7128,139 @@ State.AddFruitFilter = function(fruit, price, minKg, maxKg, variant, cap)
         log("Added fruit filter", tostring(fruit), "price", tostring(price), "saved=true")
     end
 end
+State.OpenFruitFilterEditPopup = function(index, managerOverlay)
+    reloadFruitFilters(true)
+    index = toInt(index)
+    local row = index and State.FruitFilterData and State.FruitFilterData.Fruit and State.FruitFilterData.Fruit[index]
+    if not row then
+        log("Edit fruit filter failed", "bad index", tostring(index))
+        return
+    end
+
+    local overlay = make("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.3,
+        BorderSizePixel = 0,
+        ZIndex = 100,
+    }, win.Gui)
+    local modal = make("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.fromOffset(420, 300),
+        BackgroundColor3 = T.Card,
+        BorderSizePixel = 0,
+        ZIndex = 101,
+    }, overlay)
+    corner(modal, 10); stroke(modal); pad(modal, 12)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 28),
+        BackgroundTransparency = 1,
+        Text = "Edit Fruit Filter - " .. tostring(row.Fruit or row.fruit or "?"),
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 102,
+    }, modal)
+
+    local function label(y, text)
+        make("TextLabel", {
+            Size = UDim2.new(0, 120, 0, 26),
+            Position = UDim2.fromOffset(0, y),
+            BackgroundTransparency = 1,
+            Text = text,
+            TextColor3 = T.Sub,
+            Font = Enum.Font.Gotham,
+            TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 102,
+        }, modal)
+    end
+    local function box(y, value)
+        local b = make("TextBox", {
+            Size = UDim2.new(1, -130, 0, 26),
+            Position = UDim2.fromOffset(130, y),
+            BackgroundColor3 = T.Card2,
+            Text = tostring(value or ""),
+            TextColor3 = T.Text,
+            Font = Enum.Font.Gotham,
+            TextSize = 12,
+            ClearTextOnFocus = false,
+            BorderSizePixel = 0,
+            ZIndex = 102,
+        }, modal)
+        corner(b, 6); stroke(b); pad(b, 0, 0, 6, 6)
+        return b
+    end
+
+    label(44, "Fruit")
+    local fruitBox = box(44, row.Fruit or row.fruit or "")
+    label(78, "Price")
+    local priceBox = box(78, row.Price or row.price or "")
+    label(112, "Min KG")
+    local minBox = box(112, row.MinWeight or row.minWeight or row.MinKG or row.minKG or 0)
+    label(146, "Max KG")
+    local maxBox = box(146, row.MaxWeight or row.maxWeight or row.MaxKG or row.maxKG or "")
+    label(180, "Variant")
+    local variantBox = box(180, row.Variant or row.variant or row.Mutation or row.mutation or "Any")
+    label(214, "Max Listed")
+    local capBox = box(214, row.MaxListedFruit or row.maxListedFruit or row.MaxListedPet or row.maxListedPet or 5)
+
+    local saveBtn = make("TextButton", {
+        Size = UDim2.fromOffset(130, 30),
+        Position = UDim2.new(1, -272, 1, -34),
+        BackgroundColor3 = T.Accent,
+        Text = "Save",
+        TextColor3 = Color3.new(1, 1, 1),
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 102,
+    }, modal)
+    corner(saveBtn, 7)
+    local cancelBtn = make("TextButton", {
+        Size = UDim2.fromOffset(130, 30),
+        Position = UDim2.new(1, -134, 1, -34),
+        BackgroundColor3 = T.Card2,
+        Text = "Cancel",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 102,
+    }, modal)
+    corner(cancelBtn, 7); stroke(cancelBtn)
+
+    cancelBtn.Activated:Connect(function()
+        overlay:Destroy()
+    end)
+    saveBtn.Activated:Connect(function()
+        reloadFruitFilters(true)
+        local target = State.FruitFilterData and State.FruitFilterData.Fruit and State.FruitFilterData.Fruit[index]
+        if target then
+            target.Enabled = true
+            target.Fruit = tostring(fruitBox.Text or "")
+            target.Price = clampPrice(priceBox.Text) or target.Price or 1
+            target.MinWeight = toNumber(minBox.Text) or 0
+            target.MaxWeight = toNumber(maxBox.Text)
+            target.Variant = tostring(variantBox.Text or "Any")
+            target.MaxListedFruit = toInt(capBox.Text) or target.MaxListedFruit or 5
+            local ok = saveFruitFilters()
+            log("Updated fruit filter", tostring(index), tostring(target.Fruit or "?"), "price", tostring(target.Price), "max", tostring(target.MaxListedFruit), "saved=" .. tostring(ok))
+            if State.BuildFruitCandidates then
+                local scanOk, scan = pcall(State.BuildFruitCandidates)
+                if scanOk and State.RefreshFruitLog then State.RefreshFruitLog(scan) end
+            end
+        end
+        overlay:Destroy()
+        if managerOverlay then managerOverlay:Destroy() end
+        State.OpenFruitFilterManager()
+    end)
+
+    if State.DisableAutoLocalize then State.DisableAutoLocalize(overlay) end
+end
 State.OpenFruitFilterManager = function()
     reloadFruitFilters(true)
     local filters = getFruitFilters()
@@ -7256,16 +7389,7 @@ State.OpenFruitFilterManager = function()
         }, row)
         corner(delBtn, 6)
         editBtn.Activated:Connect(function()
-            if State.FruitNameInput and State.FruitNameInput.Set then State.FruitNameInput:Set(f.Fruit or "") end
-            if State.FruitPriceInput and State.FruitPriceInput.Set then State.FruitPriceInput:Set(tostring(f.Price or "")) end
-            if State.FruitMinInput and State.FruitMinInput.Set then State.FruitMinInput:Set(tostring(f.MinWeight or 0)) end
-            if State.FruitMaxInput and State.FruitMaxInput.Set then State.FruitMaxInput:Set(tostring(f.MaxWeight or "")) end
-            if State.FruitMutInput and State.FruitMutInput.Set then State.FruitMutInput:Set(tostring(f.Variant or "Any")) end
-            if State.FruitCapInput and State.FruitCapInput.Set then State.FruitCapInput:Set(tostring(f.MaxListedFruit or 5)) end
-            State.EditingFruitFilterRow = f.Row or i
-            if win and win.SelectPage then win:SelectPage("Fruit") end
-            overlay:Destroy()
-            log("Loaded fruit filter for edit", tostring(f.Fruit or "?"), "row", tostring(State.EditingFruitFilterRow))
+            State.OpenFruitFilterEditPopup(f.Row or i, overlay)
         end)
         delBtn.Activated:Connect(function()
             State.OpenConfirmPopup("Delete Fruit Filter", "Remove this fruit filter from config?", "Delete", function()
