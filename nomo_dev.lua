@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V10.6 DEV FRUIT CONTROL FIX"
+local VERSION = "V10.7 DEV FRUIT MANAGER OPEN"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -7107,6 +7107,8 @@ end
 
 State.ReloadFruitFilters = reloadFruitFilters
 
+local getFruitFilters
+
 local function saveFruitFilters()
     State.FruitFilterData = normalizeFruitConfigData(State.FruitFilterData)
     return saveJson(State.GetFruitFilterPath(), {
@@ -7282,7 +7284,7 @@ State.OpenFruitFilterManager = function()
 
     if State.DisableAutoLocalize then State.DisableAutoLocalize(overlay) end
 end
-local function getFruitFilters()
+getFruitFilters = function()
     reloadFruitFilters(false)
     local out = {}
     for i, row in ipairs(State.FruitFilterData.Fruit or {}) do
