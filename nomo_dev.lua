@@ -7086,32 +7086,16 @@ bootStep("WarnFilter", installWarnFilter)
 
 log("Started", VERSION .. " PRIVATE UI")
 
-bootStep("BoothLog", refreshBoothLog)
-bootStep("SellerLog", function() refreshSellerLog(false) end)
-bootStep("MyListingsLog", refreshMyListingsLog)
-bootStep("MarketSample", refreshMarketSample)
-bootStep("SniperLog", State.RefreshSniperLog)
-
 win:SelectPage("Dashboard")
 
 if State.PendingRuntimeDefaultsSave then
     State.PendingRuntimeDefaultsSave = false
     State.SaveRuntimeSettings()
 end
-bootStep("SniperFilters", State.ReloadSniperConfig)
-bootStep("WarnFilter", installWarnFilter)
-
-log("Started", VERSION .. " PRIVATE UI")
-refreshPills()
+task.defer(function()
+    pcall(refreshPills)
+end)
 log("PetList", #State.PetList, "| ConfigFolder", getConfigFolder(), "| Listing", getFilterPath())
-
-bootStep("BoothLog", refreshBoothLog)
-bootStep("SellerLog", function() refreshSellerLog(false) end)
-bootStep("MyListingsLog", refreshMyListingsLog)
-bootStep("MarketSample", refreshMarketSample)
-bootStep("SniperLog", State.RefreshSniperLog)
-
-win:SelectPage("Dashboard")
 
 State.InstallFruitListing = function()
 local function normalizeFruitConfigData(data)
