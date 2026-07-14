@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V11.4 DEV FRUIT UI CLEANUP"
+local VERSION = "V11.5 DEV FRUIT GLOBAL CAP"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -45,6 +45,7 @@ CFG.Fruit = CFG.Fruit or {
     AutoList = true,
     RequireExactName = true,
     ItemType = "Holdable",
+    MaxListed = 10,
 }
 
 CFG.Sniper = CFG.Sniper or {
@@ -120,6 +121,7 @@ CFG.Fruit.Enabled = CFG.Fruit.Enabled == true
 CFG.Fruit.AutoList = CFG.Fruit.AutoList == true
 CFG.Fruit.RequireExactName = CFG.Fruit.RequireExactName ~= false
 CFG.Fruit.ItemType = tostring(CFG.Fruit.ItemType or "Holdable")
+CFG.Fruit.MaxListed = math.max(0, toInt(CFG.Fruit.MaxListed or CFG.Fruit.MaxListedFruit or CFG.Fruit.MaxFruitListings) or 10)
 CFG.Listings.RemoveCooldown = CFG.Listings.RemoveCooldown or 1.2
 CFG.Listings.RemoveAllMax = CFG.Listings.RemoveAllMax or 50
 CFG.Listings.VerifyRemoveDelay = CFG.Listings.VerifyRemoveDelay or 0.45
@@ -717,6 +719,7 @@ State.LoadRuntimeSettings = function()
     if type(data.Fruit) == "table" then
         if data.Fruit.Enabled ~= nil then CFG.Fruit.Enabled = data.Fruit.Enabled == true end
         if data.Fruit.AutoList ~= nil then CFG.Fruit.AutoList = data.Fruit.AutoList == true end
+        if data.Fruit.MaxListed ~= nil then CFG.Fruit.MaxListed = math.max(0, toInt(data.Fruit.MaxListed) or CFG.Fruit.MaxListed or 10) end
     end
     if type(data.Webhook) == "table" then
         if data.Webhook.Enabled ~= nil then CFG.Webhook.Enabled = data.Webhook.Enabled == true end
@@ -777,6 +780,7 @@ State.SaveRuntimeSettings = function()
         Fruit = {
             Enabled = CFG.Fruit.Enabled == true,
             AutoList = CFG.Fruit.AutoList == true,
+            MaxListed = tonumber(CFG.Fruit.MaxListed) or 10,
         },
         Webhook = {
             Enabled = CFG.Webhook.Enabled == true,
@@ -2718,6 +2722,10 @@ local function buildCandidates()
 
             if remainingBoothSlots <= 0 then
                 reason = "booth full"
+            elseif maxFruitListings > 0 and currentFruitListings >= maxFruitListings then
+                reason = "fruit global cap reached"
+            elseif maxFruitListings > 0 and chosenFruitTotal >= math.max(0, maxFruitListings - currentFruitListings) then
+                reason = "fruit global cap"
             elseif maxListed > 0 and currentListed >= maxListed then
                 reason = "filter cap reached"
             elseif nameChosen >= allowed then
@@ -6760,7 +6768,7 @@ end)
 State.RefreshFruitLog = function(scan)
     scan = scan or State.LastFruitScan
     local lines = {
-        string.format("Fruit: %s | Filters %s | Inventory %s | Ready %s",
+        string.format("Fruit: %s | Cap %s | Filters %s | Inventory %s | Ready %s",
             CFG.Fruit.Enabled == true and "ON" or "OFF",
             tostring(type(scan) == "table" and #(scan.Filters or {}) or 0),
             tostring(type(scan) == "table" and #(scan.Fruits or {}) or 0),
@@ -7575,6 +7583,14 @@ local function buildFruitCandidates()
     local myListings = getMyListings()
     local alreadyListedByFilter = countMyGoodFruitListingsByFilter(filters, myListings)
     local currentBoothListings = #myListings
+    local currentFruitListings = 0
+    for _, l in ipairs(myListings) do
+        if tostring(l.ItemType or "") == tostring(CFG.Fruit.ItemType or "Holdable") then
+            currentFruitListings += 1
+        end
+    end
+    local maxFruitListings = math.max(0, toInt(CFG.Fruit.MaxListed) or 10)
+    local chosenFruitTotal = 0
     local chosenFilter = {}
     local candidates, skipped = {}, {}
 
@@ -7606,12 +7622,17 @@ local function buildFruitCandidates()
 
             if remainingBoothSlots <= 0 then
                 reason = "booth full"
+            elseif maxFruitListings > 0 and currentFruitListings >= maxFruitListings then
+                reason = "fruit global cap reached"
+            elseif maxFruitListings > 0 and chosenFruitTotal >= math.max(0, maxFruitListings - currentFruitListings) then
+                reason = "fruit global cap"
             elseif maxListed > 0 and currentListed >= maxListed then
                 reason = "filter cap reached"
             elseif maxListed > 0 and chosen >= math.max(0, maxListed - currentListed) then
                 reason = "filter cap"
             else
                 chosenFilter[key] = chosen + 1
+                chosenFruitTotal += 1
                 table.insert(candidates, {Fruit = fruit, Filter = matched})
             end
         end
