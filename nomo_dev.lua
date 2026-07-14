@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V10.4 DEV FRUIT MANAGER"
+local VERSION = "V10.5 DEV CLOSE STOPS"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -260,6 +260,10 @@ local State = {
 function State.Stop(reason)
     State.Running = false
     print("[NOMO V3] Stop:", reason or "manual")
+    if State.Gui then
+        pcall(function() State.Gui:Destroy() end)
+        State.Gui = nil
+    end
 end
 
 getgenv()[STATE_KEY] = State
@@ -3867,7 +3871,7 @@ function Library:CreateWindow(cfg)
 		b.Activated:Connect(cb)
 		return b
 	end
-	winBtn("×", -36, function() gui:Destroy() end)
+	winBtn("×", -36, function() State.Stop("window close") end)
 
 	-- Hydra/Holy-style minimize: hide full window and show compact floating button.
 	local mini = make("TextButton", {
@@ -4061,9 +4065,14 @@ function Library:CreateWindow(cfg)
 		TextXAlignment = Enum.TextXAlignment.Left,
 	}, side)
 
-	local navHolder = make("Frame", {
+	local navHolder = make("ScrollingFrame", {
 		Size = UDim2.new(1, -16, 1, -140), Position = UDim2.fromOffset(8, 64),
 		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = T.Border,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
 	}, side)
 	vlist(navHolder, 4)
 
@@ -4830,6 +4839,7 @@ win = (CFG.Performance.NoUI and State.CreateHeadlessWindow() or Library:CreateWi
     -- MiniImage = "rbxassetid://YOUR_IMAGE_ID",
     -- MiniImage = "Nomo/blue_rose.png",
 }))
+State.Gui = win.Gui
 
 if not CFG.Performance.NoUI then
     State.ApplyPerformanceMode()
