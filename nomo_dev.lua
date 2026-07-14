@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V10.2 DEV FRUIT INVENTORY SAFE"
+local VERSION = "V10.3 DEV NO LOCALIZE"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -3626,6 +3626,7 @@ local function make(class, props, parent)
 		parent = nil
 	end
 	local o = Instance.new(class)
+	pcall(function() o.AutoLocalize = false end)
 	for k, v in pairs(props) do o[k] = v end
 	o.Parent = parent
 	return o
@@ -3766,6 +3767,9 @@ function Library:CreateWindow(cfg)
 	gui.Name = "NomoHub"
 	gui.ResetOnSpawn = false
 	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	gui.DescendantAdded:Connect(function(child)
+		pcall(function() child.AutoLocalize = false end)
+	end)
 	-- Arceus-safe: PlayerGui first. CoreGui can trigger capability errors on some executors.
 	local pg = Players.LocalPlayer:WaitForChild("PlayerGui", 20)
 	if not pg then error("PlayerGui not ready") end
