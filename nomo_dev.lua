@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V10.5 DEV CLOSE STOPS"
+local VERSION = "V10.6 DEV FRUIT CONTROL FIX"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6688,6 +6688,13 @@ State.FruitControlSec:AddButton("Reload Fruit Config", function()
         if ok then State.RefreshFruitOptions(scan); State.RefreshFruitLog(scan) end
     end
 end, "outline")
+State.FruitControlSec:AddButton("Manage Fruit Filters", function()
+    if State.OpenFruitFilterManager then
+        State.OpenFruitFilterManager()
+    else
+        log("Fruit filter manager not ready")
+    end
+end, "outline")
 
 State.RefreshFruitOptions = function(scan)
     local seen, names = {}, {}
@@ -6759,13 +6766,7 @@ State.FruitFilterSec:AddButton("+ Add Fruit Filter", function()
         if ok then State.RefreshFruitOptions(scan); State.RefreshFruitLog(scan) end
     end
 end)
-State.FruitFilterSec:AddButton("Manage Fruit Filters", function()
-    if State.OpenFruitFilterManager then
-        State.OpenFruitFilterManager()
-    else
-        log("Fruit filter manager not ready")
-    end
-end, "outline")
+
 
 State.RefreshFruitLog = function(scan)
     scan = scan or State.LastFruitScan
@@ -7103,6 +7104,8 @@ local function reloadFruitFilters(force)
     end
     return State.FruitFilterData
 end
+
+State.ReloadFruitFilters = reloadFruitFilters
 
 local function saveFruitFilters()
     State.FruitFilterData = normalizeFruitConfigData(State.FruitFilterData)
