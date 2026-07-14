@@ -4900,10 +4900,18 @@ local refreshSellerLog
 
 State.RefreshCloneStatus = function(forceInventory)
     if not win.CloneStatusText then return end
-    local best = findBestBooth()
-    local boothText = best and best.Status or "No Booth"
+    local boothText = "..."
+    local okBooth, best = pcall(findBestBooth)
+    if okBooth and best then
+        boothText = best.Status or "No Booth"
+    elseif State.LastBooth and State.LastBooth.Status then
+        boothText = State.LastBooth.Status
+    end
     local listings = State.LastMyListings
-    if type(listings) ~= "table" then listings = getMyListings() end
+    if type(listings) ~= "table" then
+        local okListings, listingResult = pcall(getMyListings)
+        listings = (okListings and type(listingResult) == "table") and listingResult or {}
+    end
     local device = tostring(CFG.Webhook.DeviceName or getgenv().nomo_device_name or getgenv().NOMO_DEVICE_NAME or "")
     if device == "" then device = tostring(LocalPlayer.Name or "NOMO") end
     local uptime = math.max(0, math.floor(os.clock() - (State.StartedAt or os.clock())))
@@ -4913,7 +4921,10 @@ State.RefreshCloneStatus = function(forceInventory)
     local webhook = CFG.Webhook.Enabled and "ON" or "OFF"
     if forceInventory or State.CloneInventoryDirty or os.clock() - (State.LastCloneInventoryAt or 0) >= 10 then
         State.LastCloneInventoryAt = os.clock()
-        State.CloneInventoryCount = #getOwnPetsFromData(forceInventory or State.CloneInventoryDirty)
+        local okPets, pets = pcall(getOwnPetsFromData, forceInventory or State.CloneInventoryDirty)
+        if okPets and type(pets) == "table" then
+            State.CloneInventoryCount = #pets
+        end
         State.CloneInventoryDirty = false
     end
     State.ClonePanelDirty = false
@@ -4959,8 +4970,13 @@ State.RefreshDashboard = function()
         local session = math.floor(os.clock())
         local mins = math.floor(session / 60)
         local secs = session % 60
-        local best = findBestBooth()
-        local boothText = best and best.Status or "No Booth"
+        local boothText = "..."
+        local okBooth, best = pcall(findBestBooth)
+        if okBooth and best then
+            boothText = best.Status or "No Booth"
+        elseif State.LastBooth and State.LastBooth.Status then
+            boothText = State.LastBooth.Status
+        end
         win.RuntimeFooterText.Text = ('<font color="#%s">Session:</font> <font color="#%s">%dm %02ds</font>   |   <font color="#%s">Seller:</font> <font color="#%s">%s/%s</font>   |   <font color="#%s">Sniper:</font> <font color="#%s">%s/%s</font>   |   <font color="#%s">Booth:</font> <font color="#%s">%s</font>   |   <font color="#%s">Pets:</font> <font color="#%s">%s</font>'):format(
             T.Sub:ToHex(),
             T.Accent:ToHex(),
@@ -4993,22 +5009,36 @@ local function refreshPills()
 
     if State.UiRefreshDirty or now - (State.LastPillRefreshAt or 0) >= pillInterval then
         State.LastPillRefreshAt = now
-        local best = findBestBooth()
-        local boothText = best and best.Status or "No Booth"
+        local boothText = "..."
+        local okBooth, best = pcall(findBestBooth)
+        if okBooth and best then
+            boothText = best.Status or "No Booth"
+        elseif State.LastBooth and State.LastBooth.Status then
+            boothText = State.LastBooth.Status
+        end
         if not minimized or State.UiRefreshDirty then
             win.Pills.Booth:Set(boothText, boothText == "MINE" and T.Green or (boothText == "FREE" and T.Yellow or T.Sub))
-            win.Pills.Balance:Set(commaNumber(getTokenBalance()), T.Green)
+            local okBalance, balance = pcall(getTokenBalance)
+            win.Pills.Balance:Set(commaNumber(okBalance and balance or 0), T.Green)
         end
         State.UpdatePerfStats()
     end
 
     if State.ClonePanelDirty or now - (State.LastClonePanelAt or 0) >= cloneInterval then
-        State.RefreshCloneStatus(State.CloneInventoryDirty)
+        local okClone, cloneErr = pcall(State.RefreshCloneStatus, State.CloneInventoryDirty)
+        if not okClone then
+            State.LastClonePanelAt = now
+            if win.CloneStatusText then
+                win.CloneStatusText.Text = '<font color="#ff5c7a">Status refresh paused</font>\nScript still running'
+            end
+            dlog("Clone status refresh error", tostring(cloneErr))
+        end
     end
 
     if (not minimized) and (State.UiRefreshDirty or now - (State.LastDashboardRefreshAt or 0) >= dashboardInterval) then
         State.LastDashboardRefreshAt = now
-        State.RefreshDashboard()
+        local okDash, dashErr = pcall(State.RefreshDashboard)
+        if not okDash then dlog("Dashboard refresh error", tostring(dashErr)) end
     end
 
     State.UiRefreshDirty = false
