@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V12.0 DEV FRUIT UI"
+local VERSION = "V12.1 DEV MANUAL REJOIN"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -278,6 +278,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local UserInputService = game:GetService("UserInputService")
+State.TeleportService = game:GetService("TeleportService")
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -427,6 +428,26 @@ local function log(...)
             end
         end)
     end
+end
+
+State.Rejoin = function(reason)
+    if State.RejoinRequested then return false end
+    State.RejoinRequested = true
+    State.Running = false
+    log("Rejoin requested", tostring(reason or "manual"), tostring(game.PlaceId) .. ":" .. tostring(game.JobId))
+    task.spawn(function()
+        task.wait(1)
+        local ok, err = pcall(function()
+            State.TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+        end)
+        if not ok then
+            log("Same-server rejoin failed", tostring(err), "trying place")
+            pcall(function()
+                State.TeleportService:Teleport(game.PlaceId, LocalPlayer)
+            end)
+        end
+    end)
+    return true
 end
 
 local function dlog(...)
@@ -7040,6 +7061,12 @@ end, "outline")
 
 State.SettingActionSec:AddButton("Diagnose Fruits", function()
     if State.DiagnoseFruits then State.DiagnoseFruits() end
+end, "outline")
+
+State.SettingActionSec:AddButton("Rejoin Server", function()
+    State.OpenConfirmPopup("Rejoin Server", "Reload this clone in the current trade server?", "Rejoin", function()
+        State.Rejoin("settings rejoin")
+    end)
 end, "outline")
 
 State.SettingPathSec:AddButton("Save / Reload Path", function()
