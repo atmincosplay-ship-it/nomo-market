@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V9.6 WEBHOOK DEFAULTS"
+local VERSION = "V12.1 DEV MANUAL REJOIN"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -38,6 +38,14 @@ CFG.Seller = CFG.Seller or {
 
 CFG.Listings = CFG.Listings or {
     RemoveCooldown = 1.2,
+}
+
+CFG.Fruit = CFG.Fruit or {
+    Enabled = true,
+    AutoList = true,
+    RequireExactName = true,
+    ItemType = "Holdable",
+    MaxListed = 0,
 }
 
 CFG.Sniper = CFG.Sniper or {
@@ -108,6 +116,12 @@ CFG.Seller.CreateWaitBackoff = math.clamp(tonumber(CFG.Seller.CreateWaitBackoff)
 CFG.Seller.MinPetCountKeep = 0
 CFG.Seller.MaxListPerMinute = 999
 CFG.Seller.MaxAutoListSession = 50
+CFG.Fruit = CFG.Fruit or {}
+CFG.Fruit.Enabled = CFG.Fruit.Enabled == true
+CFG.Fruit.AutoList = CFG.Fruit.AutoList == true
+CFG.Fruit.RequireExactName = CFG.Fruit.RequireExactName ~= false
+CFG.Fruit.ItemType = tostring(CFG.Fruit.ItemType or "Holdable")
+CFG.Fruit.MaxListed = 0
 CFG.Listings.RemoveCooldown = CFG.Listings.RemoveCooldown or 1.2
 CFG.Listings.RemoveAllMax = CFG.Listings.RemoveAllMax or 50
 CFG.Listings.VerifyRemoveDelay = CFG.Listings.VerifyRemoveDelay or 0.45
@@ -248,6 +262,10 @@ local State = {
 function State.Stop(reason)
     State.Running = false
     print("[NOMO V3] Stop:", reason or "manual")
+    if State.Gui then
+        pcall(function() State.Gui:Destroy() end)
+        State.Gui = nil
+    end
 end
 
 getgenv()[STATE_KEY] = State
@@ -260,6 +278,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local UserInputService = game:GetService("UserInputService")
+State.TeleportService = game:GetService("TeleportService")
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -367,6 +386,17 @@ pcall(function()
         PetUtilities = require(petUtilities)
     end
 end)
+pcall(function()
+    State.FruitWeightCalculator = require(ReplicatedStorage:WaitForChild("Calculate_Weight", 20))
+end)
+
+pcall(function()
+    local dataFolder = ReplicatedStorage:WaitForChild("Data", 20)
+    local seedDataModule = dataFolder and dataFolder:WaitForChild("SeedData", 10)
+    if seedDataModule then
+        State.FruitSeedData = require(seedDataModule)
+    end
+end)
 
 --//====================================================--
 --// Utils
@@ -398,6 +428,26 @@ local function log(...)
             end
         end)
     end
+end
+
+State.Rejoin = function(reason)
+    if State.RejoinRequested then return false end
+    State.RejoinRequested = true
+    State.Running = false
+    log("Rejoin requested", tostring(reason or "manual"), tostring(game.PlaceId) .. ":" .. tostring(game.JobId))
+    task.spawn(function()
+        task.wait(1)
+        local ok, err = pcall(function()
+            State.TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+        end)
+        if not ok then
+            log("Same-server rejoin failed", tostring(err), "trying place")
+            pcall(function()
+                State.TeleportService:Teleport(game.PlaceId, LocalPlayer)
+            end)
+        end
+    end)
+    return true
 end
 
 local function dlog(...)
@@ -659,13 +709,17 @@ local function getFilterPath()
     return joinConfigPath(path, "listing_filters.json")
 end
 
+State.GetFruitFilterPath = function()
+    return joinConfigPath(getConfigFolder(), "fruit_listing_filters.json")
+end
+
 State.GetSettingsPath = function()
     return joinConfigPath(getConfigFolder(), "settings.json")
 end
 
 State.LoadRuntimeSettings = function()
     local data = readJson(State.GetSettingsPath())
-    local defaultsVersion = "v8_6_arceus_startup_retry"
+    local defaultsVersion = "v9_9_fruit_perf_off"
     local applyLiveAutomationDefaults = type(data.Meta) ~= "table" or data.Meta.DefaultsVersion ~= defaultsVersion
     if type(data.Booth) == "table" then
         if data.Booth.AutoClaim ~= nil then CFG.Booth.AutoClaim = data.Booth.AutoClaim == true end
@@ -682,6 +736,11 @@ State.LoadRuntimeSettings = function()
         if data.Sniper.Enabled ~= nil then CFG.Sniper.Enabled = data.Sniper.Enabled == true end
         if data.Sniper.DryRun ~= nil then CFG.Sniper.DryRun = data.Sniper.DryRun == true end
         if data.Sniper.RescanBeforeBuy ~= nil then CFG.Sniper.RescanBeforeBuy = data.Sniper.RescanBeforeBuy == true end
+    end
+    if type(data.Fruit) == "table" then
+        if data.Fruit.Enabled ~= nil then CFG.Fruit.Enabled = data.Fruit.Enabled == true end
+        if data.Fruit.AutoList ~= nil then CFG.Fruit.AutoList = data.Fruit.AutoList == true end
+        CFG.Fruit.MaxListed = 0
     end
     if type(data.Webhook) == "table" then
         if data.Webhook.Enabled ~= nil then CFG.Webhook.Enabled = data.Webhook.Enabled == true end
@@ -713,6 +772,8 @@ State.LoadRuntimeSettings = function()
         CFG.Sniper.Enabled = true
         CFG.Sniper.DryRun = false
         CFG.UI.AutoMinimized = true
+        CFG.Fruit.Enabled = false
+        CFG.Fruit.AutoList = false
         State.PendingRuntimeDefaultsSave = true
     end
     return data
@@ -721,7 +782,7 @@ end
 State.SaveRuntimeSettings = function()
     local data = {
         Meta = {
-            DefaultsVersion = "v8_6_arceus_startup_retry",
+            DefaultsVersion = "v9_9_fruit_perf_off",
         },
         Booth = {
             AutoClaim = CFG.Booth.AutoClaim == true,
@@ -736,6 +797,10 @@ State.SaveRuntimeSettings = function()
             Enabled = CFG.Sniper.Enabled == true,
             DryRun = CFG.Sniper.DryRun == true,
             RescanBeforeBuy = CFG.Sniper.RescanBeforeBuy == true,
+        },
+        Fruit = {
+            Enabled = CFG.Fruit.Enabled == true,
+            AutoList = CFG.Fruit.AutoList == true,
         },
         Webhook = {
             Enabled = CFG.Webhook.Enabled == true,
@@ -790,7 +855,22 @@ local function loadGamePetList()
 end
 
 local function getPetList()
-    if #State.PetList == 0 then loadGamePetList() end
+    if #State.PetList == 0 and not State.PetListLoading then
+        State.PetListLoading = true
+        task.spawn(function()
+            local ok, result = pcall(loadGamePetList)
+            if not ok then
+                log("PetList background load failed", tostring(result))
+            end
+            State.PetListLoading = false
+            if State.PetNameInput and State.PetNameInput.SetOptions and type(State.PetList) == "table" then
+                pcall(function() State.PetNameInput:SetOptions(State.PetList) end)
+            end
+            if State.SniperPetInput and State.SniperPetInput.SetOptions and type(State.PetList) == "table" then
+                pcall(function() State.SniperPetInput:SetOptions(State.PetList) end)
+            end
+        end)
+    end
     return State.PetList
 end
 
@@ -874,7 +954,21 @@ end
 
 local function getMutationList()
     if type(State.MutationList) ~= "table" or #State.MutationList == 0 then
-        return loadGameMutationList()
+        if not State.MutationListLoading then
+            State.MutationListLoading = true
+            task.spawn(function()
+                local ok, result = pcall(loadGameMutationList)
+                if not ok then
+                    log("MutationList background load failed", tostring(result))
+                    State.MutationList = {"Any", "Normal", "Mutated Only"}
+                end
+                State.MutationListLoading = false
+                if State.MutationInput and State.MutationInput.SetOptions and type(State.MutationList) == "table" then
+                    pcall(function() State.MutationInput:SetOptions(State.MutationList) end)
+                end
+            end)
+        end
+        return {"Any", "Normal", "Mutated Only"}
     end
     return State.MutationList
 end
@@ -1630,7 +1724,13 @@ State.NormalizeListingConfigData = function(data)
     return data
 end
 
-local function reloadFilters()
+local function reloadFilters(force)
+    local path = getFilterPath()
+    local now = os.clock()
+    if not force and State.FilterData and State.LastFilterPath == path and now - (State.LastFilterLoadAt or 0) < 5 then
+        return State.FilterData
+    end
+
     local remoteURL = tostring(CFG.Seller.RemoteConfigURL or "")
     if CFG.Seller.RemoteConfigEnabled and remoteURL ~= "" then
         local remoteData, remoteErr = fetchRemoteConfig()
@@ -1642,7 +1742,6 @@ local function reloadFilters()
         end
     end
 
-    local path = getFilterPath()
     State.FilterData = State.NormalizeListingConfigData(readJson(path))
     if type(State.FilterData.Filters) ~= "table" or #State.FilterData.Filters == 0 then
         local fallback = "Nomo/listing_filters.json"
@@ -1657,7 +1756,14 @@ local function reloadFilters()
             end
         end
     end
-    log("Local filters loaded", path, tostring(#(State.FilterData.Filters or {})) .. " filters")
+    local countNow = #(State.FilterData.Filters or {})
+    State.LastFilterPath = path
+    State.LastFilterLoadAt = now
+    if force or State.LastFilterLogPath ~= path or State.LastFilterLogCount ~= countNow then
+        State.LastFilterLogPath = path
+        State.LastFilterLogCount = countNow
+        log("Local filters loaded", path, tostring(countNow) .. " filters")
+    end
     return State.FilterData
 end
 
@@ -1977,7 +2083,7 @@ local function getOwnPetsFromData(force)
             Variant = traits.Variant,
             VariantNorm = traits.VariantNorm,
             Favorited = isPetFavorite(petData),
-            Locked = tradeLock ~= nil,
+            Locked = (tradeLock == true or type(tradeLock) == "table" or type(tradeLock) == "string"),
             AlreadyListed = listed[tostring(uuid)] == true,
             Raw = petData,
         })
@@ -1993,6 +2099,106 @@ local function getOwnPetsFromData(force)
     return out
 end
 
+State.DiagnoseFruits = function()
+    local function cleanShort(v)
+        local s = tostring(v or "")
+        s = s:gsub("\\n", " "):gsub("\\r", " ")
+        if #s > 80 then s = s:sub(1, 77) .. "..." end
+        return s
+    end
+
+    local function logFruitTool(tool, label)
+        if typeof(tool) ~= "Instance" or not tool:IsA("Tool") then return false end
+
+        local harvested = tool:GetAttribute("HarvestedFruit")
+        local itemType = tool:GetAttribute("ItemType")
+        local fruitId = tool:GetAttribute("Id") or tool:GetAttribute("UUID") or tool:GetAttribute("ItemId")
+        local fruitName = tool:GetAttribute("FruitName") or tool:GetAttribute("Fruit") or tool:GetAttribute("ItemName") or tool:GetAttribute("Name")
+        local kg = tool:GetAttribute("Weight") or tool:GetAttribute("KG") or tool:GetAttribute("Kilo")
+        local mutation = tool:GetAttribute("Mutation") or tool:GetAttribute("Variant")
+
+        local looksFruit = harvested == true or tostring(itemType or ""):lower():find("fruit", 1, true) ~= nil or fruitName ~= nil
+        if not looksFruit then return false end
+
+        log("Fruit tool", label, cleanShort(tool.Name), "type=" .. cleanShort(itemType), "id=" .. cleanShort(fruitId), "fruit=" .. cleanShort(fruitName), "kg=" .. cleanShort(kg), "mut=" .. cleanShort(mutation))
+        return true
+    end
+
+    log("Fruit diag started", "read-only")
+
+    local foundTools = 0
+    local backpack = LocalPlayer and LocalPlayer:FindFirstChildOfClass("Backpack")
+    local character = LocalPlayer and LocalPlayer.Character
+    local containers = {
+        {Name = "Backpack", Obj = backpack},
+        {Name = "Character", Obj = character},
+    }
+
+    for _, entry in ipairs(containers) do
+        local obj = entry.Obj
+        if typeof(obj) == "Instance" then
+            for _, child in ipairs(obj:GetChildren()) do
+                if logFruitTool(child, entry.Name) then
+                    foundTools = foundTools + 1
+                end
+            end
+        end
+    end
+    log("Fruit diag tools", tostring(foundTools), "candidate fruit tool(s)")
+
+    local okData, data = pcall(function()
+        return DataService:GetData()
+    end)
+    if okData and type(data) == "table" then
+        local foundData = 0
+        local function scanData(node, path, depth)
+            if foundData >= 20 or depth > 5 or type(node) ~= "table" then return end
+
+            local pathLower = tostring(path):lower()
+            local itemType = node.ItemType or node.Type
+            local fruitName = node.FruitName or node.Fruit or node.ItemName or node.Name
+            local fruitId = node.Id or node.UUID or node.ItemId
+            local kg = node.Weight or node.KG or node.Kilo
+            local looksFruit = pathLower:find("fruit", 1, true) ~= nil or tostring(itemType or ""):lower():find("fruit", 1, true) ~= nil or node.HarvestedFruit == true
+
+            if looksFruit and (fruitName ~= nil or fruitId ~= nil or itemType ~= nil) then
+                foundData = foundData + 1
+                log("Fruit data", tostring(path), "type=" .. cleanShort(itemType), "id=" .. cleanShort(fruitId), "name=" .. cleanShort(fruitName), "kg=" .. cleanShort(kg))
+            end
+
+            for k, v in pairs(node) do
+                if type(v) == "table" then
+                    local key = tostring(k)
+                    local keyLower = key:lower()
+                    if depth < 2 or keyLower:find("fruit", 1, true) or keyLower:find("inventory", 1, true) or keyLower:find("trade", 1, true) then
+                        scanData(v, tostring(path) .. "." .. key, depth + 1)
+                        if foundData >= 20 then return end
+                    end
+                end
+            end
+        end
+
+        scanData(data, "Data", 0)
+        log("Fruit diag data", tostring(foundData), "candidate data row(s)")
+    else
+        log("Fruit diag data failed", tostring(data))
+    end
+
+    local nonPet = 0
+    for _, l in ipairs(getAllListings(true, true)) do
+        if tostring(l.ItemType or "") ~= "Pet" then
+            nonPet = nonPet + 1
+            if nonPet <= 15 then
+                local item = l.Item or {}
+                log("Market non-pet", "type=" .. cleanShort(l.ItemType), "name=" .. cleanShort(item.FruitName or item.Fruit or item.ItemName or item.Name or l.PetType), "price=" .. cleanShort(l.Price), "id=" .. cleanShort(l.ItemId))
+            end
+        end
+    end
+    log("Fruit diag market", tostring(nonPet), "non-pet listing(s) visible")
+end
+
+_G.NOMO_DIAGNOSE_FRUITS = State.DiagnoseFruits
+getgenv().NOMO_DIAGNOSE_FRUITS = State.DiagnoseFruits
 local function findOwnPetByUUID(uuid, force)
     local target = tostring(uuid or "")
     if target == "" then return nil end
@@ -2565,6 +2771,10 @@ local function buildCandidates()
 
             if remainingBoothSlots <= 0 then
                 reason = "booth full"
+            elseif maxFruitListings > 0 and currentFruitListings >= maxFruitListings then
+                reason = "fruit global cap reached"
+            elseif maxFruitListings > 0 and chosenFruitTotal >= math.max(0, maxFruitListings - currentFruitListings) then
+                reason = "fruit global cap"
             elseif maxListed > 0 and currentListed >= maxListed then
                 reason = "filter cap reached"
             elseif nameChosen >= allowed then
@@ -3477,9 +3687,20 @@ local function make(class, props, parent)
 		parent = nil
 	end
 	local o = Instance.new(class)
+	pcall(function() o.AutoLocalize = false end)
 	for k, v in pairs(props) do o[k] = v end
+	pcall(function() o.AutoLocalize = false end)
 	o.Parent = parent
 	return o
+end
+State.DisableAutoLocalize = function(root)
+    pcall(function() root.AutoLocalize = false end)
+    pcall(function() root.RootLocalizationTable = nil end)
+    if typeof(root) == "Instance" then
+        for _, child in ipairs(root:GetDescendants()) do
+            pcall(function() child.AutoLocalize = false end)
+        end
+    end
 end
 local function corner(p, r) make("UICorner", {CornerRadius = UDim.new(0, r or 8)}, p) end
 local function stroke(p, c, tr) make("UIStroke", {Color = c or T.Border, Thickness = 1, Transparency = tr or 0}, p) end
@@ -3615,8 +3836,13 @@ function Library:CreateWindow(cfg)
 	cfg = cfg or {}
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "NomoHub"
+	pcall(function() gui.AutoLocalize = false end)
+	pcall(function() gui.RootLocalizationTable = nil end)
 	gui.ResetOnSpawn = false
 	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	gui.DescendantAdded:Connect(function(child)
+		pcall(function() child.AutoLocalize = false end)
+	end)
 	-- Arceus-safe: PlayerGui first. CoreGui can trigger capability errors on some executors.
 	local pg = Players.LocalPlayer:WaitForChild("PlayerGui", 20)
 	if not pg then error("PlayerGui not ready") end
@@ -3702,7 +3928,7 @@ function Library:CreateWindow(cfg)
 		b.Activated:Connect(cb)
 		return b
 	end
-	winBtn("×", -36, function() gui:Destroy() end)
+	winBtn("×", -36, function() State.Stop("window close") end)
 
 	-- Hydra/Holy-style minimize: hide full window and show compact floating button.
 	local mini = make("TextButton", {
@@ -3896,9 +4122,14 @@ function Library:CreateWindow(cfg)
 		TextXAlignment = Enum.TextXAlignment.Left,
 	}, side)
 
-	local navHolder = make("Frame", {
+	local navHolder = make("ScrollingFrame", {
 		Size = UDim2.new(1, -16, 1, -140), Position = UDim2.fromOffset(8, 64),
 		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = T.Border,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
 	}, side)
 	vlist(navHolder, 4)
 
@@ -4350,6 +4581,7 @@ function Library:CreateWindow(cfg)
 
                 openBtn.Activated:Connect(function()
                     overlay.Visible = true
+                    if State.DisableAutoLocalize then State.DisableAutoLocalize(overlay) end
                     searchBox.Text = ""
                     rebuildList()
                     task.defer(function()
@@ -4381,7 +4613,7 @@ function Library:CreateWindow(cfg)
                     Get = function() return current end,
                     Set = function(_, v) current = tostring(v or ""); refreshButton() end,
                     SetOptions = function(_, opts) options = opts or {}; if overlay.Visible then rebuildList() end end,
-                    Open = function() overlay.Visible = true; searchBox.Text = ""; rebuildList() end,
+                    Open = function() overlay.Visible = true; if State.DisableAutoLocalize then State.DisableAutoLocalize(overlay) end; searchBox.Text = ""; rebuildList() end,
                 }
             end
 
@@ -4664,14 +4896,40 @@ win = (CFG.Performance.NoUI and State.CreateHeadlessWindow() or Library:CreateWi
     -- MiniImage = "rbxassetid://YOUR_IMAGE_ID",
     -- MiniImage = "Nomo/blue_rose.png",
 }))
+State.Gui = win.Gui
+
+State.SetBootStatus = function(step)
+    State.LastBootStep = tostring(step or "?")
+    local text = "Boot: " .. State.LastBootStep
+    if not State.BootComplete and win and win.CloneStatusText then
+        pcall(function()
+            win.CloneStatusText.Text = text
+        end)
+    end
+    if win and win.Pills and win.Pills.Status and win.Pills.Status.Set then
+        pcall(function()
+            win.Pills.Status:Set(State.LastBootStep, T.Accent)
+        end)
+    end
+end
+
+State.SetBootStatus("window ready")
 
 if not CFG.Performance.NoUI then
+    State.SetBootStatus("performance")
     State.ApplyPerformanceMode()
 end
 
-win.Pills.Status:Set("Ready", T.Green)
+State.SetBootStatus("pills")
+win.Pills.Status:Set("Boot", T.Accent)
 win.Pills.Booth:Set("Data", T.Accent)
-win.Pills.Balance:Set(commaNumber(getTokenBalance()), T.Green)
+win.Pills.Balance:Set("...", T.Sub)
+task.defer(function()
+    local okBalance, balance = pcall(getTokenBalance)
+    if okBalance then
+        win.Pills.Balance:Set(commaNumber(balance), T.Green)
+    end
+end)
 
 local function richEscape(v)
     return tostring(v or ""):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
@@ -4716,10 +4974,18 @@ local refreshSellerLog
 
 State.RefreshCloneStatus = function(forceInventory)
     if not win.CloneStatusText then return end
-    local best = findBestBooth()
-    local boothText = best and best.Status or "No Booth"
+    local boothText = "..."
+    local okBooth, best = pcall(findBestBooth)
+    if okBooth and best then
+        boothText = best.Status or "No Booth"
+    elseif State.LastBooth and State.LastBooth.Status then
+        boothText = State.LastBooth.Status
+    end
     local listings = State.LastMyListings
-    if type(listings) ~= "table" then listings = getMyListings() end
+    if type(listings) ~= "table" then
+        local okListings, listingResult = pcall(getMyListings)
+        listings = (okListings and type(listingResult) == "table") and listingResult or {}
+    end
     local device = tostring(CFG.Webhook.DeviceName or getgenv().nomo_device_name or getgenv().NOMO_DEVICE_NAME or "")
     if device == "" then device = tostring(LocalPlayer.Name or "NOMO") end
     local uptime = math.max(0, math.floor(os.clock() - (State.StartedAt or os.clock())))
@@ -4729,7 +4995,10 @@ State.RefreshCloneStatus = function(forceInventory)
     local webhook = CFG.Webhook.Enabled and "ON" or "OFF"
     if forceInventory or State.CloneInventoryDirty or os.clock() - (State.LastCloneInventoryAt or 0) >= 10 then
         State.LastCloneInventoryAt = os.clock()
-        State.CloneInventoryCount = #getOwnPetsFromData(forceInventory or State.CloneInventoryDirty)
+        local okPets, pets = pcall(getOwnPetsFromData, forceInventory or State.CloneInventoryDirty)
+        if okPets and type(pets) == "table" then
+            State.CloneInventoryCount = #pets
+        end
         State.CloneInventoryDirty = false
     end
     State.ClonePanelDirty = false
@@ -4775,8 +5044,13 @@ State.RefreshDashboard = function()
         local session = math.floor(os.clock())
         local mins = math.floor(session / 60)
         local secs = session % 60
-        local best = findBestBooth()
-        local boothText = best and best.Status or "No Booth"
+        local boothText = "..."
+        local okBooth, best = pcall(findBestBooth)
+        if okBooth and best then
+            boothText = best.Status or "No Booth"
+        elseif State.LastBooth and State.LastBooth.Status then
+            boothText = State.LastBooth.Status
+        end
         win.RuntimeFooterText.Text = ('<font color="#%s">Session:</font> <font color="#%s">%dm %02ds</font>   |   <font color="#%s">Seller:</font> <font color="#%s">%s/%s</font>   |   <font color="#%s">Sniper:</font> <font color="#%s">%s/%s</font>   |   <font color="#%s">Booth:</font> <font color="#%s">%s</font>   |   <font color="#%s">Pets:</font> <font color="#%s">%s</font>'):format(
             T.Sub:ToHex(),
             T.Accent:ToHex(),
@@ -4805,26 +5079,40 @@ local function refreshPills()
     local minimized = State.UiMinimized == true
     local pillInterval = minimized and 10 or 1
     local cloneInterval = minimized and 10 or 2
-    local dashboardInterval = minimized and 20 or 2
+    local dashboardInterval = minimized and 30 or 10
 
     if State.UiRefreshDirty or now - (State.LastPillRefreshAt or 0) >= pillInterval then
         State.LastPillRefreshAt = now
-        local best = findBestBooth()
-        local boothText = best and best.Status or "No Booth"
+        local boothText = "..."
+        local okBooth, best = pcall(findBestBooth)
+        if okBooth and best then
+            boothText = best.Status or "No Booth"
+        elseif State.LastBooth and State.LastBooth.Status then
+            boothText = State.LastBooth.Status
+        end
         if not minimized or State.UiRefreshDirty then
             win.Pills.Booth:Set(boothText, boothText == "MINE" and T.Green or (boothText == "FREE" and T.Yellow or T.Sub))
-            win.Pills.Balance:Set(commaNumber(getTokenBalance()), T.Green)
+            local okBalance, balance = pcall(getTokenBalance)
+            win.Pills.Balance:Set(commaNumber(okBalance and balance or 0), T.Green)
         end
         State.UpdatePerfStats()
     end
 
     if State.ClonePanelDirty or now - (State.LastClonePanelAt or 0) >= cloneInterval then
-        State.RefreshCloneStatus(State.CloneInventoryDirty)
+        local okClone, cloneErr = pcall(State.RefreshCloneStatus, State.CloneInventoryDirty)
+        if not okClone then
+            State.LastClonePanelAt = now
+            if win.CloneStatusText then
+                win.CloneStatusText.Text = '<font color="#ff5c7a">Status refresh paused</font>\nScript still running'
+            end
+            dlog("Clone status refresh error", tostring(cloneErr))
+        end
     end
 
     if (not minimized) and (State.UiRefreshDirty or now - (State.LastDashboardRefreshAt or 0) >= dashboardInterval) then
         State.LastDashboardRefreshAt = now
-        State.RefreshDashboard()
+        local okDash, dashErr = pcall(State.RefreshDashboard)
+        if not okDash then dlog("Dashboard refresh error", tostring(dashErr)) end
     end
 
     State.UiRefreshDirty = false
@@ -4832,6 +5120,7 @@ end
 
 
 --// DASHBOARD PAGE
+State.SetBootStatus("dashboard ui")
 State.DashboardPage = win:CreatePage("Dashboard")
 State.DashToggleRow = State.DashboardPage:AddRow()
 State.DashAutoSec = State.DashboardPage:AddSectionInRow(State.DashToggleRow, "Auto List", 1 / 3)
@@ -4857,10 +5146,11 @@ State.DashWebhookSec:AddToggle("Enabled", CFG.Webhook.Enabled == true, function(
 end)
 
 State.DashActionRow = State.DashboardPage:AddRow()
-State.DashRebuildSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Rebuild", 0.25)
-State.DashListingsSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "My Listing", 0.25)
-State.DashFiltersSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Filters", 0.25)
-State.DashSniperNavSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Sniper", 0.25)
+State.DashRebuildSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Rebuild", 0.20)
+State.DashListingsSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "My Listing", 0.20)
+State.DashFiltersSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Filters", 0.20)
+State.DashSniperNavSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Sniper", 0.20)
+State.DashFruitSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Fruit", 0.20)
 
 State.DashRebuildSec:AddButton("Smart Rebuild", function()
     task.spawn(function()
@@ -4891,10 +5181,18 @@ State.DashSniperNavSec:AddButton("Manage", function()
     end
 end, "outline")
 
+State.DashFruitSec:AddButton("Manage", function()
+    if State.OpenFruitFilterManager then
+        State.OpenFruitFilterManager()
+    else
+        win:SelectPage("Fruit")
+    end
+end, "outline")
 State.DashEventsSec = State.DashboardPage:AddSection("Recent Events")
 State.DashLog = State.DashEventsSec:AddLog(64)
 
 --// BOOTH PAGE
+State.SetBootStatus("booth ui")
 local boothPage = win:CreatePage("Booth")
 State.BoothControlRow = boothPage:AddRow()
 State.BoothAutoSec = boothPage:AddSectionInRow(State.BoothControlRow, "Auto Claim", 1 / 3)
@@ -4906,6 +5204,7 @@ State.BoothAutoSec:AddToggle("Enabled", CFG.Booth.AutoClaim, function(v)
     State.SaveRuntimeSettings()
     log("AutoClaim", tostring(v))
 end)
+
 
 State.BoothReclaimSec:AddToggle("Enabled", CFG.Booth.SmartReclaim, function(v)
     CFG.Booth.SmartReclaim = v
@@ -5010,6 +5309,7 @@ State.BoothRebuildSec:AddButton("Smart Rebuild", function()
 end)
 
 --// SELLER PAGE
+State.SetBootStatus("seller ui")
 local sellerPage = win:CreatePage("Seller")
 local sellerCtrl = sellerPage:AddSection("Seller Control")
 sellerCtrl.Frame.LayoutOrder = 30
@@ -5141,9 +5441,11 @@ filterSec:AddDropdown("Listing Weight Mode", {"Base", "Visual"}, CFG.Seller.Weig
     log("ListingWeightMode", CFG.Seller.WeightMode)
 end)
 
-local petInput = filterSec:AddSearchDropdown("Pet", getPetList(), "Ankylosaurus")
+local petInput = filterSec:AddSearchDropdown("Pet", State.PetList or {}, "Ankylosaurus")
+State.PetNameInput = petInput
 local priceInput = filterSec:AddInput("Price", "111")
-local mutationInput = filterSec:AddSearchDropdown("Mutation", getMutationList(), "Any")
+local mutationInput = filterSec:AddSearchDropdown("Mutation", State.MutationList or {"Any", "Normal", "Mutated Only"}, "Any")
+State.MutationInput = mutationInput
 local minKgInput = filterRangeSec:AddInput("Min Base KG", "0")
 local maxKgInput = filterRangeSec:AddInput("Max Base KG", "3")
 local minAgeInput = filterRangeSec:AddInput("Min Age", "1")
@@ -5311,6 +5613,7 @@ State.OpenFilterEditPopup = function(index, managerOverlay)
 end
 
 State.OpenFilterManager = function()
+    State.LoadLocalFilters()
     local overlay = make("Frame", {
         Size = UDim2.new(1, 0, 1, 0),
         BackgroundColor3 = Color3.new(0, 0, 0),
@@ -5643,6 +5946,7 @@ filterLogSec:AddButton("Clear All Filters", function()
 end, "outline")
 
 --// LISTINGS PAGE
+State.SetBootStatus("listings ui")
 local listingsPage = win:CreatePage("Listings")
 State.ListingActionRow = listingsPage:AddRow()
 State.ListingManageSec = listingsPage:AddSectionInRow(State.ListingActionRow, "My Listing", 0.25)
@@ -6052,6 +6356,7 @@ end, "outline")
 State.ListingMarketSec:AddButton("Price Check", refreshMarketSample, "outline")
 
 --// SNIPER PAGE
+State.SetBootStatus("sniper ui")
 local sniperPage = win:CreatePage("Sniper")
 State.SniperConfigRow = sniperPage:AddRow()
 State.SniperWatchSec = sniperPage:AddSectionInRow(State.SniperConfigRow, "Watch Builder", 0.5)
@@ -6077,7 +6382,8 @@ State.SniperWatchSec:AddToggle("Rescan Before Buy", CFG.Sniper.RescanBeforeBuy, 
     log("Sniper RescanBeforeBuy", tostring(v))
 end)
 
-local sPet = State.SniperWatchSec:AddSearchDropdown("Pet", getPetList(), "Red Fox")
+local sPet = State.SniperWatchSec:AddSearchDropdown("Pet", State.PetList or {}, "Red Fox")
+State.SniperPetInput = sPet
 local sMax = State.SniperWatchSec:AddInput("Max Price", "6")
 State.SniperWeightModeInput = State.SniperLimitSec:AddDropdown("Weight Mode", {"Base", "Visual"}, CFG.Sniper.WeightMode or "Base", function(v)
     CFG.Sniper.WeightMode = normalizeSniperWeightMode(v)
@@ -6239,6 +6545,7 @@ State.OpenSniperWatchEditPopup = function(name, managerOverlay)
 end
 
 State.OpenSniperWatchlistManager = function()
+    State.ReloadSniperConfig()
     local watches = State.GetSortedSniperWatches()
     local overlay = make("Frame", {
         Size = UDim2.new(1, 0, 1, 0),
@@ -6456,7 +6763,166 @@ State.SniperLimitSec:AddButton("Buy First", function()
     State.RefreshSniperLog()
 end, "outline")
 
+--// FRUIT PAGE
+State.SetBootStatus("fruit ui")
+State.FruitPage = win:CreatePage("Fruit")
+State.FruitTopRow = State.FruitPage:AddRow()
+State.FruitControlSec = State.FruitPage:AddSectionInRow(State.FruitTopRow, "Auto Fruit", 0.36)
+State.FruitFilterSec = State.FruitPage:AddSectionInRow(State.FruitTopRow, "Filter Builder", 0.64)
+State.FruitLogSec = State.FruitPage:AddSection("Fruit Preview")
+State.FruitLog = State.FruitLogSec:AddLog(112)
+
+State.FruitControlSec:AddToggle("Enabled", CFG.Fruit.Enabled == true, function(v)
+    CFG.Fruit.Enabled = v == true
+    CFG.Fruit.AutoList = v == true
+    State.SaveRuntimeSettings()
+    log("FruitListing", tostring(v), "path", State.GetFruitFilterPath())
+end)
+State.FruitControlSec:AddButton("Preview Fruits", function()
+    if State.BuildFruitCandidates then
+        local ok, scan = pcall(State.BuildFruitCandidates)
+        if ok and type(scan) == "table" then
+            State.RefreshFruitLog(scan)
+            log("Fruit scan", "filters", tostring(#(scan.Filters or {})), "fruits", tostring(#(scan.Fruits or {})), "candidates", tostring(#(scan.Candidates or {})))
+        else
+            log("Fruit scan error", tostring(scan))
+        end
+    else
+        log("Fruit scan unavailable")
+    end
+end)
+State.FruitControlSec:AddButton("Reload Config", function()
+    if State.ReloadFruitFilters then State.ReloadFruitFilters(true) end
+    if State.BuildFruitCandidates then
+        local ok, scan = pcall(State.BuildFruitCandidates)
+        if ok then State.RefreshFruitOptions(scan); State.RefreshFruitLog(scan) end
+    end
+end, "outline")
+State.FruitControlSec:AddButton("Manage Filters", function()
+    if State.OpenFruitFilterManager then
+        State.OpenFruitFilterManager()
+    else
+        log("Fruit filter manager not ready")
+    end
+end, "outline")
+
+State.RefreshFruitOptions = function(scan)
+    local seen, names = {}, {}
+    local function addName(v)
+        v = trim(v)
+        if v ~= "" and not seen[v] then
+            seen[v] = true
+            table.insert(names, v)
+        end
+    end
+
+    if type(State.FruitSeedData) == "table" then
+        for name in pairs(State.FruitSeedData) do
+            addName(name)
+        end
+    end
+
+    if type(scan) == "table" then
+        for _, fruit in ipairs(scan.Fruits or {}) do
+            addName(fruit.Name)
+        end
+        for _, f in ipairs(scan.Filters or {}) do
+            addName(f.Fruit)
+        end
+    end
+
+    if State.FruitFilterData and type(State.FruitFilterData.Fruit) == "table" then
+        for _, row in ipairs(State.FruitFilterData.Fruit) do
+            if type(row) == "table" then
+                addName(row.Fruit or row.fruit or row.Name or row.name)
+            end
+        end
+    end
+
+    for _, l in ipairs(getAllListings(false, true)) do
+        if tostring(l.ItemType or "") == tostring(CFG.Fruit.ItemType or "Holdable") then
+            local item = l.Item or {}
+            addName(item.FruitName or item.Fruit or item.ItemName or item.Name or l.PetType)
+        end
+    end
+
+    table.sort(names)
+    State.FruitNameOptions = names
+    if State.FruitNameInput and State.FruitNameInput.SetOptions then
+        State.FruitNameInput:SetOptions(names)
+    end
+    return names
+end
+
+State.FruitNameInput = State.FruitFilterSec:AddSearchDropdown("Fruit", State.RefreshFruitOptions(), "Bone Blossom")
+State.FruitPriceInput = State.FruitFilterSec:AddInput("Price", "11")
+State.FruitMinInput = State.FruitFilterSec:AddInput("Min KG", "0")
+State.FruitMaxInput = State.FruitFilterSec:AddInput("Max KG", "")
+State.FruitMutInput = State.FruitFilterSec:AddInput("Variant", "Any")
+State.FruitCapInput = State.FruitFilterSec:AddInput("Max Listed", "5")
+State.FruitFilterSec:AddButton("+ Add Fruit Filter", function()
+    if State.AddFruitFilter then
+        State.AddFruitFilter(
+            State.FruitNameInput:Get(),
+            State.FruitPriceInput:Get(),
+            State.FruitMinInput:Get(),
+            State.FruitMaxInput:Get(),
+            State.FruitMutInput:Get(),
+            State.FruitCapInput:Get()
+        )
+    end
+    if State.BuildFruitCandidates then
+        local ok, scan = pcall(State.BuildFruitCandidates)
+        if ok then State.RefreshFruitOptions(scan); State.RefreshFruitLog(scan) end
+    end
+end)
+
+
+State.RefreshFruitLog = function(scan)
+    scan = scan or State.LastFruitScan
+    local lines = {
+        string.format("Auto %s | Filters %s | Inventory %s | Ready %s",
+            CFG.Fruit.Enabled == true and "ON" or "OFF",
+            tostring(type(scan) == "table" and #(scan.Filters or {}) or 0),
+            tostring(type(scan) == "table" and #(scan.Fruits or {}) or 0),
+            tostring(type(scan) == "table" and #(scan.Candidates or {}) or 0)
+        ),
+        "Path: " .. tostring(State.GetFruitFilterPath()),
+    }
+    if type(scan) == "table" then
+        if #(scan.Candidates or {}) > 0 then
+            table.insert(lines, "Ready:")
+            for i, c in ipairs(scan.Candidates or {}) do
+                if i > 6 then table.insert(lines, "... +" .. tostring(#scan.Candidates - 6) .. " more ready") break end
+                local fruit = c.Fruit or {}
+                local filter = c.Filter or {}
+                table.insert(lines, string.format("%02d. %s | %s KG | %s tokens", i, tostring(fruit.Name or "?"), fmtKg(fruit.Weight), tostring(filter.Price or "?")))
+            end
+        else
+            table.insert(lines, "Ready: 0")
+        end
+
+        local reasonCounts, reasonOrder = {}, {}
+        for _, s in ipairs(scan.Skipped or {}) do
+            local reason = tostring(s.Reason or "unknown")
+            if not reasonCounts[reason] then table.insert(reasonOrder, reason) end
+            reasonCounts[reason] = (reasonCounts[reason] or 0) + 1
+        end
+        if #reasonOrder > 0 then
+            table.insert(lines, "Skipped summary:")
+            for i, reason in ipairs(reasonOrder) do
+                if i > 5 then table.insert(lines, "... +" .. tostring(#reasonOrder - 5) .. " more reason(s)") break end
+                table.insert(lines, string.format("- %s: %s", reason, tostring(reasonCounts[reason] or 0)))
+            end
+        end
+    else
+        table.insert(lines, "Press Preview Fruits to inspect current inventory fruit.")
+    end
+    addLines(State.FruitLog, lines)
+end
+State.RefreshFruitLog()
 --// WEBHOOK PAGE
+State.SetBootStatus("webhook ui")
 State.WebhookPage = win:CreatePage("Webhook")
 State.WebhookTopRow = State.WebhookPage:AddRow()
 State.WebhookSec = State.WebhookPage:AddSectionInRow(State.WebhookTopRow, "Delivery", 0.35)
@@ -6557,6 +7023,7 @@ State.WebhookTestSec:AddButton("Test Sale Webhook", function()
 end, "outline")
 
 --// SETTINGS PAGE
+State.SetBootStatus("settings ui")
 State.SettingsPage = win:CreatePage("Settings")
 State.SettingsTopRow = State.SettingsPage:AddRow()
 State.SettingPathSec = State.SettingsPage:AddSectionInRow(State.SettingsTopRow, "Paths", 0.36)
@@ -6580,9 +7047,26 @@ State.SettingUiSec:AddToggle("Auto Minimized", CFG.UI.AutoMinimized == true, fun
     log("AutoMinimized", tostring(v), "applies on next reload")
 end)
 
+State.SettingUiSec:AddToggle("Fruit Listing", CFG.Fruit.Enabled == true, function(v)
+    CFG.Fruit.Enabled = v == true
+    CFG.Fruit.AutoList = v == true
+    State.SaveRuntimeSettings()
+    log("FruitListing", tostring(v), "path", State.GetFruitFilterPath())
+end)
+
 State.SettingActionSec:AddButton("Reload Pet List", function()
     loadGamePetList()
     log("PetList reloaded", tostring(#State.PetList))
+end, "outline")
+
+State.SettingActionSec:AddButton("Diagnose Fruits", function()
+    if State.DiagnoseFruits then State.DiagnoseFruits() end
+end, "outline")
+
+State.SettingActionSec:AddButton("Rejoin Server", function()
+    State.OpenConfirmPopup("Rejoin Server", "Reload this clone in the current trade server?", "Rejoin", function()
+        State.Rejoin("settings rejoin")
+    end)
 end, "outline")
 
 State.SettingPathSec:AddButton("Save / Reload Path", function()
@@ -6672,6 +7156,7 @@ getgenv().NOMO_V32_REFRESH_SNIPER = State.RefreshSniperLog
 getgenv().NOMO_V32_STOP = function() State.Stop("manual") end
 
 --// startup
+State.SetBootStatus("startup")
 ensureFolder()
 local function bootStep(name, fn)
     log("Boot step", tostring(name))
@@ -6684,27 +7169,690 @@ local function bootStep(name, fn)
     return nil
 end
 
-bootStep("PetList", loadGamePetList)
-bootStep("MutationList", loadGameMutationList)
 bootStep("ListingFilters", reloadFilters)
+bootStep("WarnFilter", installWarnFilter)
+
+log("Started", VERSION .. " PRIVATE UI")
+State.SetBootStatus("select dashboard")
+
+win:SelectPage("Dashboard")
+
 if State.PendingRuntimeDefaultsSave then
     State.PendingRuntimeDefaultsSave = false
     State.SaveRuntimeSettings()
 end
-bootStep("SniperFilters", State.ReloadSniperConfig)
-bootStep("WarnFilter", installWarnFilter)
-
-log("Started", VERSION .. " PRIVATE UI")
-refreshPills()
+task.defer(function()
+    pcall(refreshPills)
+end)
 log("PetList", #State.PetList, "| ConfigFolder", getConfigFolder(), "| Listing", getFilterPath())
+State.SetBootStatus("fruit install")
 
-bootStep("BoothLog", refreshBoothLog)
-bootStep("SellerLog", function() refreshSellerLog(false) end)
-bootStep("MyListingsLog", refreshMyListingsLog)
-bootStep("MarketSample", refreshMarketSample)
-bootStep("SniperLog", State.RefreshSniperLog)
+State.InstallFruitListing = function()
+local function normalizeFruitConfigData(data)
+    if type(data) ~= "table" then return {Fruit = {}} end
+    if type(data.fruit) == "table" then data.Fruit = data.fruit end
+    if type(data.Fruits) == "table" then data.Fruit = data.Fruits end
+    if type(data.filters) == "table" then data.Fruit = data.filters end
+    if type(data.Filters) == "table" then data.Fruit = data.Filters end
+    if type(data[1]) == "table" then data.Fruit = data end
+    data.Fruit = type(data.Fruit) == "table" and data.Fruit or {}
+    return data
+end
 
-win:SelectPage("Dashboard")
+local function reloadFruitFilters(force)
+    local path = State.GetFruitFilterPath()
+    local now = os.clock()
+    if not force and State.FruitFilterData and State.LastFruitFilterPath == path and now - (State.LastFruitFilterLoadAt or 0) < 5 then
+        return State.FruitFilterData
+    end
+
+    State.FruitFilterData = normalizeFruitConfigData(readJson(path))
+    State.LastFruitFilterPath = path
+    State.LastFruitFilterLoadAt = now
+
+    local countNow = #(State.FruitFilterData.Fruit or {})
+    if force or State.LastFruitFilterLogCount ~= countNow or State.LastFruitFilterLogPath ~= path then
+        State.LastFruitFilterLogCount = countNow
+        State.LastFruitFilterLogPath = path
+        log("Fruit filters loaded", path, tostring(countNow) .. " filters")
+    end
+    return State.FruitFilterData
+end
+
+State.ReloadFruitFilters = reloadFruitFilters
+
+local getFruitFilters
+
+local function saveFruitFilters()
+    State.FruitFilterData = normalizeFruitConfigData(State.FruitFilterData)
+    return saveJson(State.GetFruitFilterPath(), {
+        version = 1,
+        fruit = State.FruitFilterData.Fruit or {},
+    })
+end
+
+State.AddFruitFilter = function(fruit, price, minKg, maxKg, variant, cap)
+    State.FruitFilterData = normalizeFruitConfigData(State.FruitFilterData or readJson(State.GetFruitFilterPath()))
+    local row = {
+        Enabled = true,
+        Fruit = tostring(fruit or ""),
+        Price = clampPrice(price) or 1,
+        MinWeight = toNumber(minKg) or 0,
+        MaxWeight = toNumber(maxKg),
+        Variant = tostring(variant or "Any"),
+        MaxListedFruit = toInt(cap) or 5,
+    }
+    local editIndex = toInt(State.EditingFruitFilterRow)
+    if editIndex and State.FruitFilterData.Fruit and State.FruitFilterData.Fruit[editIndex] then
+        State.FruitFilterData.Fruit[editIndex] = row
+        State.EditingFruitFilterRow = nil
+        saveFruitFilters()
+        log("Updated fruit filter", tostring(fruit), "price", tostring(price), "saved=true")
+    else
+        State.EditingFruitFilterRow = nil
+        table.insert(State.FruitFilterData.Fruit, row)
+        saveFruitFilters()
+        log("Added fruit filter", tostring(fruit), "price", tostring(price), "saved=true")
+    end
+end
+State.OpenFruitFilterEditPopup = function(index, managerOverlay)
+    reloadFruitFilters(true)
+    index = toInt(index)
+    local row = index and State.FruitFilterData and State.FruitFilterData.Fruit and State.FruitFilterData.Fruit[index]
+    if not row then
+        log("Edit fruit filter failed", "bad index", tostring(index))
+        return
+    end
+
+    local overlay = make("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.3,
+        BorderSizePixel = 0,
+        ZIndex = 100,
+    }, win.Gui)
+    local modal = make("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.fromOffset(420, 230),
+        BackgroundColor3 = T.Card,
+        BorderSizePixel = 0,
+        ZIndex = 101,
+    }, overlay)
+    corner(modal, 10); stroke(modal); pad(modal, 12)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 28),
+        BackgroundTransparency = 1,
+        Text = "Edit Fruit Filter - " .. tostring(row.Fruit or row.fruit or "?"),
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 102,
+    }, modal)
+
+    local function label(y, text)
+        make("TextLabel", {
+            Size = UDim2.new(0, 120, 0, 26),
+            Position = UDim2.fromOffset(0, y),
+            BackgroundTransparency = 1,
+            Text = text,
+            TextColor3 = T.Sub,
+            Font = Enum.Font.Gotham,
+            TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 102,
+        }, modal)
+    end
+    local function box(y, value)
+        local b = make("TextBox", {
+            Size = UDim2.new(1, -130, 0, 26),
+            Position = UDim2.fromOffset(130, y),
+            BackgroundColor3 = T.Card2,
+            Text = tostring(value or ""),
+            TextColor3 = T.Text,
+            Font = Enum.Font.Gotham,
+            TextSize = 12,
+            ClearTextOnFocus = false,
+            BorderSizePixel = 0,
+            ZIndex = 102,
+        }, modal)
+        corner(b, 6); stroke(b); pad(b, 0, 0, 6, 6)
+        return b
+    end
+
+    label(50, "Price")
+    local priceBox = box(50, row.Price or row.price or "")
+    label(90, "Min KG")
+    local minBox = box(90, row.MinWeight or row.minWeight or row.MinKG or row.minKG or 0)
+    label(130, "Max KG")
+    local maxBox = box(130, row.MaxWeight or row.maxWeight or row.MaxKG or row.maxKG or "")
+
+    local saveBtn = make("TextButton", {
+        Size = UDim2.fromOffset(130, 30),
+        Position = UDim2.new(1, -272, 1, -34),
+        BackgroundColor3 = T.Accent,
+        Text = "Save",
+        TextColor3 = Color3.new(1, 1, 1),
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 102,
+    }, modal)
+    corner(saveBtn, 7)
+    local cancelBtn = make("TextButton", {
+        Size = UDim2.fromOffset(130, 30),
+        Position = UDim2.new(1, -134, 1, -34),
+        BackgroundColor3 = T.Card2,
+        Text = "Cancel",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 102,
+    }, modal)
+    corner(cancelBtn, 7); stroke(cancelBtn)
+
+    cancelBtn.Activated:Connect(function()
+        overlay:Destroy()
+    end)
+    saveBtn.Activated:Connect(function()
+        reloadFruitFilters(true)
+        local target = State.FruitFilterData and State.FruitFilterData.Fruit and State.FruitFilterData.Fruit[index]
+        if target then
+            target.Enabled = true
+            target.Price = clampPrice(priceBox.Text) or target.Price or 1
+            target.MinWeight = toNumber(minBox.Text) or 0
+            target.MaxWeight = toNumber(maxBox.Text)
+            local ok = saveFruitFilters()
+            log("Updated fruit filter", tostring(index), tostring(target.Fruit or "?"), "price", tostring(target.Price), "max", tostring(target.MaxListedFruit), "saved=" .. tostring(ok))
+            if State.BuildFruitCandidates then
+                local scanOk, scan = pcall(State.BuildFruitCandidates)
+                if scanOk and State.RefreshFruitLog then State.RefreshFruitLog(scan) end
+            end
+        end
+        overlay:Destroy()
+        if managerOverlay then managerOverlay:Destroy() end
+        State.OpenFruitFilterManager()
+    end)
+
+    if State.DisableAutoLocalize then State.DisableAutoLocalize(overlay) end
+end
+State.OpenFruitFilterManager = function()
+    reloadFruitFilters(true)
+    local filters = getFruitFilters()
+    local overlay = make("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.35,
+        BorderSizePixel = 0,
+        ZIndex = 90,
+    }, win.Gui)
+    local modal = make("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.fromOffset(540, 300),
+        BackgroundColor3 = T.Card,
+        BorderSizePixel = 0,
+        ZIndex = 91,
+    }, overlay)
+    corner(modal, 10); stroke(modal); pad(modal, 10)
+
+    make("TextLabel", {
+        Size = UDim2.new(1, -74, 0, 26),
+        BackgroundTransparency = 1,
+        Text = "Fruit Filters (" .. tostring(#filters) .. ")",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 92,
+    }, modal)
+    local closeBtn = make("TextButton", {
+        Size = UDim2.fromOffset(64, 24),
+        Position = UDim2.new(1, -64, 0, 0),
+        BackgroundColor3 = T.Card2,
+        Text = "Done",
+        TextColor3 = T.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        ZIndex = 92,
+    }, modal)
+    corner(closeBtn, 7); stroke(closeBtn)
+
+    local list = make("ScrollingFrame", {
+        Size = UDim2.new(1, 0, 1, -34),
+        Position = UDim2.fromOffset(0, 32),
+        BackgroundColor3 = T.Card2,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 4,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = UDim2.new(),
+        ZIndex = 92,
+    }, modal)
+    corner(list, 8); pad(list, 5); vlist(list, 4)
+    closeBtn.Activated:Connect(function() overlay:Destroy() end)
+
+    for i, f in ipairs(filters) do
+        local row = make("Frame", {
+            Size = UDim2.new(1, 0, 0, 46),
+            BackgroundColor3 = T.Card,
+            BorderSizePixel = 0,
+            ZIndex = 93,
+        }, list)
+        corner(row, 7); stroke(row)
+        make("TextLabel", {
+            Size = UDim2.new(1, -116, 0, 20),
+            Position = UDim2.fromOffset(8, 5),
+            BackgroundTransparency = 1,
+            RichText = true,
+            Text = string.format('%02d. %s | <font color="#%s">P %s</font> | <font color="#%s">KG %s-%s</font>',
+                i,
+                tostring(f.Fruit or "?"):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"),
+                T.Yellow:ToHex(),
+                tostring(f.Price or "?"),
+                T.Accent:ToHex(),
+                tostring(f.MinWeight or 0),
+                tostring(f.MaxWeight or "unli")
+            ),
+            TextColor3 = T.Text,
+            Font = Enum.Font.Code,
+            TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 94,
+        }, row)
+        make("TextLabel", {
+            Size = UDim2.new(1, -116, 0, 18),
+            Position = UDim2.fromOffset(8, 24),
+            BackgroundTransparency = 1,
+            RichText = true,
+            Text = string.format('Var <font color="#%s">%s</font> | <font color="#%s">Cap %s</font>',
+                T.Text:ToHex(),
+                tostring(f.Variant or "Any"):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"),
+                T.Green:ToHex(),
+                tostring(f.MaxListedFruit or 5)
+            ),
+            TextColor3 = T.Sub,
+            Font = Enum.Font.Code,
+            TextSize = 10,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 94,
+        }, row)
+        local editBtn = make("TextButton", {
+            Size = UDim2.fromOffset(50, 24),
+            Position = UDim2.new(1, -104, 0.5, -12),
+            BackgroundColor3 = T.Card2,
+            Text = "Edit",
+            TextColor3 = T.Accent,
+            Font = Enum.Font.GothamBold,
+            TextSize = 11,
+            BorderSizePixel = 0,
+            ZIndex = 94,
+        }, row)
+        corner(editBtn, 6); stroke(editBtn)
+        local delBtn = make("TextButton", {
+            Size = UDim2.fromOffset(36, 24),
+            Position = UDim2.new(1, -44, 0.5, -12),
+            BackgroundColor3 = Color3.fromRGB(255, 72, 86),
+            Text = "X",
+            TextColor3 = Color3.new(1, 1, 1),
+            Font = Enum.Font.GothamBold,
+            TextSize = 12,
+            BorderSizePixel = 0,
+            ZIndex = 94,
+        }, row)
+        corner(delBtn, 6)
+        editBtn.Activated:Connect(function()
+            State.OpenFruitFilterEditPopup(f.Row or i, overlay)
+        end)
+        delBtn.Activated:Connect(function()
+            State.OpenConfirmPopup("Delete Fruit Filter", "Remove this fruit filter from config?", "Delete", function()
+                reloadFruitFilters(true)
+                if State.FruitFilterData and State.FruitFilterData.Fruit then
+                    table.remove(State.FruitFilterData.Fruit, f.Row or i)
+                    saveFruitFilters()
+                    log("Deleted fruit filter", tostring(f.Fruit or "?"))
+                end
+                overlay:Destroy()
+                State.OpenFruitFilterManager()
+            end)
+        end)
+    end
+
+    if State.DisableAutoLocalize then State.DisableAutoLocalize(overlay) end
+end
+getFruitFilters = function()
+    reloadFruitFilters(false)
+    local out = {}
+    for i, row in ipairs(State.FruitFilterData.Fruit or {}) do
+        if type(row) == "table" and row.Enabled ~= false then
+            local fruit = row.Fruit or row.fruit or row.Name or row.name or row.ItemName or row.itemName
+            if fruit and tostring(fruit) ~= "" then
+                table.insert(out, {
+                    Row = i,
+                    Fruit = tostring(fruit),
+                    FruitNorm = norm(fruit),
+                    Price = clampPrice(row.Price or row.price or row.Tokens or row.tokens),
+                    MinWeight = toNumber(row.MinWeight or row.minWeight or row.MinKG or row.minKG or row.minKg or row.MinSize or row.minSize),
+                    MaxWeight = toNumber(row.MaxWeight or row.maxWeight or row.MaxKG or row.maxKG or row.maxKg or row.MaxSize or row.maxSize),
+                    Variant = normalizeMutationConfig(row.Variant or row.variant or row.Mutation or row.mutation or "Any"),
+                    MaxListedFruit = toInt(row.MaxListedFruit or row.maxListedFruit or row.MaxListedPet or row.maxListedPet or row.MaxListed or row.maxListed) or 0,
+                    Raw = row,
+                })
+            end
+        end
+    end
+    return out
+end
+
+local function calculateFruitWeight(itemData)
+    if type(itemData) ~= "table" then return nil end
+    local seed = itemData.Seed
+    local itemName = itemData.ItemName or itemData.Name
+    local multiplier = toNumber(itemData.WeightMultiplier) or 1
+
+    if State.FruitWeightCalculator and type(State.FruitWeightCalculator.Calculate_Weight) == "function" then
+        local ok, base = pcall(State.FruitWeightCalculator.Calculate_Weight, seed, itemName)
+        if ok and tonumber(base) then
+            return (tonumber(base) or 0) * multiplier
+        end
+    elseif type(State.FruitWeightCalculator) == "function" then
+        local ok, base = pcall(State.FruitWeightCalculator, seed, itemName)
+        if ok and tonumber(base) then
+            return (tonumber(base) or 0) * multiplier
+        end
+    end
+
+    return toNumber(itemData.Weight or itemData.KG or itemData.Kilo or itemData.SizeMulti or itemData.WeightMultiplier)
+end
+
+local function getFruitMutationText(itemData)
+    if type(itemData) ~= "table" then return "Normal" end
+    local mutation = itemData.MutationString or itemData.Mutation or itemData.Mutations or ""
+    mutation = tostring(mutation or "")
+    if mutation == "" then mutation = "Normal" end
+    return mutation
+end
+
+local function getOwnFruitsFromInventoryData()
+    local okData, data = pcall(function() return DataService:GetData() end)
+    if not okData or type(data) ~= "table" then
+        log("Fruit inventory data failed", tostring(data))
+        return {}
+    end
+
+    local listed = {}
+    if data.TradeData and type(data.TradeData.Listings) == "table" then
+        for _, l in pairs(data.TradeData.Listings) do
+            if type(l) == "table" and l.ItemId then listed[tostring(l.ItemId)] = true end
+        end
+    end
+
+    local out = {}
+    local inventory = data.InventoryData
+    if type(inventory) ~= "table" then return out end
+
+    for id, item in pairs(inventory) do
+        if type(item) == "table" and tostring(item.ItemType or "") == tostring(CFG.Fruit.ItemType or "Holdable") then
+            local itemData = item.ItemData or {}
+            local name = itemData.ItemName or itemData.Name
+            if type(name) == "string" and name ~= "" then
+                local tradeLock = data.TradeData and data.TradeData.TradeLocks and data.TradeData.TradeLocks[item.ItemType] and data.TradeData.TradeLocks[item.ItemType][id]
+                local variant = tostring(itemData.Variant or "Normal")
+                if variant == "" then variant = "Normal" end
+                table.insert(out, {
+                    UUID = tostring(id),
+                    Type = tostring(item.ItemType or "Holdable"),
+                    Name = tostring(name),
+                    NameNorm = norm(name),
+                    Weight = calculateFruitWeight(itemData),
+                    Variant = variant,
+                    Mutation = getFruitMutationText(itemData),
+                    Favorited = itemData.IsFavorite == true,
+                    Locked = (tradeLock == true or type(tradeLock) == "table" or type(tradeLock) == "string"),
+                    AlreadyListed = listed[tostring(id)] == true,
+                    Raw = item,
+                    ItemData = itemData,
+                })
+            end
+        end
+    end
+
+    table.sort(out, function(a, b)
+        if a.NameNorm ~= b.NameNorm then return a.NameNorm < b.NameNorm end
+        return (a.Weight or 999999) < (b.Weight or 999999)
+    end)
+    State.FruitInventoryCache = out
+    return out
+end
+local function fruitMatchesFilter(fruit, f)
+    if not fruit or not f then return false, "missing" end
+    if fruit.NameNorm ~= f.FruitNorm then return false, "name" end
+    if f.MinWeight ~= nil and (fruit.Weight == nil or fruit.Weight < f.MinWeight) then return false, "min kg" end
+    if f.MaxWeight ~= nil and (fruit.Weight == nil or fruit.Weight > f.MaxWeight) then return false, "max kg" end
+    if not traitWantedAny(f.Variant) and norm(fruit.Variant) ~= norm(f.Variant) then return false, "variant" end
+    return true
+end
+
+local function listingToPseudoFruit(l)
+    local item = l and l.Item or {}
+    local name = item.ItemName or item.Name or item.FruitName or item.Fruit or l.PetType or "Unknown"
+    return {
+        UUID = tostring(l and l.ItemId or ""),
+        Name = tostring(name),
+        NameNorm = norm(name),
+        Weight = toNumber(item.Weight or item.KG or item.Kilo or item.SizeMulti),
+        Variant = tostring(item.Variant or item.Mutation or "Normal"),
+    }
+end
+
+local function findFruitFilterForListing(l, filters, requirePrice)
+    if tostring(l and l.ItemType or "") ~= tostring(CFG.Fruit.ItemType or "Holdable") then return nil, nil, "wrong item type" end
+    local pseudo = listingToPseudoFruit(l)
+    for _, f in ipairs(filters or getFruitFilters()) do
+        local ok = fruitMatchesFilter(pseudo, f)
+        if ok then
+            if requirePrice then
+                local listingPrice = clampPrice(l.Price)
+                local filterPrice = clampPrice(f.Price)
+                if not listingPrice or not filterPrice or listingPrice ~= filterPrice then
+                    return nil, pseudo, "wrong price"
+                end
+            end
+            return f, pseudo, nil
+        end
+    end
+    return nil, pseudo, "no filter"
+end
+
+local function countMyGoodFruitListingsByFilter(filters, myListings)
+    local counts = {}
+    for _, l in ipairs(myListings or getMyListings()) do
+        local f = findFruitFilterForListing(l, filters, true)
+        if f then
+            local key = tostring(f.FruitNorm) .. "|" .. tostring(f.Price) .. "|" .. tostring(f.MinWeight) .. "|" .. tostring(f.MaxWeight) .. "|" .. tostring(f.Variant)
+            counts[key] = (counts[key] or 0) + 1
+        end
+    end
+    return counts
+end
+
+local function buildFruitCandidates()
+    local fruits = getOwnFruitsFromInventoryData()
+    local filters = getFruitFilters()
+    local myListings = getMyListings()
+    local alreadyListedByFilter = countMyGoodFruitListingsByFilter(filters, myListings)
+    local currentBoothListings = #myListings
+    local currentFruitListings = 0
+    for _, l in ipairs(myListings) do
+        if tostring(l.ItemType or "") == tostring(CFG.Fruit.ItemType or "Holdable") then
+            currentFruitListings += 1
+        end
+    end
+    local maxFruitListings = math.max(0, toInt(CFG.Fruit.MaxListed) or 10)
+    local chosenFruitTotal = 0
+    local chosenFilter = {}
+    local candidates, skipped = {}, {}
+
+    for _, fruit in ipairs(fruits) do
+        local reason, matched = nil, nil
+        if fruit.Favorited then
+            reason = "favorited"
+        elseif fruit.Locked then
+            reason = "trade locked"
+        elseif fruit.AlreadyListed then
+            reason = "already listed"
+        else
+            for _, f in ipairs(filters) do
+                local ok, why = fruitMatchesFilter(fruit, f)
+                if ok then matched = f; break end
+                reason = why or "no filter"
+            end
+            if not matched then reason = "no filter" end
+        end
+
+        if matched and not matched.Price then reason = "filter no price" end
+        if matched and not reason then
+            local boothCap = tonumber(CFG.Seller.BoothCap) or 50
+            local remainingBoothSlots = math.max(0, boothCap - currentBoothListings)
+            local key = tostring(matched.FruitNorm) .. "|" .. tostring(matched.Price) .. "|" .. tostring(matched.MinWeight) .. "|" .. tostring(matched.MaxWeight) .. "|" .. tostring(matched.Variant)
+            local maxListed = tonumber(matched.MaxListedFruit) or 0
+            local currentListed = alreadyListedByFilter[key] or 0
+            local chosen = chosenFilter[key] or 0
+
+            if remainingBoothSlots <= 0 then
+                reason = "booth full"
+            elseif maxFruitListings > 0 and currentFruitListings >= maxFruitListings then
+                reason = "fruit global cap reached"
+            elseif maxFruitListings > 0 and chosenFruitTotal >= math.max(0, maxFruitListings - currentFruitListings) then
+                reason = "fruit global cap"
+            elseif maxListed > 0 and currentListed >= maxListed then
+                reason = "filter cap reached"
+            elseif maxListed > 0 and chosen >= math.max(0, maxListed - currentListed) then
+                reason = "filter cap"
+            else
+                chosenFilter[key] = chosen + 1
+                chosenFruitTotal += 1
+                table.insert(candidates, {Fruit = fruit, Filter = matched})
+            end
+        end
+
+        if reason then table.insert(skipped, {Fruit = fruit, Reason = reason}) end
+    end
+
+    State.LastFruitScan = {Fruits = fruits, Filters = filters, Candidates = candidates, Skipped = skipped}
+    return State.LastFruitScan
+end
+
+local function verifyFruitListingAfterList(fruit, price, f)
+    local targetId = tostring(fruit and fruit.UUID or "")
+    local targetPrice = clampPrice(price)
+    local attempts = math.max(1, toInt(CFG.Seller.VerifyAfterListAttempts) or 4)
+    local delay = tonumber(CFG.Seller.VerifyAfterListDelay) or 0.75
+
+    for attempt = 1, attempts do
+        task.wait(delay)
+        local listing = findMyListingByItemAndPrice(targetId, targetPrice, true, true)
+        if listing then
+            local pseudo = listingToPseudoFruit(listing)
+            local listingPrice = clampPrice(listing.Price)
+            local filterPrice = clampPrice(f and f.Price)
+            if tostring(listing.ItemType or "") ~= tostring(CFG.Fruit.ItemType or "Holdable") or pseudo.NameNorm ~= tostring(f and f.FruitNorm or "") or not listingPrice or not filterPrice or listingPrice ~= filterPrice then
+                log("UNSAFE fruit listing verified mismatch, removing", tostring(pseudo.Name), "price", tostring(listing.Price), "uuid", tostring(listing.ListingUUID))
+                removeListingUUID(listing.ListingUUID)
+                clearPendingList(targetId)
+                return false, "verified fruit listing failed exact id/name/price check"
+            end
+            clearPendingList(targetId)
+            return true, listing
+        end
+
+        local wrongPrice = findMyListingByItem(targetId, true, true)
+        if wrongPrice then
+            log("UNSAFE fruit listing wrong price, removing", tostring(wrongPrice.PetType), "expected", tostring(targetPrice), "got", tostring(wrongPrice.Price), "uuid", tostring(wrongPrice.ListingUUID))
+            removeListingUUID(wrongPrice.ListingUUID)
+            clearPendingList(targetId)
+            return false, "listed at wrong price"
+        end
+    end
+
+    return false, "not found in booth data"
+end
+
+local function listFruit(fruit, price, boothReady, f)
+    if not fruit or not fruit.UUID then return false, "missing fruit id" end
+    local fruitId = tostring(fruit.UUID)
+    if not f or fruit.NameNorm ~= f.FruitNorm then return false, "fruit safety mismatch" end
+    if State.PendingListUUIDs[fruitId] then return false, "pending" end
+    if findMyListingByItemAndPrice(fruitId, price, true, true) then return false, "already listed" end
+    local canSession, sessionWhy = canListSession()
+    if not canSession then return false, sessionWhy end
+    if CFG.Seller.RequireBoothBeforeList and not boothReady and not ensureBoothForListing() then return false, "no booth" end
+
+    markPendingList(fruitId)
+    local ok, result = pcall(function()
+        return CreateListing:InvokeServer(tostring(CFG.Fruit.ItemType or "Holdable"), fruitId, clampPrice(price))
+    end)
+    if ok and result ~= false then
+        State.InvalidateListingCache()
+        State.LastListAt = os.clock()
+        State.ListedThisSession = (State.ListedThisSession or 0) + 1
+        table.insert(State.ListTimes, os.clock())
+        local verified, verifyInfo = verifyFruitListingAfterList(fruit, price, f)
+        if verified then
+            registerCreateSuccess()
+            log("Fruit listed OK + verified", fruit.Name, "price", tostring(price), "session", tostring(State.ListedThisSession))
+        else
+            log("Fruit list sent but NOT verified", fruit.Name, "price", tostring(price), tostring(verifyInfo))
+        end
+        return true
+    end
+
+    if ok and result == false and (os.clock() - (tonumber(State.LastCreateWaitSignal) or 0)) < 1.5 then
+        registerCreateWait("CreateListing returned false")
+        clearPendingList(fruitId)
+        return false, "server wait"
+    end
+
+    clearPendingList(fruitId)
+    log("Fruit listing failed", tostring(fruit.Name), tostring(result))
+    return false, result
+end
+
+local function autoListFruits(scan)
+    if not CFG.Fruit.Enabled or not CFG.Fruit.AutoList or CFG.Seller.PreviewOnly or not CFG.Seller.AutoList then return end
+    scan = scan or buildFruitCandidates()
+    if #scan.Filters == 0 or #scan.Candidates == 0 then return end
+    local boothReady = ensureBoothForListing()
+    if not boothReady then log("Fruit AutoList blocked", "no booth") return end
+
+    local i = 1
+    while i <= #scan.Candidates do
+        local c = scan.Candidates[i]
+        local serverWait = createWaitRemaining()
+        if serverWait > 0 then task.wait(math.min(serverWait, 1)); continue end
+        local can, why = canListNow()
+        if not can then dlog("fruit list wait", why); break end
+        local ok, whyList = listFruit(c.Fruit, c.Filter.Price, true, c.Filter)
+        if ok then i += 1 elseif whyList == "server wait" then task.wait(math.min(math.max(createWaitRemaining(), 0.15), 1)) else i += 1 end
+        local waitTime = tonumber(CFG.Seller.ListCooldown) or 0
+        if waitTime > 0 then task.wait(waitTime) else task.wait() end
+    end
+end
+
+State.BuildFruitCandidates = buildFruitCandidates
+State.AutoListFruits = autoListFruits
+_G.NOMO_FRUIT_SCAN = buildFruitCandidates
+getgenv().NOMO_FRUIT_SCAN = buildFruitCandidates
+end
+State.InstallFruitListing()
+State.SetBootStatus("post fruit")
+
+
 
 task.spawn(function()
     task.wait(4)
@@ -6786,6 +7934,11 @@ task.spawn(function()
 end)
 
 --// Main background loops
+State.SetBootStatus("automation loop")
+State.BootComplete = true
+win.Pills.Status:Set("Ready", T.Green)
+State.ClonePanelDirty = true
+pcall(State.RefreshCloneStatus, true)
 task.spawn(function()
     while State.Running do
         local now = os.clock()
@@ -6811,6 +7964,10 @@ task.spawn(function()
             local ok, scan = pcall(buildCandidates)
             if ok then
                 autoList(scan)
+                if State.AutoListFruits then
+                    local okFruit, fruitErr = pcall(State.AutoListFruits)
+                    if not okFruit then log("Fruit scan error", tostring(fruitErr)) end
+                end
             else
                 log("Seller scan error", tostring(scan))
             end
