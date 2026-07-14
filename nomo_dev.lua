@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V11.1 DEV FRUIT PRICE KG POPUP"
+local VERSION = "V11.2 DEV MINI NEWLINES"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -4820,7 +4820,7 @@ State.UpdatePerfStats = function()
         "Sniper Matches: " .. tostring(type(State.LastSniperMatches) == "table" and #State.LastSniperMatches or 0),
         string.format("Session: %dm %02ds", mins, secs),
         "Version: " .. VERSION,
-    }, "\\n")
+    }, "\n")
 end
 
 win = (CFG.Performance.NoUI and State.CreateHeadlessWindow() or Library:CreateWindow({
@@ -4930,7 +4930,7 @@ State.RefreshCloneStatus = function(forceInventory)
         miniRow("Sniper", sniper .. "  +" .. tostring(State.SnipedThisSession or 0), CFG.Sniper.Enabled and T.Green or T.Sub),
         miniRow("Webhook", webhook, CFG.Webhook.Enabled and T.Green or T.Sub),
         miniRow("Session", session, T.Accent),
-    }, "\\n")
+    }, "\n")
     if win.CloneFooterText then
         win.CloneFooterText.Text = ('<font color="#%s">FPS</font> --   |   <font color="#%s">RAM</font> --   |   <font color="#%s">Ping</font> --'):format(
             T.Sub:ToHex(),
