@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V11.8 DEV READY STATUS"
+local VERSION = "V11.9 DEV PER FILTER FRUIT"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -45,7 +45,7 @@ CFG.Fruit = CFG.Fruit or {
     AutoList = true,
     RequireExactName = true,
     ItemType = "Holdable",
-    MaxListed = 10,
+    MaxListed = 0,
 }
 
 CFG.Sniper = CFG.Sniper or {
@@ -121,7 +121,7 @@ CFG.Fruit.Enabled = CFG.Fruit.Enabled == true
 CFG.Fruit.AutoList = CFG.Fruit.AutoList == true
 CFG.Fruit.RequireExactName = CFG.Fruit.RequireExactName ~= false
 CFG.Fruit.ItemType = tostring(CFG.Fruit.ItemType or "Holdable")
-CFG.Fruit.MaxListed = math.max(0, math.floor(tonumber(CFG.Fruit.MaxListed or CFG.Fruit.MaxListedFruit or CFG.Fruit.MaxFruitListings) or 10))
+CFG.Fruit.MaxListed = 0
 CFG.Listings.RemoveCooldown = CFG.Listings.RemoveCooldown or 1.2
 CFG.Listings.RemoveAllMax = CFG.Listings.RemoveAllMax or 50
 CFG.Listings.VerifyRemoveDelay = CFG.Listings.VerifyRemoveDelay or 0.45
@@ -719,7 +719,7 @@ State.LoadRuntimeSettings = function()
     if type(data.Fruit) == "table" then
         if data.Fruit.Enabled ~= nil then CFG.Fruit.Enabled = data.Fruit.Enabled == true end
         if data.Fruit.AutoList ~= nil then CFG.Fruit.AutoList = data.Fruit.AutoList == true end
-        if data.Fruit.MaxListed ~= nil then CFG.Fruit.MaxListed = math.max(0, math.floor(tonumber(data.Fruit.MaxListed) or CFG.Fruit.MaxListed or 10)) end
+        CFG.Fruit.MaxListed = 0
     end
     if type(data.Webhook) == "table" then
         if data.Webhook.Enabled ~= nil then CFG.Webhook.Enabled = data.Webhook.Enabled == true end
@@ -780,7 +780,6 @@ State.SaveRuntimeSettings = function()
         Fruit = {
             Enabled = CFG.Fruit.Enabled == true,
             AutoList = CFG.Fruit.AutoList == true,
-            MaxListed = tonumber(CFG.Fruit.MaxListed) or 10,
         },
         Webhook = {
             Enabled = CFG.Webhook.Enabled == true,
@@ -6861,9 +6860,8 @@ end)
 State.RefreshFruitLog = function(scan)
     scan = scan or State.LastFruitScan
     local lines = {
-        string.format("Fruit: %s | Cap %s | Filters %s | Inventory %s | Ready %s",
+        string.format("Fruit: %s | Filters %s | Inventory %s | Ready %s",
             CFG.Fruit.Enabled == true and "ON" or "OFF",
-            tostring(CFG.Fruit.MaxListed or 10),
             tostring(type(scan) == "table" and #(scan.Filters or {}) or 0),
             tostring(type(scan) == "table" and #(scan.Fruits or {}) or 0),
             tostring(type(scan) == "table" and #(scan.Candidates or {}) or 0)
