@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V11.0 DEV FRUIT EDIT POPUP"
+local VERSION = "V11.1 DEV FRUIT PRICE KG POPUP"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -2049,7 +2049,7 @@ end
 State.DiagnoseFruits = function()
     local function cleanShort(v)
         local s = tostring(v or "")
-        s = s:gsub("\n", " "):gsub("\r", " ")
+        s = s:gsub("\\n", " "):gsub("\\r", " ")
         if #s > 80 then s = s:sub(1, 77) .. "..." end
         return s
     end
@@ -4820,7 +4820,7 @@ State.UpdatePerfStats = function()
         "Sniper Matches: " .. tostring(type(State.LastSniperMatches) == "table" and #State.LastSniperMatches or 0),
         string.format("Session: %dm %02ds", mins, secs),
         "Version: " .. VERSION,
-    }, "\n")
+    }, "\\n")
 end
 
 win = (CFG.Performance.NoUI and State.CreateHeadlessWindow() or Library:CreateWindow({
@@ -4930,7 +4930,7 @@ State.RefreshCloneStatus = function(forceInventory)
         miniRow("Sniper", sniper .. "  +" .. tostring(State.SnipedThisSession or 0), CFG.Sniper.Enabled and T.Green or T.Sub),
         miniRow("Webhook", webhook, CFG.Webhook.Enabled and T.Green or T.Sub),
         miniRow("Session", session, T.Accent),
-    }, "\n")
+    }, "\\n")
     if win.CloneFooterText then
         win.CloneFooterText.Text = ('<font color="#%s">FPS</font> --   |   <font color="#%s">RAM</font> --   |   <font color="#%s">Ping</font> --'):format(
             T.Sub:ToHex(),
@@ -7147,7 +7147,7 @@ State.OpenFruitFilterEditPopup = function(index, managerOverlay)
     local modal = make("Frame", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.new(0.5, 0, 0.5, 0),
-        Size = UDim2.fromOffset(420, 300),
+        Size = UDim2.fromOffset(420, 230),
         BackgroundColor3 = T.Card,
         BorderSizePixel = 0,
         ZIndex = 101,
@@ -7195,18 +7195,12 @@ State.OpenFruitFilterEditPopup = function(index, managerOverlay)
         return b
     end
 
-    label(44, "Fruit")
-    local fruitBox = box(44, row.Fruit or row.fruit or "")
-    label(78, "Price")
-    local priceBox = box(78, row.Price or row.price or "")
-    label(112, "Min KG")
-    local minBox = box(112, row.MinWeight or row.minWeight or row.MinKG or row.minKG or 0)
-    label(146, "Max KG")
-    local maxBox = box(146, row.MaxWeight or row.maxWeight or row.MaxKG or row.maxKG or "")
-    label(180, "Variant")
-    local variantBox = box(180, row.Variant or row.variant or row.Mutation or row.mutation or "Any")
-    label(214, "Max Listed")
-    local capBox = box(214, row.MaxListedFruit or row.maxListedFruit or row.MaxListedPet or row.maxListedPet or 5)
+    label(50, "Price")
+    local priceBox = box(50, row.Price or row.price or "")
+    label(90, "Min KG")
+    local minBox = box(90, row.MinWeight or row.minWeight or row.MinKG or row.minKG or 0)
+    label(130, "Max KG")
+    local maxBox = box(130, row.MaxWeight or row.maxWeight or row.MaxKG or row.maxKG or "")
 
     local saveBtn = make("TextButton", {
         Size = UDim2.fromOffset(130, 30),
@@ -7241,12 +7235,9 @@ State.OpenFruitFilterEditPopup = function(index, managerOverlay)
         local target = State.FruitFilterData and State.FruitFilterData.Fruit and State.FruitFilterData.Fruit[index]
         if target then
             target.Enabled = true
-            target.Fruit = tostring(fruitBox.Text or "")
             target.Price = clampPrice(priceBox.Text) or target.Price or 1
             target.MinWeight = toNumber(minBox.Text) or 0
             target.MaxWeight = toNumber(maxBox.Text)
-            target.Variant = tostring(variantBox.Text or "Any")
-            target.MaxListedFruit = toInt(capBox.Text) or target.MaxListedFruit or 5
             local ok = saveFruitFilters()
             log("Updated fruit filter", tostring(index), tostring(target.Fruit or "?"), "price", tostring(target.Price), "max", tostring(target.MaxListedFruit), "saved=" .. tostring(ok))
             if State.BuildFruitCandidates then
