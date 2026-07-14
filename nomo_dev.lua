@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V11.9 DEV FRUIT STABILITY"
+local VERSION = "V11.8 DEV READY STATUS"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -121,7 +121,7 @@ CFG.Fruit.Enabled = CFG.Fruit.Enabled == true
 CFG.Fruit.AutoList = CFG.Fruit.AutoList == true
 CFG.Fruit.RequireExactName = CFG.Fruit.RequireExactName ~= false
 CFG.Fruit.ItemType = tostring(CFG.Fruit.ItemType or "Holdable")
-CFG.Fruit.MaxListed = math.clamp(math.floor(tonumber(CFG.Fruit.MaxListed or CFG.Fruit.MaxListedFruit or CFG.Fruit.MaxFruitListings) or 10), 0, 50)
+CFG.Fruit.MaxListed = math.max(0, math.floor(tonumber(CFG.Fruit.MaxListed or CFG.Fruit.MaxListedFruit or CFG.Fruit.MaxFruitListings) or 10))
 CFG.Listings.RemoveCooldown = CFG.Listings.RemoveCooldown or 1.2
 CFG.Listings.RemoveAllMax = CFG.Listings.RemoveAllMax or 50
 CFG.Listings.VerifyRemoveDelay = CFG.Listings.VerifyRemoveDelay or 0.45
@@ -719,7 +719,7 @@ State.LoadRuntimeSettings = function()
     if type(data.Fruit) == "table" then
         if data.Fruit.Enabled ~= nil then CFG.Fruit.Enabled = data.Fruit.Enabled == true end
         if data.Fruit.AutoList ~= nil then CFG.Fruit.AutoList = data.Fruit.AutoList == true end
-        if data.Fruit.MaxListed ~= nil then CFG.Fruit.MaxListed = math.clamp(math.floor(tonumber(data.Fruit.MaxListed) or CFG.Fruit.MaxListed or 10), 0, 50) end
+        if data.Fruit.MaxListed ~= nil then CFG.Fruit.MaxListed = math.max(0, math.floor(tonumber(data.Fruit.MaxListed) or CFG.Fruit.MaxListed or 10)) end
     end
     if type(data.Webhook) == "table" then
         if data.Webhook.Enabled ~= nil then CFG.Webhook.Enabled = data.Webhook.Enabled == true end
@@ -7216,7 +7216,7 @@ State.AddFruitFilter = function(fruit, price, minKg, maxKg, variant, cap)
         MinWeight = toNumber(minKg) or 0,
         MaxWeight = toNumber(maxKg),
         Variant = tostring(variant or "Any"),
-        MaxListedFruit = math.clamp(toInt(cap) or 5, 0, 50),
+        MaxListedFruit = toInt(cap) or 5,
     }
     local editIndex = toInt(State.EditingFruitFilterRow)
     if editIndex and State.FruitFilterData.Fruit and State.FruitFilterData.Fruit[editIndex] then
@@ -7516,7 +7516,7 @@ getFruitFilters = function()
                     MinWeight = toNumber(row.MinWeight or row.minWeight or row.MinKG or row.minKG or row.minKg or row.MinSize or row.minSize),
                     MaxWeight = toNumber(row.MaxWeight or row.maxWeight or row.MaxKG or row.maxKG or row.maxKg or row.MaxSize or row.maxSize),
                     Variant = normalizeMutationConfig(row.Variant or row.variant or row.Mutation or row.mutation or "Any"),
-                    MaxListedFruit = math.clamp(toInt(row.MaxListedFruit or row.maxListedFruit or row.MaxListedPet or row.maxListedPet or row.MaxListed or row.maxListed or 5) or 5, 0, 50),
+                    MaxListedFruit = toInt(row.MaxListedFruit or row.maxListedFruit or row.MaxListedPet or row.maxListedPet or row.MaxListed or row.maxListed) or 0,
                     Raw = row,
                 })
             end
@@ -7669,7 +7669,7 @@ local function buildFruitCandidates()
             currentFruitListings += 1
         end
     end
-    local maxFruitListings = math.clamp(toInt(CFG.Fruit.MaxListed) or 10, 0, 50)
+    local maxFruitListings = math.max(0, toInt(CFG.Fruit.MaxListed) or 10)
     local chosenFruitTotal = 0
     local chosenFilter = {}
     local candidates, skipped = {}, {}
@@ -7700,7 +7700,7 @@ local function buildFruitCandidates()
             local currentListed = alreadyListedByFilter[key] or 0
             local chosen = chosenFilter[key] or 0
 
-            if remainingBoothSlots <= 0 or chosenFruitTotal >= remainingBoothSlots then
+            if remainingBoothSlots <= 0 then
                 reason = "booth full"
             elseif maxFruitListings > 0 and currentFruitListings >= maxFruitListings then
                 reason = "fruit global cap reached"
