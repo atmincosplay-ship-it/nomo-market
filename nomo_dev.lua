@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V10.7 DEV FRUIT MANAGER OPEN"
+local VERSION = "V10.8 DEV FRUIT UNLI KG"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6747,7 +6747,7 @@ end
 State.FruitNameInput = State.FruitFilterSec:AddSearchDropdown("Fruit", State.RefreshFruitOptions(), "Bone Blossom")
 State.FruitPriceInput = State.FruitFilterSec:AddInput("Price", "11")
 State.FruitMinInput = State.FruitFilterSec:AddInput("Min KG/Size", "0")
-State.FruitMaxInput = State.FruitFilterSec:AddInput("Max KG/Size", "999")
+State.FruitMaxInput = State.FruitFilterSec:AddInput("Max KG/Size", "")
 State.FruitMutInput = State.FruitFilterSec:AddInput("Variant", "Any")
 State.FruitCapInput = State.FruitFilterSec:AddInput("Max Listed", "5")
 State.FruitFilterSec:AddButton("+ Add Fruit Filter", function()
