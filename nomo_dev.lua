@@ -1656,7 +1656,13 @@ State.NormalizeListingConfigData = function(data)
     return data
 end
 
-local function reloadFilters()
+local function reloadFilters(force)
+    local path = getFilterPath()
+    local now = os.clock()
+    if not force and State.FilterData and State.LastFilterPath == path and now - (State.LastFilterLoadAt or 0) < 5 then
+        return State.FilterData
+    end
+
     local remoteURL = tostring(CFG.Seller.RemoteConfigURL or "")
     if CFG.Seller.RemoteConfigEnabled and remoteURL ~= "" then
         local remoteData, remoteErr = fetchRemoteConfig()
@@ -1668,7 +1674,6 @@ local function reloadFilters()
         end
     end
 
-    local path = getFilterPath()
     State.FilterData = State.NormalizeListingConfigData(readJson(path))
     if type(State.FilterData.Filters) ~= "table" or #State.FilterData.Filters == 0 then
         local fallback = "Nomo/listing_filters.json"
@@ -1683,7 +1688,14 @@ local function reloadFilters()
             end
         end
     end
-    log("Local filters loaded", path, tostring(#(State.FilterData.Filters or {})) .. " filters")
+    local countNow = #(State.FilterData.Filters or {})
+    State.LastFilterPath = path
+    State.LastFilterLoadAt = now
+    if force or State.LastFilterLogPath ~= path or State.LastFilterLogCount ~= countNow then
+        State.LastFilterLogPath = path
+        State.LastFilterLogCount = countNow
+        log("Local filters loaded", path, tostring(countNow) .. " filters")
+    end
     return State.FilterData
 end
 
@@ -4983,10 +4995,11 @@ State.DashWebhookSec:AddToggle("Enabled", CFG.Webhook.Enabled == true, function(
 end)
 
 State.DashActionRow = State.DashboardPage:AddRow()
-State.DashRebuildSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Rebuild", 0.25)
-State.DashListingsSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "My Listing", 0.25)
-State.DashFiltersSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Filters", 0.25)
-State.DashSniperNavSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Sniper", 0.25)
+State.DashRebuildSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Rebuild", 0.20)
+State.DashListingsSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "My Listing", 0.20)
+State.DashFiltersSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Filters", 0.20)
+State.DashSniperNavSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Sniper", 0.20)
+State.DashFruitSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Fruit", 0.20)
 
 State.DashRebuildSec:AddButton("Smart Rebuild", function()
     task.spawn(function()
@@ -5017,6 +5030,26 @@ State.DashSniperNavSec:AddButton("Manage", function()
     end
 end, "outline")
 
+State.DashFruitSec:AddButton(CFG.Fruit.Enabled and "Disable" or "Enable", function()
+    CFG.Fruit.Enabled = not CFG.Fruit.Enabled
+    CFG.Fruit.AutoList = CFG.Fruit.Enabled
+    State.SaveRuntimeSettings()
+    log("FruitListing", tostring(CFG.Fruit.Enabled), "path", State.GetFruitFilterPath())
+    if State.RefreshDashboard then State.RefreshDashboard() end
+end)
+State.DashFruitSec:AddButton("Scan", function()
+    if State.BuildFruitCandidates then
+        local ok, scan = pcall(State.BuildFruitCandidates)
+        if ok and type(scan) == "table" then
+            log("Fruit scan", "filters", tostring(#(scan.Filters or {})), "fruits", tostring(#(scan.Fruits or {})), "candidates", tostring(#(scan.Candidates or {})))
+        else
+            log("Fruit scan error", tostring(scan))
+        end
+    else
+        log("Fruit scan unavailable")
+    end
+end, "outline")
+
 State.DashEventsSec = State.DashboardPage:AddSection("Recent Events")
 State.DashLog = State.DashEventsSec:AddLog(64)
 
@@ -5032,6 +5065,7 @@ State.BoothAutoSec:AddToggle("Enabled", CFG.Booth.AutoClaim, function(v)
     State.SaveRuntimeSettings()
     log("AutoClaim", tostring(v))
 end)
+
 
 State.BoothReclaimSec:AddToggle("Enabled", CFG.Booth.SmartReclaim, function(v)
     CFG.Booth.SmartReclaim = v
