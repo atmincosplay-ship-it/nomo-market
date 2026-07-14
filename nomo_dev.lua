@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V12.5 DEV FIND SELLER TEST"
+local VERSION = "V12.6 DEV FIND SELLER HOOK"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6496,6 +6496,8 @@ State.FindIndexSellerForPet = function(petName)
     return true
 end
 getgenv().NOMO_FIND_SELLER = State.FindIndexSellerForPet
+_G.NOMO_FIND_SELLER = State.FindIndexSellerForPet
+log("Find Seller hook registered", "use NOMO_FIND_SELLER('Pet Name')")
 
 State.OpenSniperWatchEditPopup = function(name, managerOverlay)
     local cfg = CFG.Sniper.Watchlist and CFG.Sniper.Watchlist[name]
@@ -7157,6 +7159,25 @@ end, "outline")
 
 State.SettingActionSec:AddButton("Diagnose Fruits", function()
     if State.DiagnoseFruits then State.DiagnoseFruits() end
+end, "outline")
+
+State.SettingActionSec:AddButton("Find Seller Test", function()
+    local petName = ""
+    if State.SniperPetInput and State.SniperPetInput.Get then
+        petName = trim(State.SniperPetInput:Get())
+    end
+    if petName == "" and CFG.Sniper.Watchlist then
+        for name in pairs(CFG.Sniper.Watchlist) do
+            petName = tostring(name)
+            break
+        end
+    end
+    log("Find Seller test button", tostring(petName))
+    if petName ~= "" then
+        State.FindIndexSellerForPet(petName)
+    else
+        log("Find Seller test blocked", "no sniper pet/watch")
+    end
 end, "outline")
 
 State.SettingActionSec:AddButton("Rejoin Server", function()
