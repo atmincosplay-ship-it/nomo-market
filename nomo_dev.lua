@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V13.1 DEV FIND SELLER RESULT"
+local VERSION = "V13.2 DEV FIND SELLER TRACE"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6446,16 +6446,31 @@ State.ApplySniperLimits = function()
     CFG.Sniper.MaxMatchesPerPet = 0
 end
 
+State.FindSellerLog = function(...)
+    local parts = {}
+    for i = 1, select("#", ...) do
+        table.insert(parts, tostring(select(i, ...)))
+    end
+    print("[NOMO FIND SELLER TRACE]", table.concat(parts, " "))
+    local ok, err = pcall(log, ...)
+    if not ok then
+        print("[NOMO FIND SELLER LOG ERROR]", tostring(err))
+    end
+    if State.RefreshActivityLog then
+        pcall(State.RefreshActivityLog, true)
+    end
+end
+
 State.FindIndexSellerForPet = function(petName)
     petName = trim(petName)
     print("[NOMO FIND SELLER]", petName)
-    log("Find Seller called", tostring(petName))
+    State.FindSellerLog("Find Seller called", tostring(petName))
     if petName == "" then
-        log("Find Seller blocked", "empty pet")
+        State.FindSellerLog("Find Seller blocked", "empty pet")
         return false
     end
     if os.clock() - (tonumber(State.LastFindSellerAt) or 0) < 10 then
-        log("Find Seller cooldown", tostring(petName))
+        State.FindSellerLog("Find Seller cooldown", tostring(petName))
         return false
     end
     State.LastFindSellerAt = os.clock()
@@ -6478,7 +6493,7 @@ State.FindIndexSellerForPet = function(petName)
             State.FindSellerController = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("TradeControllers"):WaitForChild("TradeFindSellerController"))
         end)
         if not okRequire then
-            log("Find Seller controller require failed", tostring(requireResult))
+            State.FindSellerLog("Find Seller controller require failed", tostring(requireResult))
         end
     end
     if State.FindSellerController then
@@ -6488,38 +6503,38 @@ State.FindIndexSellerForPet = function(petName)
             for k in pairs(State.FindSellerController) do
                 if #keys < 5 then table.insert(keys, tostring(k)) end
             end
-            log("Find Seller controller", shape, table.concat(keys, ","))
+            State.FindSellerLog("Find Seller controller", shape, table.concat(keys, ","))
         else
-            log("Find Seller controller", shape)
+            State.FindSellerLog("Find Seller controller", shape)
         end
     end
     if type(State.FindSellerController) == "function" then
-        log("Find Seller prompt fn", tostring(petName))
+        State.FindSellerLog("Find Seller prompt fn", tostring(petName))
         local okPrompt, promptResult = pcall(State.FindSellerController, "Pet", payload)
         if okPrompt and promptResult ~= false and promptResult ~= nil then
-            log("Find Seller prompt fn opened", tostring(petName), tostring(promptResult))
+            State.FindSellerLog("Find Seller prompt fn opened", tostring(petName), tostring(promptResult))
             return true
         end
-        log("Find Seller prompt fn result", tostring(promptResult), "falling back")
+        State.FindSellerLog("Find Seller prompt fn result", tostring(promptResult), "falling back")
     end
     if State.FindSellerController and type(State.FindSellerController.Prompt) == "function" then
-        log("Find Seller prompt", tostring(petName))
+        State.FindSellerLog("Find Seller prompt", tostring(petName))
         local okPrompt, promptResult = pcall(State.FindSellerController.Prompt, "Pet", payload)
         if not okPrompt then
             okPrompt, promptResult = pcall(State.FindSellerController.Prompt, State.FindSellerController, "Pet", payload)
         end
         if okPrompt and promptResult ~= false and promptResult ~= nil then
-            log("Find Seller prompt opened", tostring(petName), tostring(promptResult))
+            State.FindSellerLog("Find Seller prompt opened", tostring(petName), tostring(promptResult))
             return true
         end
-        log("Find Seller prompt result", tostring(promptResult), "falling back remote")
+        State.FindSellerLog("Find Seller prompt result", tostring(promptResult), "falling back remote")
     end
 
     local tradeEvents = GameEvents:FindFirstChild("TradeEvents")
     local tokenRaps = tradeEvents and tradeEvents:FindFirstChild("TokenRAPs")
     local findSellers = tokenRaps and tokenRaps:FindFirstChild("FindSellers")
     if not findSellers then
-        log("Find Seller failed", "FindSellers remote missing")
+        State.FindSellerLog("Find Seller failed", "FindSellers remote missing")
         return false
     end
 
@@ -6551,15 +6566,15 @@ State.FindIndexSellerForPet = function(petName)
         return "table#" .. tostring(count) .. " " .. table.concat(parts, " | ")
     end
 
-    log("Find Seller", tostring(petName), "using in-game index")
+    State.FindSellerLog("Find Seller", tostring(petName), "using in-game index")
     local ok, result = pcall(function()
         return findSellers:InvokeServer("Pet", payload)
     end)
     if not ok then
-        log("Find Seller error", tostring(result))
+        State.FindSellerLog("Find Seller error", tostring(result))
         return false
     end
-    log("Find Seller result", tostring(petName), summarizeFindResult(result))
+    State.FindSellerLog("Find Seller result", tostring(petName), summarizeFindResult(result))
     return result ~= false and result ~= nil
 end
 getgenv().NOMO_FIND_SELLER = State.FindIndexSellerForPet
