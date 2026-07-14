@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V11.9 DEV PER FILTER FRUIT"
+local VERSION = "V12.0 DEV FRUIT UI"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6746,9 +6746,9 @@ end, "outline")
 State.SetBootStatus("fruit ui")
 State.FruitPage = win:CreatePage("Fruit")
 State.FruitTopRow = State.FruitPage:AddRow()
-State.FruitControlSec = State.FruitPage:AddSectionInRow(State.FruitTopRow, "Fruit Control", 0.42)
-State.FruitFilterSec = State.FruitPage:AddSectionInRow(State.FruitTopRow, "Fruit Filter", 0.58)
-State.FruitLogSec = State.FruitPage:AddSection("Fruit Status")
+State.FruitControlSec = State.FruitPage:AddSectionInRow(State.FruitTopRow, "Auto Fruit", 0.36)
+State.FruitFilterSec = State.FruitPage:AddSectionInRow(State.FruitTopRow, "Filter Builder", 0.64)
+State.FruitLogSec = State.FruitPage:AddSection("Fruit Preview")
 State.FruitLog = State.FruitLogSec:AddLog(112)
 
 State.FruitControlSec:AddToggle("Enabled", CFG.Fruit.Enabled == true, function(v)
@@ -6757,7 +6757,7 @@ State.FruitControlSec:AddToggle("Enabled", CFG.Fruit.Enabled == true, function(v
     State.SaveRuntimeSettings()
     log("FruitListing", tostring(v), "path", State.GetFruitFilterPath())
 end)
-State.FruitControlSec:AddButton("Scan Fruits", function()
+State.FruitControlSec:AddButton("Preview Fruits", function()
     if State.BuildFruitCandidates then
         local ok, scan = pcall(State.BuildFruitCandidates)
         if ok and type(scan) == "table" then
@@ -6770,14 +6770,14 @@ State.FruitControlSec:AddButton("Scan Fruits", function()
         log("Fruit scan unavailable")
     end
 end)
-State.FruitControlSec:AddButton("Reload Fruit Config", function()
+State.FruitControlSec:AddButton("Reload Config", function()
     if State.ReloadFruitFilters then State.ReloadFruitFilters(true) end
     if State.BuildFruitCandidates then
         local ok, scan = pcall(State.BuildFruitCandidates)
         if ok then State.RefreshFruitOptions(scan); State.RefreshFruitLog(scan) end
     end
 end, "outline")
-State.FruitControlSec:AddButton("Manage Fruit Filters", function()
+State.FruitControlSec:AddButton("Manage Filters", function()
     if State.OpenFruitFilterManager then
         State.OpenFruitFilterManager()
     else
@@ -6835,8 +6835,8 @@ end
 
 State.FruitNameInput = State.FruitFilterSec:AddSearchDropdown("Fruit", State.RefreshFruitOptions(), "Bone Blossom")
 State.FruitPriceInput = State.FruitFilterSec:AddInput("Price", "11")
-State.FruitMinInput = State.FruitFilterSec:AddInput("Min KG/Size", "0")
-State.FruitMaxInput = State.FruitFilterSec:AddInput("Max KG/Size", "")
+State.FruitMinInput = State.FruitFilterSec:AddInput("Min KG", "0")
+State.FruitMaxInput = State.FruitFilterSec:AddInput("Max KG", "")
 State.FruitMutInput = State.FruitFilterSec:AddInput("Variant", "Any")
 State.FruitCapInput = State.FruitFilterSec:AddInput("Max Listed", "5")
 State.FruitFilterSec:AddButton("+ Add Fruit Filter", function()
@@ -6860,7 +6860,7 @@ end)
 State.RefreshFruitLog = function(scan)
     scan = scan or State.LastFruitScan
     local lines = {
-        string.format("Fruit: %s | Filters %s | Inventory %s | Ready %s",
+        string.format("Auto %s | Filters %s | Inventory %s | Ready %s",
             CFG.Fruit.Enabled == true and "ON" or "OFF",
             tostring(type(scan) == "table" and #(scan.Filters or {}) or 0),
             tostring(type(scan) == "table" and #(scan.Fruits or {}) or 0),
@@ -6869,9 +6869,8 @@ State.RefreshFruitLog = function(scan)
         "Path: " .. tostring(State.GetFruitFilterPath()),
     }
     if type(scan) == "table" then
-        table.insert(lines, "------------------------------")
         if #(scan.Candidates or {}) > 0 then
-            table.insert(lines, "Ready to list:")
+            table.insert(lines, "Ready:")
             for i, c in ipairs(scan.Candidates or {}) do
                 if i > 6 then table.insert(lines, "... +" .. tostring(#scan.Candidates - 6) .. " more ready") break end
                 local fruit = c.Fruit or {}
@@ -6879,7 +6878,7 @@ State.RefreshFruitLog = function(scan)
                 table.insert(lines, string.format("%02d. %s | %s KG | %s tokens", i, tostring(fruit.Name or "?"), fmtKg(fruit.Weight), tostring(filter.Price or "?")))
             end
         else
-            table.insert(lines, "Ready to list: 0")
+            table.insert(lines, "Ready: 0")
         end
 
         local reasonCounts, reasonOrder = {}, {}
@@ -6889,14 +6888,14 @@ State.RefreshFruitLog = function(scan)
             reasonCounts[reason] = (reasonCounts[reason] or 0) + 1
         end
         if #reasonOrder > 0 then
-            table.insert(lines, "Skipped:")
+            table.insert(lines, "Skipped summary:")
             for i, reason in ipairs(reasonOrder) do
                 if i > 5 then table.insert(lines, "... +" .. tostring(#reasonOrder - 5) .. " more reason(s)") break end
                 table.insert(lines, string.format("- %s: %s", reason, tostring(reasonCounts[reason] or 0)))
             end
         end
     else
-        table.insert(lines, "Press Scan Fruits to inspect current inventory fruit.")
+        table.insert(lines, "Press Preview Fruits to inspect current inventory fruit.")
     end
     addLines(State.FruitLog, lines)
 end
