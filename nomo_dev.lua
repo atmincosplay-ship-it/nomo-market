@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V13.4 DEV FIND SELLER REAL FLOW"
+local VERSION = "V13.5 DEV FIND SELLER AUTO HOP"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6475,29 +6475,6 @@ State.FindIndexSellerForPet = function(petName)
     end
     State.LastFindSellerAt = os.clock()
 
-    if not State.FindSellerController then
-        local okRequire, requireResult = pcall(function()
-            State.FindSellerController = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("TradeControllers"):WaitForChild("TradeFindSellerController"))
-        end)
-        if not okRequire then
-            State.FindSellerLog("Find Seller controller require failed", tostring(requireResult))
-        end
-    end
-
-    if State.FindSellerController and type(State.FindSellerController.Prompt) == "function" then
-        State.FindSellerLog("Find Seller prompt real", "Pet", tostring(petName))
-        local okPrompt, promptResult = pcall(function()
-            return State.FindSellerController:Prompt("Pet", petName)
-        end)
-        if okPrompt then
-            State.FindSellerLog("Find Seller prompt sent", tostring(petName), tostring(promptResult))
-            return true
-        end
-        State.FindSellerLog("Find Seller prompt failed", tostring(promptResult), "fallback remote")
-    else
-        State.FindSellerLog("Find Seller controller missing", tostring(type(State.FindSellerController)))
-    end
-
     local okUtil, tokenRapUtil = pcall(function()
         return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("TradeTokens"):WaitForChild("TokenRAPUtil"))
     end)
@@ -6523,7 +6500,7 @@ State.FindIndexSellerForPet = function(petName)
         return false
     end
 
-    State.FindSellerLog("Find Seller remote real", tostring(petName))
+    State.FindSellerLog("Find Seller auto hop", tostring(petName))
     local ok, hasSeller, listingId = pcall(function()
         return findSellers:InvokeServer("Pet", defaultData)
     end)
@@ -6540,6 +6517,24 @@ State.FindIndexSellerForPet = function(petName)
         State.FindSellerLog("Find Seller teleport result", tostring(okTeleport), tostring(teleportResult))
         return okTeleport
     end
+
+    if not State.FindSellerController then
+        local okRequire, requireResult = pcall(function()
+            State.FindSellerController = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("TradeControllers"):WaitForChild("TradeFindSellerController"))
+        end)
+        if not okRequire then
+            State.FindSellerLog("Find Seller controller require failed", tostring(requireResult))
+        end
+    end
+    if State.FindSellerController and type(State.FindSellerController.Prompt) == "function" then
+        State.FindSellerLog("Find Seller no listing", "prompt fallback", tostring(petName))
+        local okPrompt, promptResult = pcall(function()
+            return State.FindSellerController:Prompt("Pet", petName)
+        end)
+        State.FindSellerLog("Find Seller prompt fallback result", tostring(okPrompt), tostring(promptResult))
+        return okPrompt
+    end
+
     return false
 end
 getgenv().NOMO_FIND_SELLER = State.FindIndexSellerForPet
