@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V13.5 DEV FIND SELLER AUTO HOP"
+local VERSION = "V13.6 DEV WATCHLIST FIND SELLER"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -5200,22 +5200,8 @@ State.DashSniperNavSec:AddButton("Manage", function()
     end
 end, "outline")
 State.DashSniperNavSec:AddButton("Find Seller", function()
-    local petName = ""
-    if State.SniperPetInput and State.SniperPetInput.Get then
-        petName = trim(State.SniperPetInput:Get())
-    end
-    if petName == "" and CFG.Sniper.Watchlist then
-        for name in pairs(CFG.Sniper.Watchlist) do
-            petName = tostring(name)
-            break
-        end
-    end
-    log("Dashboard Find Seller", tostring(petName))
-    if petName ~= "" then
-        State.FindIndexSellerForPet(petName)
-    else
-        win:SelectPage("Sniper")
-    end
+    log("Dashboard Find Seller watchlist")
+    State.FindSellerHopWatchlist()
 end, "outline")
 
 State.DashFruitSec:AddButton("Manage", function()
@@ -6461,7 +6447,7 @@ State.FindSellerLog = function(...)
     end
 end
 
-State.FindIndexSellerForPet = function(petName)
+State.FindIndexSellerForPet = function(petName, bypassCooldown)
     petName = trim(petName)
     print("[NOMO FIND SELLER]", petName)
     State.FindSellerLog("Find Seller called", tostring(petName))
@@ -6469,22 +6455,32 @@ State.FindIndexSellerForPet = function(petName)
         State.FindSellerLog("Find Seller blocked", "empty pet")
         return false
     end
-    if os.clock() - (tonumber(State.LastFindSellerAt) or 0) < 10 then
+    if not bypassCooldown and os.clock() - (tonumber(State.LastFindSellerAt) or 0) < 10 then
         State.FindSellerLog("Find Seller cooldown", tostring(petName))
         return false
     end
-    State.LastFindSellerAt = os.clock()
+    if not bypassCooldown then
+        State.LastFindSellerAt = os.clock()
+    end
 
-    local okUtil, tokenRapUtil = pcall(function()
-        return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("TradeTokens"):WaitForChild("TokenRAPUtil"))
-    end)
-    if not okUtil or not tokenRapUtil or type(tokenRapUtil.GetDefaultItemData) ~= "function" then
-        State.FindSellerLog("Find Seller util failed", tostring(tokenRapUtil))
+    if not State.TokenRAPUtil then
+        local okUtil, tokenRapUtil = pcall(function()
+            return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("TradeTokens"):WaitForChild("TokenRAPUtil"))
+        end)
+        if okUtil and tokenRapUtil then
+            State.TokenRAPUtil = tokenRapUtil
+        else
+            State.FindSellerLog("Find Seller util failed", tostring(tokenRapUtil))
+            return false
+        end
+    end
+    if type(State.TokenRAPUtil.GetDefaultItemData) ~= "function" then
+        State.FindSellerLog("Find Seller util missing GetDefaultItemData")
         return false
     end
 
     local okData, defaultData = pcall(function()
-        return tokenRapUtil.GetDefaultItemData("Pet", petName)
+        return State.TokenRAPUtil.GetDefaultItemData("Pet", petName)
     end)
     if not okData or not defaultData then
         State.FindSellerLog("Find Seller default data failed", tostring(defaultData))
@@ -6495,8 +6491,8 @@ State.FindIndexSellerForPet = function(petName)
     local tokenRaps = tradeEvents and tradeEvents:FindFirstChild("TokenRAPs")
     local findSellers = tokenRaps and tokenRaps:FindFirstChild("FindSellers")
     local teleportToListing = tokenRaps and tokenRaps:FindFirstChild("TeleportToListing")
-    if not findSellers then
-        State.FindSellerLog("Find Seller failed", "FindSellers remote missing")
+    if not findSellers or not teleportToListing then
+        State.FindSellerLog("Find Seller failed", "remote missing")
         return false
     end
 
@@ -6509,8 +6505,8 @@ State.FindIndexSellerForPet = function(petName)
         return false
     end
     State.FindSellerLog("Find Seller remote result", tostring(petName), "has", tostring(hasSeller), "listing", tostring(listingId))
-    if hasSeller and listingId and teleportToListing then
-        State.FindSellerLog("Find Seller teleport", tostring(listingId))
+    if hasSeller and listingId then
+        State.FindSellerLog("Find Seller teleport", tostring(petName), tostring(listingId))
         local okTeleport, teleportResult = pcall(function()
             return teleportToListing:InvokeServer(listingId, true)
         end)
@@ -6518,23 +6514,34 @@ State.FindIndexSellerForPet = function(petName)
         return okTeleport
     end
 
-    if not State.FindSellerController then
-        local okRequire, requireResult = pcall(function()
-            State.FindSellerController = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("TradeControllers"):WaitForChild("TradeFindSellerController"))
-        end)
-        if not okRequire then
-            State.FindSellerLog("Find Seller controller require failed", tostring(requireResult))
-        end
+    return false
+end
+
+State.FindSellerHopWatchlist = function()
+    if os.clock() - (tonumber(State.LastFindSellerAt) or 0) < 10 then
+        State.FindSellerLog("Find Seller watchlist cooldown")
+        return false
     end
-    if State.FindSellerController and type(State.FindSellerController.Prompt) == "function" then
-        State.FindSellerLog("Find Seller no listing", "prompt fallback", tostring(petName))
-        local okPrompt, promptResult = pcall(function()
-            return State.FindSellerController:Prompt("Pet", petName)
-        end)
-        State.FindSellerLog("Find Seller prompt fallback result", tostring(okPrompt), tostring(promptResult))
-        return okPrompt
+    State.LastFindSellerAt = os.clock()
+
+    local watches = State.GetSortedSniperWatches and State.GetSortedSniperWatches() or {}
+    if #watches == 0 then
+        State.FindSellerLog("Find Seller watchlist empty")
+        return false
     end
 
+    State.FindSellerLog("Find Seller watchlist scan", tostring(#watches), "pet(s)")
+    for i, watch in ipairs(watches) do
+        local petName = tostring(watch.Name or "")
+        State.FindSellerLog("Find Seller watch", tostring(i) .. "/" .. tostring(#watches), petName, "prio", tostring(getSniperPriority(watch.Config)))
+        if petName ~= "" and State.FindIndexSellerForPet(petName, true) then
+            State.FindSellerLog("Find Seller watchlist found", petName)
+            return true
+        end
+        task.wait(0.25)
+    end
+
+    State.FindSellerLog("Find Seller no sellers in watchlist")
     return false
 end
 getgenv().NOMO_FIND_SELLER = State.FindIndexSellerForPet
@@ -6889,11 +6896,8 @@ State.SniperWatchSec:AddButton("Dry Run Scan", function()
 end, "outline")
 
 State.SniperWatchSec:AddButton("Find Seller Hop", function()
-    local petName = trim(sPet:Get())
-    log("Find Seller button", tostring(petName))
-    State.OpenConfirmPopup("Find Seller Hop", "Use in-game Index Find Seller for " .. tostring(petName) .. "?", "Find", function()
-        State.FindIndexSellerForPet(petName)
-    end)
+    log("Find Seller watchlist button")
+    State.FindSellerHopWatchlist()
 end, "outline")
 
 State.SniperLimitSec:AddButton("Clear Watchlist", function()
