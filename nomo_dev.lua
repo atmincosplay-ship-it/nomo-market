@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V13.3 DEV FIND SELLER AUTO TEST"
+local VERSION = "V13.4 DEV FIND SELLER REAL FLOW"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6475,19 +6475,6 @@ State.FindIndexSellerForPet = function(petName)
     end
     State.LastFindSellerAt = os.clock()
 
-    local payload = {
-        PetType = tostring(petName),
-        PetAbility = {},
-        PetData = {
-            MutationType = "Normal",
-            LevelProgress = 0,
-            Hunger = 0,
-            Level = 0,
-            BaseWeight = 1,
-            Boosts = {},
-        },
-    }
-
     if not State.FindSellerController then
         local okRequire, requireResult = pcall(function()
             State.FindSellerController = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("TradeControllers"):WaitForChild("TradeFindSellerController"))
@@ -6496,86 +6483,64 @@ State.FindIndexSellerForPet = function(petName)
             State.FindSellerLog("Find Seller controller require failed", tostring(requireResult))
         end
     end
-    if State.FindSellerController then
-        local shape = type(State.FindSellerController)
-        if shape == "table" then
-            local keys = {}
-            for k in pairs(State.FindSellerController) do
-                if #keys < 5 then table.insert(keys, tostring(k)) end
-            end
-            State.FindSellerLog("Find Seller controller", shape, table.concat(keys, ","))
-        else
-            State.FindSellerLog("Find Seller controller", shape)
-        end
-    end
-    if type(State.FindSellerController) == "function" then
-        State.FindSellerLog("Find Seller prompt fn", tostring(petName))
-        local okPrompt, promptResult = pcall(State.FindSellerController, "Pet", payload)
-        if okPrompt and promptResult ~= false and promptResult ~= nil then
-            State.FindSellerLog("Find Seller prompt fn opened", tostring(petName), tostring(promptResult))
-            return true
-        end
-        State.FindSellerLog("Find Seller prompt fn result", tostring(promptResult), "falling back")
-    end
+
     if State.FindSellerController and type(State.FindSellerController.Prompt) == "function" then
-        State.FindSellerLog("Find Seller prompt", tostring(petName))
-        local okPrompt, promptResult = pcall(State.FindSellerController.Prompt, "Pet", payload)
-        if not okPrompt then
-            okPrompt, promptResult = pcall(State.FindSellerController.Prompt, State.FindSellerController, "Pet", payload)
-        end
-        if okPrompt and promptResult ~= false and promptResult ~= nil then
-            State.FindSellerLog("Find Seller prompt opened", tostring(petName), tostring(promptResult))
+        State.FindSellerLog("Find Seller prompt real", "Pet", tostring(petName))
+        local okPrompt, promptResult = pcall(function()
+            return State.FindSellerController:Prompt("Pet", petName)
+        end)
+        if okPrompt then
+            State.FindSellerLog("Find Seller prompt sent", tostring(petName), tostring(promptResult))
             return true
         end
-        State.FindSellerLog("Find Seller prompt result", tostring(promptResult), "falling back remote")
+        State.FindSellerLog("Find Seller prompt failed", tostring(promptResult), "fallback remote")
+    else
+        State.FindSellerLog("Find Seller controller missing", tostring(type(State.FindSellerController)))
+    end
+
+    local okUtil, tokenRapUtil = pcall(function()
+        return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("TradeTokens"):WaitForChild("TokenRAPUtil"))
+    end)
+    if not okUtil or not tokenRapUtil or type(tokenRapUtil.GetDefaultItemData) ~= "function" then
+        State.FindSellerLog("Find Seller util failed", tostring(tokenRapUtil))
+        return false
+    end
+
+    local okData, defaultData = pcall(function()
+        return tokenRapUtil.GetDefaultItemData("Pet", petName)
+    end)
+    if not okData or not defaultData then
+        State.FindSellerLog("Find Seller default data failed", tostring(defaultData))
+        return false
     end
 
     local tradeEvents = GameEvents:FindFirstChild("TradeEvents")
     local tokenRaps = tradeEvents and tradeEvents:FindFirstChild("TokenRAPs")
     local findSellers = tokenRaps and tokenRaps:FindFirstChild("FindSellers")
+    local teleportToListing = tokenRaps and tokenRaps:FindFirstChild("TeleportToListing")
     if not findSellers then
         State.FindSellerLog("Find Seller failed", "FindSellers remote missing")
         return false
     end
 
-    local function summarizeFindResult(value)
-        local kind = type(value)
-        if kind ~= "table" then
-            return kind .. ":" .. tostring(value)
-        end
-        local parts = {}
-        local count = 0
-        for k, v in pairs(value) do
-            count += 1
-            if #parts < 8 then
-                local desc = type(v)
-                if type(v) ~= "table" then
-                    desc = tostring(v)
-                else
-                    local sub = {}
-                    for kk, vv in pairs(v) do
-                        if #sub < 4 then
-                            table.insert(sub, tostring(kk) .. "=" .. tostring(vv))
-                        end
-                    end
-                    desc = "{" .. table.concat(sub, ",") .. "}"
-                end
-                table.insert(parts, tostring(k) .. "=" .. desc)
-            end
-        end
-        return "table#" .. tostring(count) .. " " .. table.concat(parts, " | ")
-    end
-
-    State.FindSellerLog("Find Seller", tostring(petName), "using in-game index")
-    local ok, result = pcall(function()
-        return findSellers:InvokeServer("Pet", payload)
+    State.FindSellerLog("Find Seller remote real", tostring(petName))
+    local ok, hasSeller, listingId = pcall(function()
+        return findSellers:InvokeServer("Pet", defaultData)
     end)
     if not ok then
-        State.FindSellerLog("Find Seller error", tostring(result))
+        State.FindSellerLog("Find Seller error", tostring(hasSeller))
         return false
     end
-    State.FindSellerLog("Find Seller result", tostring(petName), summarizeFindResult(result))
-    return result ~= false and result ~= nil
+    State.FindSellerLog("Find Seller remote result", tostring(petName), "has", tostring(hasSeller), "listing", tostring(listingId))
+    if hasSeller and listingId and teleportToListing then
+        State.FindSellerLog("Find Seller teleport", tostring(listingId))
+        local okTeleport, teleportResult = pcall(function()
+            return teleportToListing:InvokeServer(listingId, true)
+        end)
+        State.FindSellerLog("Find Seller teleport result", tostring(okTeleport), tostring(teleportResult))
+        return okTeleport
+    end
+    return false
 end
 getgenv().NOMO_FIND_SELLER = State.FindIndexSellerForPet
 _G.NOMO_FIND_SELLER = State.FindIndexSellerForPet
