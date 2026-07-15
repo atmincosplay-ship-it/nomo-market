@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V13.6 DEV WATCHLIST FIND SELLER"
+local VERSION = "V13.7 DEV FIND SELLER REBUILD PAUSE"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6523,6 +6523,8 @@ State.FindSellerHopWatchlist = function()
         return false
     end
     State.LastFindSellerAt = os.clock()
+    State.FindSellerBusyUntil = os.clock() + 35
+    State.AutoSmartRebuildPausedUntil = math.max(tonumber(State.AutoSmartRebuildPausedUntil) or 0, State.FindSellerBusyUntil)
 
     local watches = State.GetSortedSniperWatches and State.GetSortedSniperWatches() or {}
     if #watches == 0 then
@@ -8078,6 +8080,13 @@ task.spawn(function()
 
     for attempt = 1, retries do
         if not State.Running then break end
+
+        local pauseUntil = tonumber(State.AutoSmartRebuildPausedUntil) or 0
+        if os.clock() < pauseUntil then
+            local waitLeft = math.min(8, math.max(1, pauseUntil - os.clock()))
+            log("Auto Smart Rebuild paused", "find seller", string.format("%.1fs", waitLeft))
+            task.wait(waitLeft)
+        end
 
         local boothReady = ensureBoothForListing()
         local filtersReady = #(getFilters() or {}) > 0
