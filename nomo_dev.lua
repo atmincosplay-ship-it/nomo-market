@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V13.2 DEV FIND SELLER TRACE"
+local VERSION = "V13.3 DEV FIND SELLER AUTO TEST"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6580,6 +6580,13 @@ end
 getgenv().NOMO_FIND_SELLER = State.FindIndexSellerForPet
 _G.NOMO_FIND_SELLER = State.FindIndexSellerForPet
 log("Find Seller hook registered", "use NOMO_FIND_SELLER('Pet Name')")
+if getgenv().nomo_find_seller_test ~= nil then
+    task.delay(4, function()
+        local petName = tostring(getgenv().nomo_find_seller_test or "")
+        State.FindSellerLog("Find Seller auto test", petName)
+        State.FindIndexSellerForPet(petName)
+    end)
+end
 
 State.OpenSniperWatchEditPopup = function(name, managerOverlay)
     local cfg = CFG.Sniper.Watchlist and CFG.Sniper.Watchlist[name]
