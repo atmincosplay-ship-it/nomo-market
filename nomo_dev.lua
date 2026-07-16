@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V14.3 DEV AUTOCLAIM OWNED SLEEP"
+local VERSION = "V14.4 DEV FIND SELLER CONTINUE FAIL"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6552,7 +6552,7 @@ State.FindIndexSellerForPet = function(petName, bypassCooldown)
             return false
         end
 
-        local waitUntil = os.clock() + 6
+        local waitUntil = os.clock() + 8
         while State.Running and os.clock() < waitUntil do
             if (tonumber(State.LastFindSellerTeleportFailAt) or 0) >= startedAt then
                 State.FindSellerLog("Find Seller server full", tostring(petName), "waiting 2s")
@@ -6563,7 +6563,8 @@ State.FindIndexSellerForPet = function(petName, bypassCooldown)
             task.wait(0.25)
         end
 
-        return true
+        State.FindSellerLog("Find Seller no teleport", tostring(petName), "retry next")
+        return false
     end
 
     State.FindSellerLog("Find Seller no seller", tostring(petName))
