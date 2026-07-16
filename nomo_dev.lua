@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V14.0 DEV BOOTH CLAIM BLACKLIST"
+local VERSION = "V14.1 DEV ASSUME CLAIMED BOOTH"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -1121,6 +1121,10 @@ local function getBoothSnapshot(force)
         if pos then
             local owner = bd.Owner
             local status = boothOwnerStatus(owner)
+            if State.AssumedBoothId == id and os.clock() < (tonumber(State.AssumedBoothUntil) or 0) then
+                status = "MINE"
+                owner = getPlayerId()
+            end
             table.insert(items, {
                 Id = id,
                 Instance = inst,
@@ -1302,7 +1306,17 @@ local function claimBestFreeBooth()
             log("ClaimBooth failed", tostring(label), tostring(err))
             return false
         end
-        return verifyTarget(target, label)
+        if verifyTarget(target, label) then
+            return true
+        end
+        State.AssumedBoothId = target.Id
+        State.AssumedBoothUntil = os.clock() + 20
+        State.LastBooth = target
+        State.LastBooth.Status = "MINE"
+        getgenv().NOMO_BOOTH_LAST_CLAIMED = target
+        State.InvalidateListingCache()
+        log("Claim accepted assumed", target.Id, "data stale", tostring(label))
+        return true
     end
 
     local limit = math.min(#candidates, 8)
