@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V14.2 DEV QUIET CLAIM RETRY LOGS"
+local VERSION = "V14.3 DEV AUTOCLAIM OWNED SLEEP"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -1277,6 +1277,7 @@ local function claimBestFreeBooth()
                 log("Already own booth", target.Id, "dist", math.floor(target.MiddleDistance or 0))
             end
             State.LastBooth = target
+            State.AutoClaimOwnedSleepUntil = os.clock() + 60
             getgenv().NOMO_BOOTH_LAST_CLAIMED = target
             return true
         end
@@ -1314,6 +1315,7 @@ local function claimBestFreeBooth()
         end
         State.AssumedBoothId = target.Id
         State.AssumedBoothUntil = os.clock() + 20
+        State.AutoClaimOwnedSleepUntil = os.clock() + 60
         State.LastBooth = target
         State.LastBooth.Status = "MINE"
         getgenv().NOMO_BOOTH_LAST_CLAIMED = target
@@ -8173,7 +8175,7 @@ task.spawn(function()
     while State.Running do
         local now = os.clock()
 
-        if CFG.Booth.AutoClaim and now - (State.LastAutoClaimAt or 0) >= (tonumber(CFG.Booth.ClaimInterval) or 10) then
+        if CFG.Booth.AutoClaim and now >= (tonumber(State.AutoClaimOwnedSleepUntil) or 0) and now - (State.LastAutoClaimAt or 0) >= (tonumber(CFG.Booth.ClaimInterval) or 10) then
             State.LastAutoClaimAt = now
             local ok, err = pcall(function()
                 local target, status = findBestBooth(true)
@@ -8182,6 +8184,7 @@ task.spawn(function()
                 end
                 if status == "MINE" then
                     State.LastBooth = target
+                    State.AutoClaimOwnedSleepUntil = now + 60
                 elseif status == "FREE" then
                     log("AutoClaim attempting best free booth")
                     claimBestFreeBooth()
