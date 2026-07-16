@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V12.1 DEV MANUAL REJOIN"
+local VERSION = "V14.6 STABLE FIND SELLER FALLBACK HOP"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -1121,6 +1121,10 @@ local function getBoothSnapshot(force)
         if pos then
             local owner = bd.Owner
             local status = boothOwnerStatus(owner)
+            if State.AssumedBoothId == id and os.clock() < (tonumber(State.AssumedBoothUntil) or 0) then
+                status = "MINE"
+                owner = getPlayerId()
+            end
             table.insert(items, {
                 Id = id,
                 Instance = inst,
@@ -1146,13 +1150,13 @@ local function getBoothSnapshot(force)
     return items
 end
 
-local function findBestBooth(force)
+local function findBestBooth(force, maxDistOverride)
     local now = os.clock()
     if not force and type(State.BestBoothCache) == "table" and (now - (State.LastBestBoothCacheAt or 0)) <= (tonumber(CFG.Performance.BoothChoiceCacheSeconds) or 1) then
         return State.BestBoothCache.Target, State.BestBoothCache.Status
     end
 
-    local maxDist = tonumber(CFG.Booth.MaxMiddleDistance) or 200
+    local maxDist = tonumber(maxDistOverride) or tonumber(CFG.Booth.MaxMiddleDistance) or 200
     local mine, free
 
     for _, item in ipairs(getBoothSnapshot(force)) do
@@ -1237,23 +1241,51 @@ local function equipSkin()
 end
 
 local function claimBestFreeBooth()
-    local target, status = findBestBooth(true)
-    if not target then
+    local maxDist = tonumber(CFG.Booth.MaxMiddleDistance) or 85
+    local candidates = {}
+    local seen = {}
+    State.FailedClaimBooths = State.FailedClaimBooths or {}
+    local now = os.clock()
+
+    local function addCandidates(limit, label)
+        for _, item in ipairs(getBoothSnapshot(true)) do
+            if (item.Status == "MINE" or item.Status == "FREE") and not seen[item.Id] then
+                local failedUntil = tonumber(State.FailedClaimBooths[item.Id]) or 0
+                if failedUntil <= now and (item.MiddleDistance or 999999) <= limit then
+                    seen[item.Id] = true
+                    item.ClaimRangeLabel = label
+                    table.insert(candidates, item)
+                end
+            end
+        end
+    end
+
+    addCandidates(maxDist, "normal")
+    if #candidates == 0 then
+        addCandidates(999999, "fallback")
+    end
+
+    if #candidates == 0 then
         log("No FREE/MINE booth in distance", tostring(CFG.Booth.MaxMiddleDistance))
         return false
     end
 
-    if status == "MINE" then
-        log("Already own booth", target.Id, "dist", math.floor(target.MiddleDistance or 0))
-        State.LastBooth = target
-        getgenv().NOMO_BOOTH_LAST_CLAIMED = target
-        return true
+    for _, target in ipairs(candidates) do
+        if target.Status == "MINE" then
+            if os.clock() - (tonumber(State.LastOwnBoothLogAt) or 0) > 45 then
+                State.LastOwnBoothLogAt = os.clock()
+                log("Already own booth", target.Id, "dist", math.floor(target.MiddleDistance or 0))
+            end
+            State.LastBooth = target
+            State.AutoClaimOwnedSleepUntil = os.clock() + 60
+            getgenv().NOMO_BOOTH_LAST_CLAIMED = target
+            return true
+        end
     end
 
-    local attempts = math.max(1, toInt(CFG.Booth.ClaimVerifyAttempts) or 6)
-    local delay = tonumber(CFG.Booth.ClaimVerifyDelay) or 0.35
+    local delay = math.max(tonumber(CFG.Booth.ClaimVerifyDelay) or 0.35, 0.55)
 
-    local function verifyClaim(label)
+    local function verifyTarget(target, label)
         task.wait(delay)
         for _, item in ipairs(getBoothSnapshot(true)) do
             if item.Id == target.Id then
@@ -1263,13 +1295,14 @@ local function claimBestFreeBooth()
                     getgenv().NOMO_BOOTH_LAST_CLAIMED = item
                     return true
                 end
+                return false
             end
         end
         return false
     end
 
-    local function sendClaim(arg, label)
-        log("Claiming FREE booth", target.Id, "dist", math.floor(target.MiddleDistance or 0), tostring(label))
+    local function sendClaim(target, arg, label)
+        log("Claiming FREE booth", target.Id, "dist", math.floor(target.MiddleDistance or 0), tostring(target.ClaimRangeLabel or ""), tostring(label))
         local ok, err = pcall(function()
             ClaimBooth:FireServer(arg)
         end)
@@ -1277,30 +1310,44 @@ local function claimBestFreeBooth()
             log("ClaimBooth failed", tostring(label), tostring(err))
             return false
         end
-        return verifyClaim(label)
-    end
-
-    if sendClaim(target.Instance, "instance") then
-        equipSkin()
-        return true
-    end
-
-    if sendClaim(target.Id, "id") then
-        equipSkin()
-        return true
-    end
-
-    for attempt = 1, attempts do
-        if verifyClaim("retry " .. tostring(attempt)) then
-            equipSkin()
+        if verifyTarget(target, label) then
             return true
+        end
+        State.AssumedBoothId = target.Id
+        State.AssumedBoothUntil = os.clock() + 20
+        State.AutoClaimOwnedSleepUntil = os.clock() + 60
+        State.LastBooth = target
+        State.LastBooth.Status = "MINE"
+        getgenv().NOMO_BOOTH_LAST_CLAIMED = target
+        State.InvalidateListingCache()
+        log("Claim accepted assumed", target.Id, "data stale", tostring(label))
+        return true
+    end
+
+    local limit = math.min(#candidates, 8)
+    for i = 1, limit do
+        local target = candidates[i]
+        if target.Status == "FREE" then
+            local claimed = false
+            if sendClaim(target, target.Instance, "instance") then
+                claimed = true
+            elseif sendClaim(target, target.Id, "id") then
+                claimed = true
+            end
+            if claimed then
+                State.FailedClaimBooths[target.Id] = nil
+                equipSkin()
+                return true
+            end
+            State.FailedClaimBooths[target.Id] = os.clock() + 30
+            log("Claim candidate failed", target.Id, "skip 30s")
+            task.wait(0.25)
         end
     end
 
-    log("Claim not verified", target.Id)
+    log("Claim not verified", tostring(limit) .. "/" .. tostring(#candidates), "candidate(s)")
     return false
 end
-
 local function hasOwnBooth(force)
     local target, status = findBestBooth(force)
     if status == "MINE" and target then
@@ -5180,6 +5227,10 @@ State.DashSniperNavSec:AddButton("Manage", function()
         win:SelectPage("Sniper")
     end
 end, "outline")
+State.DashSniperNavSec:AddButton("Find Seller", function()
+    log("Dashboard Find Seller watchlist")
+    State.FindSellerHopWatchlist()
+end, "outline")
 
 State.DashFruitSec:AddButton("Manage", function()
     if State.OpenFruitFilterManager then
@@ -6409,6 +6460,218 @@ State.ApplySniperLimits = function()
     CFG.Sniper.MaxMatchesPerPet = 0
 end
 
+State.FindSellerLog = function(...)
+    local parts = {}
+    for i = 1, select("#", ...) do
+        table.insert(parts, tostring(select(i, ...)))
+    end
+    local ok, err = pcall(log, ...)
+    if not ok then
+        print("[NOMO FIND SELLER LOG ERROR]", tostring(err))
+    end
+    if State.RefreshActivityLog then
+        pcall(State.RefreshActivityLog, true)
+    end
+end
+
+if not State.FindSellerTeleportFailHooked and State.TeleportService and State.TeleportService.TeleportInitFailed then
+    State.FindSellerTeleportFailHooked = true
+    pcall(function()
+        State.TeleportService.TeleportInitFailed:Connect(function(player, result, message)
+            if player ~= LocalPlayer then return end
+            State.LastFindSellerTeleportFailAt = os.clock()
+            State.LastFindSellerTeleportFailReason = tostring(result) .. " " .. tostring(message)
+            State.FindSellerLog("Find Seller teleport failed", State.LastFindSellerTeleportFailReason)
+        end)
+    end)
+end
+
+State.FindIndexSellerForItem = function(itemType, itemName, bypassCooldown)
+    itemType = trim(itemType or "Pet")
+    itemName = trim(itemName)
+    if itemName == "" then
+        State.FindSellerLog("Find Seller blocked", "empty item")
+        return false
+    end
+    if not bypassCooldown and os.clock() - (tonumber(State.LastFindSellerAt) or 0) < 10 then
+        State.FindSellerLog("Find Seller cooldown", tostring(itemName))
+        return false
+    end
+    if not bypassCooldown then
+        State.LastFindSellerAt = os.clock()
+    end
+
+    if not State.TokenRAPUtil then
+        local okUtil, tokenRapUtil = pcall(function()
+            return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("TradeTokens"):WaitForChild("TokenRAPUtil"))
+        end)
+        if okUtil and tokenRapUtil then
+            State.TokenRAPUtil = tokenRapUtil
+        else
+            State.FindSellerLog("Find Seller util failed", tostring(tokenRapUtil))
+            return false
+        end
+    end
+    if type(State.TokenRAPUtil.GetDefaultItemData) ~= "function" then
+        State.FindSellerLog("Find Seller util missing GetDefaultItemData")
+        return false
+    end
+
+    local okData, defaultData = pcall(function()
+        return State.TokenRAPUtil.GetDefaultItemData(itemType, itemName)
+    end)
+    if not okData or not defaultData then
+        State.FindSellerLog("Find Seller default data failed", tostring(itemType), tostring(itemName), tostring(defaultData))
+        return false
+    end
+
+    local tradeEvents = GameEvents:FindFirstChild("TradeEvents")
+    local tokenRaps = tradeEvents and tradeEvents:FindFirstChild("TokenRAPs")
+    local findSellers = tokenRaps and tokenRaps:FindFirstChild("FindSellers")
+    local teleportToListing = tokenRaps and tokenRaps:FindFirstChild("TeleportToListing")
+    if not findSellers or not teleportToListing then
+        State.FindSellerLog("Find Seller failed", "remote missing")
+        return false
+    end
+
+    local ok, hasSeller, listingId = pcall(function()
+        return findSellers:InvokeServer(itemType, defaultData)
+    end)
+    if not ok then
+        State.FindSellerLog("Find Seller error", tostring(hasSeller))
+        return false
+    end
+    if hasSeller and listingId then
+        State.FindSellerLog("Find Seller teleporting", tostring(itemName))
+        local startedAt = os.clock()
+        State.LastFindSellerTeleportFailAt = 0
+        State.LastFindSellerTeleportFailReason = nil
+        local okTeleport, teleportResult = pcall(function()
+            return teleportToListing:InvokeServer(listingId, true)
+        end)
+        if not okTeleport or teleportResult == false then
+            return false
+        end
+
+        local waitUntil = os.clock() + 8
+        while State.Running and os.clock() < waitUntil do
+            if (tonumber(State.LastFindSellerTeleportFailAt) or 0) >= startedAt then
+                State.FindSellerLog("Find Seller server full", tostring(itemName), "waiting 2s")
+                task.wait(2)
+                State.FindSellerLog("Find Seller retry next", tostring(itemName))
+                return false
+            end
+            task.wait(0.25)
+        end
+
+        State.FindSellerLog("Find Seller no teleport", tostring(itemName), "retry next")
+        return false
+    end
+
+    State.FindSellerLog("Find Seller no seller", tostring(itemName))
+    return false
+end
+
+State.FindIndexSellerForPet = function(petName, bypassCooldown)
+    return State.FindIndexSellerForItem("Pet", petName, bypassCooldown)
+end
+
+State.FindSellerHopWatchlist = function()
+    if State.FindSellerLoopRunning then
+        State.FindSellerLog("Find Seller already running")
+        return false
+    end
+    if os.clock() - (tonumber(State.LastFindSellerAt) or 0) < 5 then
+        State.FindSellerLog("Find Seller watchlist cooldown")
+        return false
+    end
+
+    State.FindSellerLoopRunning = true
+    State.LastFindSellerAt = os.clock()
+    State.FindSellerBusyUntil = os.clock() + 90
+    State.AutoSmartRebuildPausedUntil = math.max(tonumber(State.AutoSmartRebuildPausedUntil) or 0, State.FindSellerBusyUntil)
+
+    task.spawn(function()
+        local okLoop, errLoop = pcall(function()
+            local maxPasses = 8
+            for pass = 1, maxPasses do
+                if not State.Running then break end
+                local watches = State.GetSortedSniperWatches and State.GetSortedSniperWatches() or {}
+                if #watches == 0 then
+                    State.FindSellerLog("Find Seller watchlist empty")
+                    break
+                end
+
+                State.FindSellerLog("Find Seller scan", "pass", tostring(pass) .. "/" .. tostring(maxPasses), tostring(#watches), "watch(es)")
+                for i, watch in ipairs(watches) do
+                    if not State.Running then break end
+                    local petName = tostring(watch.Name or "")
+                    State.FindSellerLog("Find Seller try", tostring(i) .. "/" .. tostring(#watches), petName, "prio", tostring(getSniperPriority(watch.Config)))
+                    if petName ~= "" and State.FindIndexSellerForPet(petName, true) then
+                        State.FindSellerLog("Find Seller found", petName)
+                        State.FindSellerLoopRunning = false
+                        return
+                    end
+                    task.wait(0.6)
+                end
+
+                if pass < maxPasses then
+                    State.FindSellerLog("Find Seller pass done", "waiting 4s")
+                    task.wait(4)
+                end
+            end
+            State.FindSellerLog("Find Seller fallback hop mode")
+            local fallback = State.FindSellerFallbackTargets or {
+                {Type = "Pet", Name = "Red Fox"},
+                {Type = "Pet", Name = "Mimic Octopus"},
+                {Type = "Pet", Name = "Butterfly"},
+                {Type = "Pet", Name = "Bacon Pig"},
+                {Type = "Pet", Name = "Ankylosaurus"},
+                {Type = "Holdable", Name = "Bone Blossom"},
+                {Type = "Holdable", Name = "Candy Blossom"},
+                {Type = "Holdable", Name = "Beanstalk"},
+            }
+            local fallbackPasses = 3
+            for pass = 1, fallbackPasses do
+                for i, target in ipairs(fallback) do
+                    if not State.Running then break end
+                    local itemType = tostring(target.Type or "Pet")
+                    local itemName = tostring(target.Name or "")
+                    State.FindSellerLog("Find Seller fallback", tostring(pass) .. "/" .. tostring(fallbackPasses), tostring(i) .. "/" .. tostring(#fallback), itemName)
+                    if itemName ~= "" and State.FindIndexSellerForItem(itemType, itemName, true) then
+                        State.FindSellerLog("Find Seller fallback found", itemName)
+                        State.FindSellerLoopRunning = false
+                        return
+                    end
+                    task.wait(0.6)
+                end
+                if pass < fallbackPasses then
+                    State.FindSellerLog("Find Seller fallback wait", "4s")
+                    task.wait(4)
+                end
+            end
+            State.FindSellerLog("Find Seller no sellers after retry")
+        end)
+        if not okLoop then
+            State.FindSellerLog("Find Seller loop error", tostring(errLoop))
+        end
+        State.FindSellerLoopRunning = false
+        State.FindSellerBusyUntil = os.clock() + 5
+    end)
+
+    return true
+end
+getgenv().NOMO_FIND_SELLER = State.FindIndexSellerForPet
+_G.NOMO_FIND_SELLER = State.FindIndexSellerForPet
+log("Find Seller hook registered", "use NOMO_FIND_SELLER('Pet Name')")
+if getgenv().nomo_find_seller_test ~= nil then
+    task.delay(4, function()
+        local petName = tostring(getgenv().nomo_find_seller_test or "")
+        State.FindSellerLog("Find Seller auto test", petName)
+        State.FindIndexSellerForPet(petName)
+    end)
+end
+
 State.OpenSniperWatchEditPopup = function(name, managerOverlay)
     local cfg = CFG.Sniper.Watchlist and CFG.Sniper.Watchlist[name]
     if not cfg then
@@ -6749,6 +7012,11 @@ State.SniperWatchSec:AddButton("Dry Run Scan", function()
     State.RefreshSniperLog()
 end, "outline")
 
+State.SniperWatchSec:AddButton("Find Seller Hop", function()
+    log("Find Seller watchlist button")
+    State.FindSellerHopWatchlist()
+end, "outline")
+
 State.SniperLimitSec:AddButton("Clear Watchlist", function()
     State.OpenConfirmPopup("Clear Watchlist", "Remove every sniper watch from config?", "Clear", function()
         clearWatch()
@@ -7034,6 +7302,7 @@ State.FilterPathInput = State.SettingPathSec:AddInput("Filter Folder", getConfig
     CFG.Seller.ListingFilterPath = v
     reloadFilters()
 end)
+State.FindSellerPetInput = State.SettingPathSec:AddInput("Find Seller Pet", "Rainbow Bacon Pig")
 
 State.SettingUiSec:AddToggle("Compact Booth Data", CFG.UI.CompactBoothData ~= false, function(v)
     CFG.UI.CompactBoothData = v
@@ -7063,6 +7332,16 @@ State.SettingActionSec:AddButton("Diagnose Fruits", function()
     if State.DiagnoseFruits then State.DiagnoseFruits() end
 end, "outline")
 
+State.SettingActionSec:AddButton("Find Seller Test", function()
+    local petName = State.FindSellerPetInput and trim(State.FindSellerPetInput:Get()) or ""
+    log("Find Seller test button", tostring(petName))
+    if petName ~= "" then
+        State.FindIndexSellerForPet(petName)
+    else
+        log("Find Seller test blocked", "no sniper pet/watch")
+    end
+end, "outline")
+
 State.SettingActionSec:AddButton("Rejoin Server", function()
     State.OpenConfirmPopup("Rejoin Server", "Reload this clone in the current trade server?", "Rejoin", function()
         State.Rejoin("settings rejoin")
@@ -7076,6 +7355,14 @@ State.SettingPathSec:AddButton("Save / Reload Path", function()
     State.ReloadSniperConfig()
     log("Config path set", tostring(CFG.Seller.ListingFilterPath), "listing", getFilterPath(), "sniper", getSniperFilterPath())
 end)
+
+State.SettingPathSec:AddButton("Test Find Seller", function()
+    local petName = State.FindSellerPetInput and trim(State.FindSellerPetInput:Get()) or ""
+    log("Path Find Seller test", tostring(petName))
+    if petName ~= "" then
+        State.FindIndexSellerForPet(petName)
+    end
+end, "outline")
 
 State.SettingActionSec:AddButton("Stop Script", function()
     State.Stop("settings stop")
@@ -7909,6 +8196,13 @@ task.spawn(function()
     for attempt = 1, retries do
         if not State.Running then break end
 
+        local pauseUntil = tonumber(State.AutoSmartRebuildPausedUntil) or 0
+        if os.clock() < pauseUntil then
+            local waitLeft = math.min(8, math.max(1, pauseUntil - os.clock()))
+            log("Auto Smart Rebuild paused", "find seller", string.format("%.1fs", waitLeft))
+            task.wait(waitLeft)
+        end
+
         local boothReady = ensureBoothForListing()
         local filtersReady = #(getFilters() or {}) > 0
         if not boothReady then
@@ -7943,12 +8237,16 @@ task.spawn(function()
     while State.Running do
         local now = os.clock()
 
-        if CFG.Booth.AutoClaim and now - (State.LastAutoClaimAt or 0) >= (tonumber(CFG.Booth.ClaimInterval) or 10) then
+        if CFG.Booth.AutoClaim and now >= (tonumber(State.AutoClaimOwnedSleepUntil) or 0) and now - (State.LastAutoClaimAt or 0) >= (tonumber(CFG.Booth.ClaimInterval) or 10) then
             State.LastAutoClaimAt = now
             local ok, err = pcall(function()
                 local target, status = findBestBooth(true)
+                if status ~= "MINE" and status ~= "FREE" then
+                    target, status = findBestBooth(true, 999999)
+                end
                 if status == "MINE" then
                     State.LastBooth = target
+                    State.AutoClaimOwnedSleepUntil = now + 60
                 elseif status == "FREE" then
                     log("AutoClaim attempting best free booth")
                     claimBestFreeBooth()
