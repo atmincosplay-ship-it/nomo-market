@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V13.7 DEV FIND SELLER REBUILD PAUSE"
+local VERSION = "V13.8 DEV FIND SELLER RETRY FULL"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6447,6 +6447,18 @@ State.FindSellerLog = function(...)
     end
 end
 
+if not State.FindSellerTeleportFailHooked and State.TeleportService and State.TeleportService.TeleportInitFailed then
+    State.FindSellerTeleportFailHooked = true
+    pcall(function()
+        State.TeleportService.TeleportInitFailed:Connect(function(player, result, message)
+            if player ~= LocalPlayer then return end
+            State.LastFindSellerTeleportFailAt = os.clock()
+            State.LastFindSellerTeleportFailReason = tostring(result) .. " " .. tostring(message)
+            State.FindSellerLog("Find Seller teleport failed", State.LastFindSellerTeleportFailReason)
+        end)
+    end)
+end
+
 State.FindIndexSellerForPet = function(petName, bypassCooldown)
     petName = trim(petName)
     print("[NOMO FIND SELLER]", petName)
@@ -6507,13 +6519,30 @@ State.FindIndexSellerForPet = function(petName, bypassCooldown)
     State.FindSellerLog("Find Seller remote result", tostring(petName), "has", tostring(hasSeller), "listing", tostring(listingId))
     if hasSeller and listingId then
         State.FindSellerLog("Find Seller teleport", tostring(petName), tostring(listingId))
+        local startedAt = os.clock()
+        State.LastFindSellerTeleportFailAt = 0
+        State.LastFindSellerTeleportFailReason = nil
         local okTeleport, teleportResult = pcall(function()
             return teleportToListing:InvokeServer(listingId, true)
         end)
         State.FindSellerLog("Find Seller teleport result", tostring(okTeleport), tostring(teleportResult))
-        return okTeleport
+        if not okTeleport or teleportResult == false then
+            return false
+        end
+
+        local waitUntil = os.clock() + 6
+        while State.Running and os.clock() < waitUntil do
+            if (tonumber(State.LastFindSellerTeleportFailAt) or 0) >= startedAt then
+                State.FindSellerLog("Find Seller retry next", tostring(petName), tostring(State.LastFindSellerTeleportFailReason or "teleport failed"))
+                return false
+            end
+            task.wait(0.25)
+        end
+
+        return true
     end
 
+    State.FindSellerLog("Find Seller no seller", tostring(petName))
     return false
 end
 
