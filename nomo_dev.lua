@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V14.5 DEV FIND SELLER LOOP"
+local VERSION = "V14.6 DEV FIND SELLER FALLBACK HOP"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6486,14 +6486,15 @@ if not State.FindSellerTeleportFailHooked and State.TeleportService and State.Te
     end)
 end
 
-State.FindIndexSellerForPet = function(petName, bypassCooldown)
-    petName = trim(petName)
-    if petName == "" then
-        State.FindSellerLog("Find Seller blocked", "empty pet")
+State.FindIndexSellerForItem = function(itemType, itemName, bypassCooldown)
+    itemType = trim(itemType or "Pet")
+    itemName = trim(itemName)
+    if itemName == "" then
+        State.FindSellerLog("Find Seller blocked", "empty item")
         return false
     end
     if not bypassCooldown and os.clock() - (tonumber(State.LastFindSellerAt) or 0) < 10 then
-        State.FindSellerLog("Find Seller cooldown", tostring(petName))
+        State.FindSellerLog("Find Seller cooldown", tostring(itemName))
         return false
     end
     if not bypassCooldown then
@@ -6517,10 +6518,10 @@ State.FindIndexSellerForPet = function(petName, bypassCooldown)
     end
 
     local okData, defaultData = pcall(function()
-        return State.TokenRAPUtil.GetDefaultItemData("Pet", petName)
+        return State.TokenRAPUtil.GetDefaultItemData(itemType, itemName)
     end)
     if not okData or not defaultData then
-        State.FindSellerLog("Find Seller default data failed", tostring(defaultData))
+        State.FindSellerLog("Find Seller default data failed", tostring(itemType), tostring(itemName), tostring(defaultData))
         return false
     end
 
@@ -6534,14 +6535,14 @@ State.FindIndexSellerForPet = function(petName, bypassCooldown)
     end
 
     local ok, hasSeller, listingId = pcall(function()
-        return findSellers:InvokeServer("Pet", defaultData)
+        return findSellers:InvokeServer(itemType, defaultData)
     end)
     if not ok then
         State.FindSellerLog("Find Seller error", tostring(hasSeller))
         return false
     end
     if hasSeller and listingId then
-        State.FindSellerLog("Find Seller teleporting", tostring(petName))
+        State.FindSellerLog("Find Seller teleporting", tostring(itemName))
         local startedAt = os.clock()
         State.LastFindSellerTeleportFailAt = 0
         State.LastFindSellerTeleportFailReason = nil
@@ -6555,20 +6556,24 @@ State.FindIndexSellerForPet = function(petName, bypassCooldown)
         local waitUntil = os.clock() + 8
         while State.Running and os.clock() < waitUntil do
             if (tonumber(State.LastFindSellerTeleportFailAt) or 0) >= startedAt then
-                State.FindSellerLog("Find Seller server full", tostring(petName), "waiting 2s")
+                State.FindSellerLog("Find Seller server full", tostring(itemName), "waiting 2s")
                 task.wait(2)
-                State.FindSellerLog("Find Seller retry next", tostring(petName))
+                State.FindSellerLog("Find Seller retry next", tostring(itemName))
                 return false
             end
             task.wait(0.25)
         end
 
-        State.FindSellerLog("Find Seller no teleport", tostring(petName), "retry next")
+        State.FindSellerLog("Find Seller no teleport", tostring(itemName), "retry next")
         return false
     end
 
-    State.FindSellerLog("Find Seller no seller", tostring(petName))
+    State.FindSellerLog("Find Seller no seller", tostring(itemName))
     return false
+end
+
+State.FindIndexSellerForPet = function(petName, bypassCooldown)
+    return State.FindIndexSellerForItem("Pet", petName, bypassCooldown)
 end
 
 State.FindSellerHopWatchlist = function()
@@ -6612,6 +6617,36 @@ State.FindSellerHopWatchlist = function()
 
                 if pass < maxPasses then
                     State.FindSellerLog("Find Seller pass done", "waiting 4s")
+                    task.wait(4)
+                end
+            end
+            State.FindSellerLog("Find Seller fallback hop mode")
+            local fallback = State.FindSellerFallbackTargets or {
+                {Type = "Pet", Name = "Red Fox"},
+                {Type = "Pet", Name = "Mimic Octopus"},
+                {Type = "Pet", Name = "Butterfly"},
+                {Type = "Pet", Name = "Bacon Pig"},
+                {Type = "Pet", Name = "Ankylosaurus"},
+                {Type = "Holdable", Name = "Bone Blossom"},
+                {Type = "Holdable", Name = "Candy Blossom"},
+                {Type = "Holdable", Name = "Beanstalk"},
+            }
+            local fallbackPasses = 3
+            for pass = 1, fallbackPasses do
+                for i, target in ipairs(fallback) do
+                    if not State.Running then break end
+                    local itemType = tostring(target.Type or "Pet")
+                    local itemName = tostring(target.Name or "")
+                    State.FindSellerLog("Find Seller fallback", tostring(pass) .. "/" .. tostring(fallbackPasses), tostring(i) .. "/" .. tostring(#fallback), itemName)
+                    if itemName ~= "" and State.FindIndexSellerForItem(itemType, itemName, true) then
+                        State.FindSellerLog("Find Seller fallback found", itemName)
+                        State.FindSellerLoopRunning = false
+                        return
+                    end
+                    task.wait(0.6)
+                end
+                if pass < fallbackPasses then
+                    State.FindSellerLog("Find Seller fallback wait", "4s")
                     task.wait(4)
                 end
             end
