@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V13.8 DEV FIND SELLER RETRY FULL"
+local VERSION = "V13.9 DEV FIND SELLER POLISH"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6437,7 +6437,6 @@ State.FindSellerLog = function(...)
     for i = 1, select("#", ...) do
         table.insert(parts, tostring(select(i, ...)))
     end
-    print("[NOMO FIND SELLER TRACE]", table.concat(parts, " "))
     local ok, err = pcall(log, ...)
     if not ok then
         print("[NOMO FIND SELLER LOG ERROR]", tostring(err))
@@ -6461,8 +6460,6 @@ end
 
 State.FindIndexSellerForPet = function(petName, bypassCooldown)
     petName = trim(petName)
-    print("[NOMO FIND SELLER]", petName)
-    State.FindSellerLog("Find Seller called", tostring(petName))
     if petName == "" then
         State.FindSellerLog("Find Seller blocked", "empty pet")
         return false
@@ -6508,7 +6505,6 @@ State.FindIndexSellerForPet = function(petName, bypassCooldown)
         return false
     end
 
-    State.FindSellerLog("Find Seller auto hop", tostring(petName))
     local ok, hasSeller, listingId = pcall(function()
         return findSellers:InvokeServer("Pet", defaultData)
     end)
@@ -6516,16 +6512,14 @@ State.FindIndexSellerForPet = function(petName, bypassCooldown)
         State.FindSellerLog("Find Seller error", tostring(hasSeller))
         return false
     end
-    State.FindSellerLog("Find Seller remote result", tostring(petName), "has", tostring(hasSeller), "listing", tostring(listingId))
     if hasSeller and listingId then
-        State.FindSellerLog("Find Seller teleport", tostring(petName), tostring(listingId))
+        State.FindSellerLog("Find Seller teleporting", tostring(petName))
         local startedAt = os.clock()
         State.LastFindSellerTeleportFailAt = 0
         State.LastFindSellerTeleportFailReason = nil
         local okTeleport, teleportResult = pcall(function()
             return teleportToListing:InvokeServer(listingId, true)
         end)
-        State.FindSellerLog("Find Seller teleport result", tostring(okTeleport), tostring(teleportResult))
         if not okTeleport or teleportResult == false then
             return false
         end
@@ -6533,7 +6527,7 @@ State.FindIndexSellerForPet = function(petName, bypassCooldown)
         local waitUntil = os.clock() + 6
         while State.Running and os.clock() < waitUntil do
             if (tonumber(State.LastFindSellerTeleportFailAt) or 0) >= startedAt then
-                State.FindSellerLog("Find Seller retry next", tostring(petName), tostring(State.LastFindSellerTeleportFailReason or "teleport failed"))
+                State.FindSellerLog("Find Seller server full", tostring(petName), "retry next")
                 return false
             end
             task.wait(0.25)
@@ -6561,12 +6555,12 @@ State.FindSellerHopWatchlist = function()
         return false
     end
 
-    State.FindSellerLog("Find Seller watchlist scan", tostring(#watches), "pet(s)")
+    State.FindSellerLog("Find Seller scan", tostring(#watches), "watch(es)")
     for i, watch in ipairs(watches) do
         local petName = tostring(watch.Name or "")
-        State.FindSellerLog("Find Seller watch", tostring(i) .. "/" .. tostring(#watches), petName, "prio", tostring(getSniperPriority(watch.Config)))
+        State.FindSellerLog("Find Seller try", tostring(i) .. "/" .. tostring(#watches), petName, "prio", tostring(getSniperPriority(watch.Config)))
         if petName ~= "" and State.FindIndexSellerForPet(petName, true) then
-            State.FindSellerLog("Find Seller watchlist found", petName)
+            State.FindSellerLog("Find Seller found", petName)
             return true
         end
         task.wait(0.25)
