@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V13.9 DEV FIND SELLER POLISH"
+local VERSION = "V14.0 DEV BOOTH CLAIM BLACKLIST"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -1240,11 +1240,14 @@ local function claimBestFreeBooth()
     local maxDist = tonumber(CFG.Booth.MaxMiddleDistance) or 85
     local candidates = {}
     local seen = {}
+    State.FailedClaimBooths = State.FailedClaimBooths or {}
+    local now = os.clock()
 
     local function addCandidates(limit, label)
         for _, item in ipairs(getBoothSnapshot(true)) do
             if (item.Status == "MINE" or item.Status == "FREE") and not seen[item.Id] then
-                if (item.MiddleDistance or 999999) <= limit then
+                local failedUntil = tonumber(State.FailedClaimBooths[item.Id]) or 0
+                if failedUntil <= now and (item.MiddleDistance or 999999) <= limit then
                     seen[item.Id] = true
                     item.ClaimRangeLabel = label
                     table.insert(candidates, item)
@@ -1272,7 +1275,7 @@ local function claimBestFreeBooth()
         end
     end
 
-    local delay = tonumber(CFG.Booth.ClaimVerifyDelay) or 0.35
+    local delay = math.max(tonumber(CFG.Booth.ClaimVerifyDelay) or 0.35, 0.55)
 
     local function verifyTarget(target, label)
         task.wait(delay)
@@ -1306,14 +1309,20 @@ local function claimBestFreeBooth()
     for i = 1, limit do
         local target = candidates[i]
         if target.Status == "FREE" then
+            local claimed = false
             if sendClaim(target, target.Instance, "instance") then
+                claimed = true
+            elseif sendClaim(target, target.Id, "id") then
+                claimed = true
+            end
+            if claimed then
+                State.FailedClaimBooths[target.Id] = nil
                 equipSkin()
                 return true
             end
-            if sendClaim(target, target.Id, "id") then
-                equipSkin()
-                return true
-            end
+            State.FailedClaimBooths[target.Id] = os.clock() + 30
+            log("Claim candidate failed", target.Id, "skip 30s")
+            task.wait(0.25)
         end
     end
 
