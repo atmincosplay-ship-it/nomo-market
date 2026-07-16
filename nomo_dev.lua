@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V14.6 DEV FIND SELLER FALLBACK HOP"
+local VERSION = "V14.7 DEV AFTER HOP CLEANUP"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -715,6 +715,41 @@ end
 
 State.GetSettingsPath = function()
     return joinConfigPath(getConfigFolder(), "settings.json")
+end
+
+State.GetFindSellerLandingPath = function()
+    return joinConfigPath(getConfigFolder(), "find_seller_landing.json")
+end
+
+State.MarkFindSellerLanding = function(itemType, itemName)
+    pcall(function()
+        saveJson(State.GetFindSellerLandingPath(), {
+            At = os.time(),
+            ItemType = tostring(itemType or ""),
+            ItemName = tostring(itemName or ""),
+            JobId = tostring(game.JobId or ""),
+            Version = VERSION,
+        })
+    end)
+end
+
+State.ClearFindSellerLanding = function()
+    local path = State.GetFindSellerLandingPath()
+    if type(delfile) == "function" then pcall(delfile, path) end
+end
+
+State.ConsumeFindSellerLanding = function()
+    local path = State.GetFindSellerLandingPath()
+    local data = readJson(path)
+    if type(data) ~= "table" or type(data.At) ~= "number" then
+        return nil
+    end
+    if os.time() - data.At > 180 then
+        if type(delfile) == "function" then pcall(delfile, path) end
+        return nil
+    end
+    if type(delfile) == "function" then pcall(delfile, path) end
+    return data
 end
 
 State.LoadRuntimeSettings = function()
@@ -6546,10 +6581,14 @@ State.FindIndexSellerForItem = function(itemType, itemName, bypassCooldown)
         local startedAt = os.clock()
         State.LastFindSellerTeleportFailAt = 0
         State.LastFindSellerTeleportFailReason = nil
+        if State.MarkFindSellerLanding then
+            State.MarkFindSellerLanding(itemType, itemName)
+        end
         local okTeleport, teleportResult = pcall(function()
             return teleportToListing:InvokeServer(listingId, true)
         end)
         if not okTeleport or teleportResult == false then
+            if State.ClearFindSellerLanding then State.ClearFindSellerLanding() end
             return false
         end
 
@@ -6557,6 +6596,7 @@ State.FindIndexSellerForItem = function(itemType, itemName, bypassCooldown)
         while State.Running and os.clock() < waitUntil do
             if (tonumber(State.LastFindSellerTeleportFailAt) or 0) >= startedAt then
                 State.FindSellerLog("Find Seller server full", tostring(itemName), "waiting 2s")
+                if State.ClearFindSellerLanding then State.ClearFindSellerLanding() end
                 task.wait(2)
                 State.FindSellerLog("Find Seller retry next", tostring(itemName))
                 return false
@@ -6564,6 +6604,7 @@ State.FindIndexSellerForItem = function(itemType, itemName, bypassCooldown)
             task.wait(0.25)
         end
 
+        if State.ClearFindSellerLanding then State.ClearFindSellerLanding() end
         State.FindSellerLog("Find Seller no teleport", tostring(itemName), "retry next")
         return false
     end
@@ -6664,14 +6705,6 @@ end
 getgenv().NOMO_FIND_SELLER = State.FindIndexSellerForPet
 _G.NOMO_FIND_SELLER = State.FindIndexSellerForPet
 log("Find Seller hook registered", "use NOMO_FIND_SELLER('Pet Name')")
-if getgenv().nomo_find_seller_test ~= nil then
-    task.delay(4, function()
-        local petName = tostring(getgenv().nomo_find_seller_test or "")
-        State.FindSellerLog("Find Seller auto test", petName)
-        State.FindIndexSellerForPet(petName)
-    end)
-end
-
 State.OpenSniperWatchEditPopup = function(name, managerOverlay)
     local cfg = CFG.Sniper.Watchlist and CFG.Sniper.Watchlist[name]
     if not cfg then
@@ -7037,7 +7070,7 @@ State.FruitPage = win:CreatePage("Fruit")
 State.FruitTopRow = State.FruitPage:AddRow()
 State.FruitControlSec = State.FruitPage:AddSectionInRow(State.FruitTopRow, "Auto Fruit", 0.36)
 State.FruitFilterSec = State.FruitPage:AddSectionInRow(State.FruitTopRow, "Filter Builder", 0.64)
-State.FruitLogSec = State.FruitPage:AddSection("Fruit Preview")
+State.FruitLogSec = State.FruitPage:AddSection("Fruit Status")
 State.FruitLog = State.FruitLogSec:AddLog(112)
 
 State.FruitControlSec:AddToggle("Enabled", CFG.Fruit.Enabled == true, function(v)
@@ -7046,7 +7079,7 @@ State.FruitControlSec:AddToggle("Enabled", CFG.Fruit.Enabled == true, function(v
     State.SaveRuntimeSettings()
     log("FruitListing", tostring(v), "path", State.GetFruitFilterPath())
 end)
-State.FruitControlSec:AddButton("Preview Fruits", function()
+State.FruitControlSec:AddButton("Scan Fruits", function()
     if State.BuildFruitCandidates then
         local ok, scan = pcall(State.BuildFruitCandidates)
         if ok and type(scan) == "table" then
@@ -7184,7 +7217,7 @@ State.RefreshFruitLog = function(scan)
             end
         end
     else
-        table.insert(lines, "Press Preview Fruits to inspect current inventory fruit.")
+        table.insert(lines, "Press Scan Fruits to inspect current inventory fruit.")
     end
     addLines(State.FruitLog, lines)
 end
@@ -7302,7 +7335,6 @@ State.FilterPathInput = State.SettingPathSec:AddInput("Filter Folder", getConfig
     CFG.Seller.ListingFilterPath = v
     reloadFilters()
 end)
-State.FindSellerPetInput = State.SettingPathSec:AddInput("Find Seller Pet", "Rainbow Bacon Pig")
 
 State.SettingUiSec:AddToggle("Compact Booth Data", CFG.UI.CompactBoothData ~= false, function(v)
     CFG.UI.CompactBoothData = v
@@ -7328,20 +7360,6 @@ State.SettingActionSec:AddButton("Reload Pet List", function()
     log("PetList reloaded", tostring(#State.PetList))
 end, "outline")
 
-State.SettingActionSec:AddButton("Diagnose Fruits", function()
-    if State.DiagnoseFruits then State.DiagnoseFruits() end
-end, "outline")
-
-State.SettingActionSec:AddButton("Find Seller Test", function()
-    local petName = State.FindSellerPetInput and trim(State.FindSellerPetInput:Get()) or ""
-    log("Find Seller test button", tostring(petName))
-    if petName ~= "" then
-        State.FindIndexSellerForPet(petName)
-    else
-        log("Find Seller test blocked", "no sniper pet/watch")
-    end
-end, "outline")
-
 State.SettingActionSec:AddButton("Rejoin Server", function()
     State.OpenConfirmPopup("Rejoin Server", "Reload this clone in the current trade server?", "Rejoin", function()
         State.Rejoin("settings rejoin")
@@ -7355,14 +7373,6 @@ State.SettingPathSec:AddButton("Save / Reload Path", function()
     State.ReloadSniperConfig()
     log("Config path set", tostring(CFG.Seller.ListingFilterPath), "listing", getFilterPath(), "sniper", getSniperFilterPath())
 end)
-
-State.SettingPathSec:AddButton("Test Find Seller", function()
-    local petName = State.FindSellerPetInput and trim(State.FindSellerPetInput:Get()) or ""
-    log("Path Find Seller test", tostring(petName))
-    if petName ~= "" then
-        State.FindIndexSellerForPet(petName)
-    end
-end, "outline")
 
 State.SettingActionSec:AddButton("Stop Script", function()
     State.Stop("settings stop")
@@ -8139,6 +8149,38 @@ end
 State.InstallFruitListing()
 State.SetBootStatus("post fruit")
 
+State.RunAfterHopSniperBoost = function(reason)
+    if State.AfterHopSniperBoostRunning then return false end
+    State.AfterHopSniperBoostRunning = true
+    task.spawn(function()
+        task.wait(2)
+        local ok, err = pcall(function()
+            if not State.Running then return end
+            if CFG.Sniper.Enabled ~= true then
+                log("After-hop sniper skipped", "sniper off")
+                return
+            end
+            if CFG.Sniper.DryRun ~= false then
+                log("After-hop sniper skipped", "dry run")
+                return
+            end
+            State.LastSniperScanAt = 0
+            if State.ApplySniperLimits then State.ApplySniperLimits() end
+            local matches = snipeDryRun(true)
+            if State.RefreshSniperLog then pcall(State.RefreshSniperLog) end
+            if #matches > 0 then
+                log("After-hop sniper", tostring(reason or "landing"), "matches", tostring(#matches))
+                buyFirstMatch()
+            else
+                log("After-hop sniper", tostring(reason or "landing"), "no matches")
+            end
+        end)
+        if not ok then log("After-hop sniper error", tostring(err)) end
+        State.AfterHopSniperBoostRunning = false
+    end)
+    return true
+end
+
 
 
 task.spawn(function()
@@ -8166,6 +8208,11 @@ task.spawn(function()
     pcall(refreshPills)
     pcall(State.RefreshDashboard)
     log("Startup delayed reload", "folder", getConfigFolder(), "filters", tostring(filterCount), "sniper", tostring(sniperOk))
+    local landing = State.ConsumeFindSellerLanding and State.ConsumeFindSellerLanding()
+    if landing then
+        log("Find Seller landing", tostring(landing.ItemName or "?"), "boost sniper")
+        State.RunAfterHopSniperBoost(tostring(landing.ItemName or "landing"))
+    end
 end)
 
 --// Auto smart rebuild once per server/job after first execution.
