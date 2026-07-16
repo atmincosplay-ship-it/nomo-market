@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V14.1 DEV ASSUME CLAIMED BOOTH"
+local VERSION = "V14.2 DEV QUIET CLAIM RETRY LOGS"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -1272,7 +1272,10 @@ local function claimBestFreeBooth()
 
     for _, target in ipairs(candidates) do
         if target.Status == "MINE" then
-            log("Already own booth", target.Id, "dist", math.floor(target.MiddleDistance or 0))
+            if os.clock() - (tonumber(State.LastOwnBoothLogAt) or 0) > 45 then
+                State.LastOwnBoothLogAt = os.clock()
+                log("Already own booth", target.Id, "dist", math.floor(target.MiddleDistance or 0))
+            end
             State.LastBooth = target
             getgenv().NOMO_BOOTH_LAST_CLAIMED = target
             return true
@@ -6550,7 +6553,9 @@ State.FindIndexSellerForPet = function(petName, bypassCooldown)
         local waitUntil = os.clock() + 6
         while State.Running and os.clock() < waitUntil do
             if (tonumber(State.LastFindSellerTeleportFailAt) or 0) >= startedAt then
-                State.FindSellerLog("Find Seller server full", tostring(petName), "retry next")
+                State.FindSellerLog("Find Seller server full", tostring(petName), "waiting 2s")
+                task.wait(2)
+                State.FindSellerLog("Find Seller retry next", tostring(petName))
                 return false
             end
             task.wait(0.25)
