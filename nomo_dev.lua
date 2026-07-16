@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V14.4 DEV FIND SELLER CONTINUE FAIL"
+local VERSION = "V14.5 DEV FIND SELLER LOOP"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6572,33 +6572,59 @@ State.FindIndexSellerForPet = function(petName, bypassCooldown)
 end
 
 State.FindSellerHopWatchlist = function()
-    if os.clock() - (tonumber(State.LastFindSellerAt) or 0) < 10 then
+    if State.FindSellerLoopRunning then
+        State.FindSellerLog("Find Seller already running")
+        return false
+    end
+    if os.clock() - (tonumber(State.LastFindSellerAt) or 0) < 5 then
         State.FindSellerLog("Find Seller watchlist cooldown")
         return false
     end
+
+    State.FindSellerLoopRunning = true
     State.LastFindSellerAt = os.clock()
-    State.FindSellerBusyUntil = os.clock() + 35
+    State.FindSellerBusyUntil = os.clock() + 90
     State.AutoSmartRebuildPausedUntil = math.max(tonumber(State.AutoSmartRebuildPausedUntil) or 0, State.FindSellerBusyUntil)
 
-    local watches = State.GetSortedSniperWatches and State.GetSortedSniperWatches() or {}
-    if #watches == 0 then
-        State.FindSellerLog("Find Seller watchlist empty")
-        return false
-    end
+    task.spawn(function()
+        local okLoop, errLoop = pcall(function()
+            local maxPasses = 8
+            for pass = 1, maxPasses do
+                if not State.Running then break end
+                local watches = State.GetSortedSniperWatches and State.GetSortedSniperWatches() or {}
+                if #watches == 0 then
+                    State.FindSellerLog("Find Seller watchlist empty")
+                    break
+                end
 
-    State.FindSellerLog("Find Seller scan", tostring(#watches), "watch(es)")
-    for i, watch in ipairs(watches) do
-        local petName = tostring(watch.Name or "")
-        State.FindSellerLog("Find Seller try", tostring(i) .. "/" .. tostring(#watches), petName, "prio", tostring(getSniperPriority(watch.Config)))
-        if petName ~= "" and State.FindIndexSellerForPet(petName, true) then
-            State.FindSellerLog("Find Seller found", petName)
-            return true
+                State.FindSellerLog("Find Seller scan", "pass", tostring(pass) .. "/" .. tostring(maxPasses), tostring(#watches), "watch(es)")
+                for i, watch in ipairs(watches) do
+                    if not State.Running then break end
+                    local petName = tostring(watch.Name or "")
+                    State.FindSellerLog("Find Seller try", tostring(i) .. "/" .. tostring(#watches), petName, "prio", tostring(getSniperPriority(watch.Config)))
+                    if petName ~= "" and State.FindIndexSellerForPet(petName, true) then
+                        State.FindSellerLog("Find Seller found", petName)
+                        State.FindSellerLoopRunning = false
+                        return
+                    end
+                    task.wait(0.6)
+                end
+
+                if pass < maxPasses then
+                    State.FindSellerLog("Find Seller pass done", "waiting 4s")
+                    task.wait(4)
+                end
+            end
+            State.FindSellerLog("Find Seller no sellers after retry")
+        end)
+        if not okLoop then
+            State.FindSellerLog("Find Seller loop error", tostring(errLoop))
         end
-        task.wait(0.25)
-    end
+        State.FindSellerLoopRunning = false
+        State.FindSellerBusyUntil = os.clock() + 5
+    end)
 
-    State.FindSellerLog("Find Seller no sellers in watchlist")
-    return false
+    return true
 end
 getgenv().NOMO_FIND_SELLER = State.FindIndexSellerForPet
 _G.NOMO_FIND_SELLER = State.FindIndexSellerForPet
