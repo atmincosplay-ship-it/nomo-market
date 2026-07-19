@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V14.8 DEV SNIPER CLEANUP"
+local VERSION = "V14.9 DEV QUIET BOOTH CLAIM"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -1214,6 +1214,20 @@ local function findBestBooth(force, maxDistOverride)
     return target, status
 end
 
+State.MarkOwnBooth = function(target, assumeSeconds)
+    if target then
+        State.LastBooth = target
+        State.LastBooth.Status = "MINE"
+        getgenv().NOMO_BOOTH_LAST_CLAIMED = target
+        if target.Id then State.AssumedBoothId = tostring(target.Id) end
+    end
+    local now = os.clock()
+    State.AssumedBoothUntil = now + (tonumber(assumeSeconds) or 60)
+    State.AutoClaimOwnedSleepUntil = now + 60
+    State.BestBoothCache = {Target = target, Status = "MINE"}
+    State.LastBestBoothCacheAt = now
+end
+
 local function getOwnedBoothSkins()
     local out = {}
     local seen = {}
@@ -1311,9 +1325,7 @@ local function claimBestFreeBooth()
                 State.LastOwnBoothLogAt = os.clock()
                 log("Already own booth", target.Id, "dist", math.floor(target.MiddleDistance or 0))
             end
-            State.LastBooth = target
-            State.AutoClaimOwnedSleepUntil = os.clock() + 60
-            getgenv().NOMO_BOOTH_LAST_CLAIMED = target
+            State.MarkOwnBooth(target, 60)
             return true
         end
     end
@@ -1324,11 +1336,13 @@ local function claimBestFreeBooth()
         task.wait(delay)
         for _, item in ipairs(getBoothSnapshot(true)) do
             if item.Id == target.Id then
-                log("Post claim", item.Id, item.Status, "owner", item.OwnerText, tostring(label))
                 if item.Status == "MINE" then
-                    State.LastBooth = item
-                    getgenv().NOMO_BOOTH_LAST_CLAIMED = item
+                    State.MarkOwnBooth(item, 60)
                     return true
+                end
+                if os.clock() - (tonumber(State.LastPostClaimFailLogAt) or 0) > 20 then
+                    State.LastPostClaimFailLogAt = os.clock()
+                    log("Post claim not mine", item.Id, item.Status, "owner", item.OwnerText, tostring(label))
                 end
                 return false
             end
@@ -1348,14 +1362,12 @@ local function claimBestFreeBooth()
         if verifyTarget(target, label) then
             return true
         end
-        State.AssumedBoothId = target.Id
-        State.AssumedBoothUntil = os.clock() + 20
-        State.AutoClaimOwnedSleepUntil = os.clock() + 60
-        State.LastBooth = target
-        State.LastBooth.Status = "MINE"
-        getgenv().NOMO_BOOTH_LAST_CLAIMED = target
+        State.MarkOwnBooth(target, 60)
         State.InvalidateListingCache()
-        log("Claim accepted assumed", target.Id, "data stale", tostring(label))
+        if os.clock() - (tonumber(State.LastClaimAssumedLogAt) or 0) > 45 then
+            State.LastClaimAssumedLogAt = os.clock()
+            log("Claim accepted assumed", target.Id, "data stale", tostring(label))
+        end
         return true
     end
 
@@ -1386,7 +1398,7 @@ end
 local function hasOwnBooth(force)
     local target, status = findBestBooth(force)
     if status == "MINE" and target then
-        State.LastBooth = target
+        State.MarkOwnBooth(target, 60)
         return true, target
     end
     return false, target
