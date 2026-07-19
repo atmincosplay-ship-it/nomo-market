@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V14.7 DEV AFTER HOP CLEANUP"
+local VERSION = "V14.8 DEV SNIPER CLEANUP"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -5262,10 +5262,6 @@ State.DashSniperNavSec:AddButton("Manage", function()
         win:SelectPage("Sniper")
     end
 end, "outline")
-State.DashSniperNavSec:AddButton("Find Seller", function()
-    log("Dashboard Find Seller watchlist")
-    State.FindSellerHopWatchlist()
-end, "outline")
 
 State.DashFruitSec:AddButton("Manage", function()
     if State.OpenFruitFilterManager then
@@ -6447,7 +6443,7 @@ local sniperPage = win:CreatePage("Sniper")
 State.SniperConfigRow = sniperPage:AddRow()
 State.SniperWatchSec = sniperPage:AddSectionInRow(State.SniperConfigRow, "Watch Builder", 0.5)
 State.SniperLimitSec = sniperPage:AddSectionInRow(State.SniperConfigRow, "Watch Limits", 0.5)
-State.SniperResultSec = sniperPage:AddSection("Sniper Matches")
+State.SniperResultSec = sniperPage:AddSection("Current Server Matches")
 
 State.SniperWatchSec:AddToggle("Enabled", CFG.Sniper.Enabled, function(v)
     CFG.Sniper.Enabled = v
@@ -6643,11 +6639,11 @@ State.FindSellerHopWatchlist = function()
                     break
                 end
 
-                State.FindSellerLog("Find Seller scan", "pass", tostring(pass) .. "/" .. tostring(maxPasses), tostring(#watches), "watch(es)")
+                if pass == 1 then State.FindSellerLog("Find Seller scan", tostring(#watches), "watch(es)") end
                 for i, watch in ipairs(watches) do
                     if not State.Running then break end
                     local petName = tostring(watch.Name or "")
-                    State.FindSellerLog("Find Seller try", tostring(i) .. "/" .. tostring(#watches), petName, "prio", tostring(getSniperPriority(watch.Config)))
+                    dlog("Find Seller try", tostring(i) .. "/" .. tostring(#watches), petName, "prio", tostring(getSniperPriority(watch.Config)))
                     if petName ~= "" and State.FindIndexSellerForPet(petName, true) then
                         State.FindSellerLog("Find Seller found", petName)
                         State.FindSellerLoopRunning = false
@@ -6657,7 +6653,7 @@ State.FindSellerHopWatchlist = function()
                 end
 
                 if pass < maxPasses then
-                    State.FindSellerLog("Find Seller pass done", "waiting 4s")
+                    dlog("Find Seller pass done", "waiting 4s")
                     task.wait(4)
                 end
             end
@@ -6678,7 +6674,7 @@ State.FindSellerHopWatchlist = function()
                     if not State.Running then break end
                     local itemType = tostring(target.Type or "Pet")
                     local itemName = tostring(target.Name or "")
-                    State.FindSellerLog("Find Seller fallback", tostring(pass) .. "/" .. tostring(fallbackPasses), tostring(i) .. "/" .. tostring(#fallback), itemName)
+                    dlog("Find Seller fallback", tostring(pass) .. "/" .. tostring(fallbackPasses), tostring(i) .. "/" .. tostring(#fallback), itemName)
                     if itemName ~= "" and State.FindIndexSellerForItem(itemType, itemName, true) then
                         State.FindSellerLog("Find Seller fallback found", itemName)
                         State.FindSellerLoopRunning = false
@@ -6687,7 +6683,7 @@ State.FindSellerHopWatchlist = function()
                     task.wait(0.6)
                 end
                 if pass < fallbackPasses then
-                    State.FindSellerLog("Find Seller fallback wait", "4s")
+                    dlog("Find Seller fallback wait", "4s")
                     task.wait(4)
                 end
             end
@@ -6973,6 +6969,7 @@ end
 
 State.RefreshSniperLog = function()
     local lines = {
+        "Mode: current server scan | buys watchlist matches only",
         "Safety: exact pet " .. tostring(CFG.Sniper.RequireExactPetName) .. " | max price required " .. tostring(not CFG.Sniper.AllowNoMaxPrice),
         "Rescan before buy: " .. tostring(CFG.Sniper.RescanBeforeBuy) .. " | DryRun: " .. tostring(CFG.Sniper.DryRun),
         "------------------------------",
@@ -7003,6 +7000,20 @@ State.RefreshSniperLog = function()
 
     if #State.LastSniperMatches == 0 and (tonumber(State.LastSniperSkipTotal) or 0) > 0 then
         table.insert(lines, "Skipped: " .. tostring(State.LastSniperSkipTotal) .. " safety reject(s)")
+        local reasonCounts, reasonOrder = {}, {}
+        for _, why in ipairs(State.LastSniperSkipReasons or {}) do
+            local reason = tostring(why):match("|%s*price%s+[^|]+%|%s*(.+)$") or tostring(why)
+            if not reasonCounts[reason] then table.insert(reasonOrder, reason) end
+            reasonCounts[reason] = (reasonCounts[reason] or 0) + 1
+        end
+        if #reasonOrder > 0 then
+            local summary = {}
+            for i, reason in ipairs(reasonOrder) do
+                if i > 4 then break end
+                table.insert(summary, tostring(reason) .. " x" .. tostring(reasonCounts[reason] or 0))
+            end
+            table.insert(lines, "Why: " .. table.concat(summary, " | "))
+        end
         for i, why in ipairs(State.LastSniperSkipReasons or {}) do
             table.insert(lines, string.format("%02d. %s", i, tostring(why)))
         end
@@ -7045,7 +7056,7 @@ State.SniperWatchSec:AddButton("Dry Run Scan", function()
     State.RefreshSniperLog()
 end, "outline")
 
-State.SniperWatchSec:AddButton("Find Seller Hop", function()
+State.SniperWatchSec:AddButton("Find Seller (Index)", function()
     log("Find Seller watchlist button")
     State.FindSellerHopWatchlist()
 end, "outline")
