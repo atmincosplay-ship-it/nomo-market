@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V15.2 DEV STRICT BOOTH VERIFY"
+local VERSION = "V15.3 DEV FRUIT STATUS"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -5146,6 +5146,22 @@ State.RefreshCloneStatus = function(forceInventory)
 end
 
 State.RefreshDashboard = function()
+    if State.DashFruitStatusLabel then
+        local scan = State.LastFruitScan
+        local ready = type(scan) == "table" and #(scan.Candidates or {}) or nil
+        local filters = type(scan) == "table" and #(scan.Filters or {}) or nil
+        local text, color
+        if CFG.Fruit.Enabled ~= true then
+            text, color = "OFF", T.Sub
+        elseif ready then
+            text = "Ready " .. tostring(ready) .. " | F" .. tostring(filters or 0)
+            color = ready > 0 and T.Green or T.Sub
+        else
+            text, color = "No Scan", T.Sub
+        end
+        State.DashFruitStatusLabel:Set(text, color)
+    end
+
     if State.DashLog then
         State.DashLog:Clear()
         for i = 1, math.min(5, #State.Logs) do
@@ -5263,6 +5279,7 @@ State.DashListingsSec = State.DashboardPage:AddSectionInRow(State.DashActionRow,
 State.DashFiltersSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Filters", 0.20)
 State.DashSniperNavSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Sniper", 0.20)
 State.DashFruitSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Fruit", 0.20)
+State.DashFruitStatusLabel = State.DashFruitSec:AddLabel("No Scan", T.Sub)
 
 State.DashRebuildSec:AddButton("Smart Rebuild", function()
     task.spawn(function()
@@ -7261,6 +7278,7 @@ State.RefreshFruitLog = function(scan)
         table.insert(lines, "Press Scan Fruits to inspect current inventory fruit.")
     end
     addLines(State.FruitLog, lines)
+    if State.RefreshDashboard then pcall(State.RefreshDashboard) end
 end
 State.RefreshFruitLog()
 --// WEBHOOK PAGE
