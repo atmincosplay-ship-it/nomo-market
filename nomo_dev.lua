@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V15.1 DEV SNIPER FAST PATH"
+local VERSION = "V15.2 DEV STRICT BOOTH VERIFY"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -1362,13 +1362,13 @@ local function claimBestFreeBooth()
         if verifyTarget(target, label) then
             return true
         end
-        State.MarkOwnBooth(target, 60)
-        State.InvalidateListingCache()
-        if os.clock() - (tonumber(State.LastClaimAssumedLogAt) or 0) > 45 then
-            State.LastClaimAssumedLogAt = os.clock()
-            log("Claim accepted assumed", target.Id, "data stale", tostring(label))
+        if State.AssumedBoothId == tostring(target.Id) then
+            State.AssumedBoothId = nil
+            State.AssumedBoothUntil = 0
         end
-        return true
+        State.BestBoothCache = nil
+        State.LastBestBoothCacheAt = 0
+        return false
     end
 
     local limit = math.min(#candidates, 8)
