@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V15.0 DEV FRUIT CLEANUP"
+local VERSION = "V15.1 DEV SNIPER FAST PATH"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -3469,16 +3469,34 @@ local function snipeDryRun(force)
         end
     end
 
+    local watchCount = 0
     for name, cfg in pairs(CFG.Sniper.Watchlist or {}) do
-        watchNorm[norm(name)] = {
-            Name = name,
-            MaxPrice = tonumber(type(cfg) == "table" and cfg.MaxPrice or cfg) or 0,
-            MinWeight = getSniperMinWeight(cfg),
-            MaxWeight = getSniperMaxWeight(cfg),
-            WeightMode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode or cfg.weightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode),
-            MaxMatchesPerPet = 0,
-            Priority = getSniperPriority(cfg),
-        }
+        local key = norm(name)
+        if key ~= "" then
+            watchCount += 1
+            watchNorm[key] = {
+                Name = name,
+                MaxPrice = tonumber(type(cfg) == "table" and cfg.MaxPrice or cfg) or 0,
+                MinWeight = getSniperMinWeight(cfg),
+                MaxWeight = getSniperMaxWeight(cfg),
+                WeightMode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode or cfg.weightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode),
+                MaxMatchesPerPet = 0,
+                Priority = getSniperPriority(cfg),
+            }
+        end
+    end
+
+    if watchCount <= 0 then
+        State.LastSniperMatches = {}
+        State.LastSniperRawCount = 0
+        State.LastSniperSkipReasons = {}
+        State.LastSniperSkipTotal = 0
+        local now = os.clock()
+        if (now - (State.LastSniperEmptyWatchLogAt or 0)) >= 30 then
+            State.LastSniperEmptyWatchLogAt = now
+            log("Sniper scan skipped", "empty watchlist")
+        end
+        return {}
     end
 
     local raw = {}
@@ -3627,10 +3645,14 @@ validateSniperMatch = function(m)
         return false, "missing listing id"
     end
 
-    local watch = getCurrentSniperWatch(l.PetType)
+    local watch = type(m.Watch) == "table" and m.Watch or nil
+    if not watch or norm(watch.Name) ~= norm(l.PetType) then
+        watch = getCurrentSniperWatch(l.PetType)
+    end
     if not watch then
         return false, "not in current watchlist"
     end
+    m.Watch = watch
 
     local price = clampPrice(l.Price)
     if not price then
