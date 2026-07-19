@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V14.9 DEV QUIET BOOTH CLAIM"
+local VERSION = "V15.0 DEV FRUIT CLEANUP"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -2826,7 +2826,7 @@ local function buildCandidates()
     local pets = getOwnPetsFromData()
     local filters = getFilters()
     local counts, chosenName, chosenFilter = {}, {}, {}
-    local myListings = getMyListings()
+    local myListings = getMyListings(false)
     local currentBoothListings = #myListings
     local alreadyListedByFilter = countMyGoodListingsByFilter(filters, myListings)
     for _, p in ipairs(pets) do counts[p.NameNorm] = (counts[p.NameNorm] or 0) + 1 end
@@ -2865,10 +2865,6 @@ local function buildCandidates()
 
             if remainingBoothSlots <= 0 then
                 reason = "booth full"
-            elseif maxFruitListings > 0 and currentFruitListings >= maxFruitListings then
-                reason = "fruit global cap reached"
-            elseif maxFruitListings > 0 and chosenFruitTotal >= math.max(0, maxFruitListings - currentFruitListings) then
-                reason = "fruit global cap"
             elseif maxListed > 0 and currentListed >= maxListed then
                 reason = "filter cap reached"
             elseif nameChosen >= allowed then
@@ -5334,7 +5330,7 @@ local function refreshBoothLog()
 
     local items = getBoothSnapshot()
     local target, status = findBestBooth()
-    local myListings = getMyListings()
+    local myListings = getMyListings(false)
     if State.BoothStatusLabel then
         State.BoothStatusLabel:Set("Booth: " .. tostring(status) .. " | " .. tostring(target and tostring(target.Id):sub(1, 8) or "none"), status == "MINE" and T.Green or (status == "FREE" and T.Yellow or T.Sub))
         State.BoothListingLabel:Set("Listings: " .. tostring(#myListings) .. "/50", T.Text)
@@ -5927,7 +5923,7 @@ end
 
 refreshSellerLog = function(showCandidates)
     local filters = getFilters()
-    local myListings = getMyListings()
+    local myListings = getMyListings(false)
     local lines = {
         "Filters: " .. tostring(#filters),
         "Booth listings: " .. tostring(#myListings) .. " / " .. tostring(CFG.Seller.BoothCap or 50),
@@ -7122,7 +7118,7 @@ State.FruitControlSec:AddButton("Reload Config", function()
         if ok then State.RefreshFruitOptions(scan); State.RefreshFruitLog(scan) end
     end
 end, "outline")
-State.FruitControlSec:AddButton("Manage Filters", function()
+State.FruitControlSec:AddButton("Manage Fruit Filters", function()
     if State.OpenFruitFilterManager then
         State.OpenFruitFilterManager()
     else
@@ -7211,7 +7207,7 @@ State.RefreshFruitLog = function(scan)
             tostring(type(scan) == "table" and #(scan.Fruits or {}) or 0),
             tostring(type(scan) == "table" and #(scan.Candidates or {}) or 0)
         ),
-        "Path: " .. tostring(State.GetFruitFilterPath()),
+        "Config: " .. tostring(State.GetFruitFilterPath()),
     }
     if type(scan) == "table" then
         if #(scan.Candidates or {}) > 0 then
@@ -8004,17 +8000,10 @@ end
 local function buildFruitCandidates()
     local fruits = getOwnFruitsFromInventoryData()
     local filters = getFruitFilters()
-    local myListings = getMyListings()
+    local myListings = getMyListings(false)
     local alreadyListedByFilter = countMyGoodFruitListingsByFilter(filters, myListings)
     local currentBoothListings = #myListings
-    local currentFruitListings = 0
-    for _, l in ipairs(myListings) do
-        if tostring(l.ItemType or "") == tostring(CFG.Fruit.ItemType or "Holdable") then
-            currentFruitListings += 1
-        end
-    end
-    local maxFruitListings = math.max(0, toInt(CFG.Fruit.MaxListed) or 10)
-    local chosenFruitTotal = 0
+
     local chosenFilter = {}
     local candidates, skipped = {}, {}
 
@@ -8046,17 +8035,12 @@ local function buildFruitCandidates()
 
             if remainingBoothSlots <= 0 then
                 reason = "booth full"
-            elseif maxFruitListings > 0 and currentFruitListings >= maxFruitListings then
-                reason = "fruit global cap reached"
-            elseif maxFruitListings > 0 and chosenFruitTotal >= math.max(0, maxFruitListings - currentFruitListings) then
-                reason = "fruit global cap"
             elseif maxListed > 0 and currentListed >= maxListed then
                 reason = "filter cap reached"
             elseif maxListed > 0 and chosen >= math.max(0, maxListed - currentListed) then
                 reason = "filter cap"
             else
                 chosenFilter[key] = chosen + 1
-                chosenFruitTotal += 1
                 table.insert(candidates, {Fruit = fruit, Filter = matched})
             end
         end
