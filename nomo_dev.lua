@@ -4013,6 +4013,21 @@ end
 
 function Library:CreateWindow(cfg)
 	cfg = cfg or {}
+	local cam = workspace.CurrentCamera
+	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
+	local windowScale = SCALE or 1
+	local windowW = math.clamp(math.floor((vp.X - 18) / windowScale), 520, 690)
+	local windowH = math.clamp(math.floor((vp.Y - 18) / windowScale), 300, 380)
+	local windowX = math.max(4, math.floor((vp.X - (windowW * windowScale)) / 2))
+	local windowY = math.max(4, math.floor((vp.Y - (windowH * windowScale)) / 2))
+	local compactRows = windowW < 650
+	local sidebarW = windowW < 600 and 126 or 150
+	local contentX = sidebarW + 8
+	State.UiWindowW = windowW
+	State.UiWindowH = windowH
+	State.UiCompactRows = compactRows
+	State.UiModalW = math.max(320, math.min(500, windowW - 24))
+	State.UiModalH = math.max(220, math.min(270, windowH - 34))
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "NomoHub"
 	pcall(function() gui.AutoLocalize = false end)
@@ -4028,8 +4043,8 @@ function Library:CreateWindow(cfg)
 	gui.Parent = pg
 
 	local main = make("Frame", {
-		Size = UDim2.fromOffset(690, 380),
-		Position = UDim2.new(0, 92, 0, 48),
+		Size = UDim2.fromOffset(windowW, windowH),
+		Position = UDim2.fromOffset(windowX, windowY),
 		BackgroundColor3 = T.BG,
 		BorderSizePixel = 0,
 		Active = true,
@@ -4045,8 +4060,8 @@ function Library:CreateWindow(cfg)
 	local top = make("Frame", {Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1}, main)
 
 	local search = make("TextBox", {
-		Size = UDim2.fromOffset(185, 32),
-		Position = UDim2.fromOffset(164, 10),
+		Size = UDim2.fromOffset(compactRows and 1 or 185, 32),
+		Position = UDim2.fromOffset(contentX + 6, 10),
 		BackgroundColor3 = T.Card,
 		Text = "",
 		PlaceholderText = "  Search pets, UUIDs, users...",
@@ -4057,35 +4072,36 @@ function Library:CreateWindow(cfg)
 		TextXAlignment = Enum.TextXAlignment.Left,
 		ClearTextOnFocus = false,
 		BorderSizePixel = 0,
+		Visible = not compactRows,
 	}, top)
 	corner(search, 8); stroke(search); pad(search, 0, 0, 8, 8)
 
 	-- status pills (right side)
 	local pillHolder = make("Frame", {
-		Size = UDim2.new(1, -430, 0, 32),
-		Position = UDim2.new(1, -74, 0, 10),
-		AnchorPoint = Vector2.new(1, 0),
+		Size = compactRows and UDim2.new(1, -(contentX + 84), 0, 32) or UDim2.new(1, -430, 0, 32),
+		Position = compactRows and UDim2.fromOffset(contentX + 6, 10) or UDim2.new(1, -74, 0, 10),
+		AnchorPoint = compactRows and Vector2.new(0, 0) or Vector2.new(1, 0),
 		BackgroundTransparency = 1,
 	}, top)
 	make("UIListLayout", {
 		FillDirection = Enum.FillDirection.Horizontal,
 		HorizontalAlignment = Enum.HorizontalAlignment.Right,
-		Padding = UDim.new(0, 8),
+		Padding = UDim.new(0, compactRows and 5 or 8),
 		SortOrder = Enum.SortOrder.LayoutOrder,
 	}, pillHolder)
 
 	local function makePill(label, value, color)
-		local f = make("Frame", {Size = UDim2.fromOffset(86, 32), BackgroundColor3 = T.Card, BorderSizePixel = 0}, pillHolder)
+		local f = make("Frame", {Size = UDim2.fromOffset(compactRows and 74 or 86, 32), BackgroundColor3 = T.Card, BorderSizePixel = 0}, pillHolder)
 		corner(f, 8); stroke(f)
 		make("TextLabel", {
-			Size = UDim2.new(1, -10, 0, 12), Position = UDim2.fromOffset(10, 4),
+			Size = UDim2.new(1, -8, 0, 12), Position = UDim2.fromOffset(8, 4),
 			BackgroundTransparency = 1, Text = label, TextColor3 = T.Sub,
-			Font = Enum.Font.Gotham, TextSize = 9, TextXAlignment = Enum.TextXAlignment.Left,
+			Font = Enum.Font.Gotham, TextSize = compactRows and 8 or 9, TextXAlignment = Enum.TextXAlignment.Left,
 		}, f)
 		local v = make("TextLabel", {
-			Size = UDim2.new(1, -10, 0, 12), Position = UDim2.fromOffset(10, 16),
+			Size = UDim2.new(1, -8, 0, 12), Position = UDim2.fromOffset(8, 16),
 			BackgroundTransparency = 1, Text = value, TextColor3 = color or T.Text,
-			Font = Enum.Font.GothamBold, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
+			Font = Enum.Font.GothamBold, TextSize = compactRows and 10 or 11, TextXAlignment = Enum.TextXAlignment.Left,
 		}, f)
 		return {Set = function(_, txt, col) v.Text = txt if col then v.TextColor3 = col end end}
 	end
@@ -4282,7 +4298,7 @@ function Library:CreateWindow(cfg)
 	-- SIDEBAR
 	----------------------------------------------------------------
 	local side = make("Frame", {
-		Size = UDim2.new(0, 150, 1, 0),
+		Size = UDim2.new(0, sidebarW, 1, 0),
 		BackgroundColor3 = T.Sidebar,
 		BorderSizePixel = 0,
 	}, main)
@@ -4341,13 +4357,13 @@ function Library:CreateWindow(cfg)
 	-- CONTENT / PAGES
 	----------------------------------------------------------------
 	local content = make("Frame", {
-		Size = UDim2.new(1, -166, 1, -100), Position = UDim2.fromOffset(158, 60),
+		Size = UDim2.new(1, -(contentX + 8), 1, -100), Position = UDim2.fromOffset(contentX, 60),
 		BackgroundTransparency = 1,
 	}, main)
 
 	local runtimeFooter = make("Frame", {
-		Size = UDim2.new(1, -174, 0, 26),
-		Position = UDim2.new(0, 158, 1, -34),
+		Size = UDim2.new(1, -(contentX + 16), 0, 26),
+		Position = UDim2.new(0, contentX, 1, -34),
 		BackgroundColor3 = T.Card,
 		BorderSizePixel = 0,
 	}, main)
@@ -4410,15 +4426,17 @@ function Library:CreateWindow(cfg)
 				BackgroundTransparency = 1,
 			}, frame)
 			make("UIListLayout", {
-				FillDirection = Enum.FillDirection.Horizontal,
+				FillDirection = compactRows and Enum.FillDirection.Vertical or Enum.FillDirection.Horizontal,
 				Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder,
 			}, row)
+			row:SetAttribute("NomoCompactRow", compactRows)
 			return row
 		end
 
 		local function newSection(parent, title, widthScale)
+			local forceFullWidth = parent and parent:GetAttribute("NomoCompactRow") == true
 			local card = make("Frame", {
-				Size = UDim2.new(widthScale or 1, widthScale and -6 or -6, 0, 0),
+				Size = forceFullWidth and UDim2.new(1, -6, 0, 0) or UDim2.new(widthScale or 1, widthScale and -6 or -6, 0, 0),
 				AutomaticSize = Enum.AutomaticSize.Y,
 				BackgroundColor3 = T.Card, BorderSizePixel = 0,
 			}, parent)
@@ -5820,7 +5838,7 @@ State.OpenFilterManager = function()
     local modal = make("Frame", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.new(0.5, 0, 0.5, 0),
-        Size = UDim2.fromOffset(500, 270),
+        Size = UDim2.fromOffset(State.UiModalW or 500, State.UiModalH or 270),
         BackgroundColor3 = T.Card,
         BorderSizePixel = 0,
         ZIndex = 91,
@@ -6271,7 +6289,7 @@ State.OpenMyListingsManager = function()
     local modal = make("Frame", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.new(0.5, 0, 0.5, 0),
-        Size = UDim2.fromOffset(500, 270),
+        Size = UDim2.fromOffset(State.UiModalW or 500, State.UiModalH or 270),
         BackgroundColor3 = T.Card,
         BorderSizePixel = 0,
         ZIndex = 91,
@@ -6962,7 +6980,7 @@ State.OpenSniperWatchlistManager = function()
     local modal = make("Frame", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.new(0.5, 0, 0.5, 0),
-        Size = UDim2.fromOffset(500, 270),
+        Size = UDim2.fromOffset(State.UiModalW or 500, State.UiModalH or 270),
         BackgroundColor3 = T.Card,
         BorderSizePixel = 0,
         ZIndex = 91,
@@ -7814,7 +7832,7 @@ State.OpenFruitFilterManager = function()
     local modal = make("Frame", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.new(0.5, 0, 0.5, 0),
-        Size = UDim2.fromOffset(500, 270),
+        Size = UDim2.fromOffset(State.UiModalW or 500, State.UiModalH or 270),
         BackgroundColor3 = T.Card,
         BorderSizePixel = 0,
         ZIndex = 91,
