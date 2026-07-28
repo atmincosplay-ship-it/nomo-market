@@ -6578,9 +6578,8 @@ State.SniperWatchSec:AddToggle("Rescan Before Buy", CFG.Sniper.RescanBeforeBuy, 
     log("Sniper RescanBeforeBuy", tostring(v))
 end)
 
-local sPet = State.SniperWatchSec:AddSearchDropdown("Pet", State.PetList or {}, "Red Fox")
-State.SniperPetInput = sPet
-local sMax = State.SniperWatchSec:AddInput("Max Price", "6")
+State.SniperPetInput = State.SniperWatchSec:AddSearchDropdown("Pet", State.PetList or {}, "Red Fox")
+State.SniperMaxPriceInput = State.SniperWatchSec:AddInput("Max Price", "6")
 State.SniperWeightModeInput = State.SniperLimitSec:AddDropdown("Weight Mode", {"Base", "Visual"}, CFG.Sniper.WeightMode or "Base", function(v)
     CFG.Sniper.WeightMode = normalizeSniperWeightMode(v)
     log("SniperWeightMode", CFG.Sniper.WeightMode)
@@ -6591,17 +6590,17 @@ end)
 State.SniperMaxKgInput = State.SniperLimitSec:AddInput("Max KG", "", function(v)
     CFG.Sniper.MaxWeight = toNumber(v)
 end)
-local sShow = State.SniperLimitSec:AddInput("Show", tostring(CFG.Sniper.MaxMatchesShown or 20), function(v)
+State.SniperShowInput = State.SniperLimitSec:AddInput("Show", tostring(CFG.Sniper.MaxMatchesShown or 20), function(v)
     CFG.Sniper.MaxMatchesShown = toInt(v) or CFG.Sniper.MaxMatchesShown or 20
 end)
-local sniperLog = State.SniperResultSec:AddLog(138)
+State.SniperLog = State.SniperResultSec:AddLog(138)
 
 State.ApplySniperLimits = function()
     CFG.Sniper.BuyCooldown = 0
     CFG.Sniper.WeightMode = normalizeSniperWeightMode(State.SniperWeightModeInput:Get())
     CFG.Sniper.MinWeight = toNumber(State.SniperMinKgInput:Get()) or 0
     CFG.Sniper.MaxWeight = toNumber(State.SniperMaxKgInput:Get())
-    CFG.Sniper.MaxMatchesShown = toInt(sShow:Get()) or CFG.Sniper.MaxMatchesShown or 20
+    CFG.Sniper.MaxMatchesShown = toInt(State.SniperShowInput:Get()) or CFG.Sniper.MaxMatchesShown or 20
     CFG.Sniper.MaxMatchesPerPet = 0
 end
 
@@ -7151,12 +7150,12 @@ State.RefreshSniperLog = function()
         ))
     end
 
-    addLines(sniperLog, lines)
+    addLines(State.SniperLog, lines)
 end
 
 State.SniperWatchSec:AddButton("Add Watch", function()
     State.ApplySniperLimits()
-    addWatch(sPet:Get(), sMax:Get())
+    addWatch(State.SniperPetInput:Get(), State.SniperMaxPriceInput:Get())
     State.RefreshSniperLog()
 end)
 
