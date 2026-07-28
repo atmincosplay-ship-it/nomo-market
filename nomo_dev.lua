@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V15.3 DEV FRUIT STATUS"
+local VERSION = "V15.6 DEV LISTING DIAG UI"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -205,6 +205,9 @@ local State = {
     LastSoldCheckAt = 0,
     LastAutoClaimAt = 0,
     LastListAt = 0,
+    LastAutoListNoCandidateSig = "",
+    LastAutoListNoCandidateAt = 0,
+    LastAutoListWaitLogAt = 0,
     ListTimes = {},
     ListedThisSession = 0,
     SnipedThisSession = 0,
@@ -1762,7 +1765,7 @@ local function applyRemoteConfig(data)
     if type(data.Seller) == "table" then
         shallowMerge(CFG.Seller, data.Seller)
         CFG.Seller.MinPetCountKeep = 0
-        CFG.Seller.MaxListPerMinute = 50
+        CFG.Seller.MaxListPerMinute = 999
         CFG.Seller.MaxAutoListSession = CFG.Seller.BoothCap or 50
     end
 
@@ -1774,7 +1777,7 @@ local function applyRemoteConfig(data)
             shallowMerge(CFG.Listings, data.Config.Listings)
         end
         CFG.Seller.MinPetCountKeep = 0
-        CFG.Seller.MaxListPerMinute = 50
+        CFG.Seller.MaxListPerMinute = 999
         CFG.Seller.MaxAutoListSession = CFG.Seller.BoothCap or 50
     end
 
@@ -2886,6 +2889,63 @@ local function buildCandidates()
     return scan
 end
 
+local function summarizeCandidateSkips(scan)
+    local counts = {}
+    local order = {}
+    for _, item in ipairs((scan and scan.Skipped) or {}) do
+        local reason = tostring(item and item.Reason or "unknown")
+        if counts[reason] == nil then
+            table.insert(order, reason)
+            counts[reason] = 0
+        end
+        counts[reason] += 1
+    end
+
+    table.sort(order, function(a, b)
+        return (counts[a] or 0) > (counts[b] or 0)
+    end)
+
+    local parts = {}
+    for i, reason in ipairs(order) do
+        if i > 4 then break end
+        table.insert(parts, reason .. "=" .. tostring(counts[reason] or 0))
+    end
+
+    local sample = "-"
+    for _, item in ipairs((scan and scan.Skipped) or {}) do
+        if item and item.Pet and item.Pet.Name then
+            sample = tostring(item.Pet.Name) .. ":" .. tostring(item.Reason or "unknown")
+            break
+        end
+    end
+
+    return table.concat(parts, ", "), sample
+end
+
+local function reportNoListingCandidates(scan)
+    if not scan or #scan.Candidates > 0 then return end
+    local now = os.clock()
+    local summary, sample = summarizeCandidateSkips(scan)
+    local sig = table.concat({
+        tostring(#(scan.Pets or {})),
+        tostring(#(scan.Filters or {})),
+        tostring(summary),
+        tostring(sample),
+    }, "|")
+    if State.LastAutoListNoCandidateSig == sig and now - (State.LastAutoListNoCandidateAt or 0) < 20 then
+        return
+    end
+    State.LastAutoListNoCandidateSig = sig
+    State.LastAutoListNoCandidateAt = now
+    log(
+        "AutoList no candidates",
+        "pets=" .. tostring(#(scan.Pets or {})),
+        "filters=" .. tostring(#(scan.Filters or {})),
+        summary ~= "" and summary or "no skip data",
+        "sample=" .. tostring(sample)
+    )
+end
+
 local function cleanupTimes(arr)
     local fresh = {}
     local now = os.clock()
@@ -3020,6 +3080,7 @@ local function autoList(scan)
     end
 
     scan = scan or buildCandidates()
+    reportNoListingCandidates(scan)
     local i = 1
     while i <= #scan.Candidates do
         local c = scan.Candidates[i]
@@ -3030,7 +3091,13 @@ local function autoList(scan)
         end
 
         local can, why = canListNow()
-        if not can then dlog("list wait", why) break end
+        if not can then
+            if os.clock() - (State.LastAutoListWaitLogAt or 0) >= 10 then
+                State.LastAutoListWaitLogAt = os.clock()
+                log("AutoList waiting", tostring(why))
+            end
+            break
+        end
         local ok, whyList = listPet(c.Pet, c.Filter.Price, true, c.Filter)
         if ok then
             i += 1
@@ -3770,7 +3837,7 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
 
-local SCALE = 0.8 -- compact Redfinger 2x2 window target
+local SCALE = 0.76 -- compact Redfinger 2x2 window target
 
 local T = {
 	BG        = Color3.fromRGB(8, 12, 22),
@@ -3961,8 +4028,8 @@ function Library:CreateWindow(cfg)
 	gui.Parent = pg
 
 	local main = make("Frame", {
-		Size = UDim2.fromOffset(700, 400),
-		Position = UDim2.new(0, 110, 0, 58),
+		Size = UDim2.fromOffset(690, 380),
+		Position = UDim2.new(0, 92, 0, 48),
 		BackgroundColor3 = T.BG,
 		BorderSizePixel = 0,
 		Active = true,
@@ -5753,7 +5820,7 @@ State.OpenFilterManager = function()
     local modal = make("Frame", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.new(0.5, 0, 0.5, 0),
-        Size = UDim2.fromOffset(540, 300),
+        Size = UDim2.fromOffset(500, 270),
         BackgroundColor3 = T.Card,
         BorderSizePixel = 0,
         ZIndex = 91,
@@ -6204,7 +6271,7 @@ State.OpenMyListingsManager = function()
     local modal = make("Frame", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.new(0.5, 0, 0.5, 0),
-        Size = UDim2.fromOffset(540, 300),
+        Size = UDim2.fromOffset(500, 270),
         BackgroundColor3 = T.Card,
         BorderSizePixel = 0,
         ZIndex = 91,
@@ -6896,7 +6963,7 @@ State.OpenSniperWatchlistManager = function()
     local modal = make("Frame", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.new(0.5, 0, 0.5, 0),
-        Size = UDim2.fromOffset(540, 300),
+        Size = UDim2.fromOffset(500, 270),
         BackgroundColor3 = T.Card,
         BorderSizePixel = 0,
         ZIndex = 91,
@@ -7049,7 +7116,7 @@ State.RefreshSniperLog = function()
         table.insert(lines, "Skipped: " .. tostring(State.LastSniperSkipTotal) .. " safety reject(s)")
         local reasonCounts, reasonOrder = {}, {}
         for _, why in ipairs(State.LastSniperSkipReasons or {}) do
-            local reason = tostring(why):match("|%s*price%s+[^|]+%|%s*(.+)$") or tostring(why)
+            local reason = tostring(why):match("|%s*price%s+[^|]+|%s*(.+)$") or tostring(why)
             if not reasonCounts[reason] then table.insert(reasonOrder, reason) end
             reasonCounts[reason] = (reasonCounts[reason] or 0) + 1
         end
@@ -7748,7 +7815,7 @@ State.OpenFruitFilterManager = function()
     local modal = make("Frame", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.new(0.5, 0, 0.5, 0),
-        Size = UDim2.fromOffset(540, 300),
+        Size = UDim2.fromOffset(500, 270),
         BackgroundColor3 = T.Card,
         BorderSizePixel = 0,
         ZIndex = 91,
