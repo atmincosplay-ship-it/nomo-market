@@ -3837,7 +3837,7 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
 
-local SCALE = 0.76 -- compact Redfinger 2x2 window target
+local SCALE = 0.82 -- compact Redfinger 2x2 window target
 
 local T = {
 	BG        = Color3.fromRGB(8, 12, 22),
@@ -4020,8 +4020,8 @@ function Library:CreateWindow(cfg)
 	local windowH = math.clamp(math.floor((vp.Y - 18) / windowScale), 300, 380)
 	local windowX = math.max(4, math.floor((vp.X - (windowW * windowScale)) / 2))
 	local windowY = math.max(4, math.floor((vp.Y - (windowH * windowScale)) / 2))
-	local compactRows = windowW < 650
-	local sidebarW = windowW < 600 and 126 or 150
+	local compactRows = vp.X < 740 or windowW < 650
+	local sidebarW = compactRows and 126 or 150
 	local contentX = sidebarW + 8
 	State.UiWindowW = windowW
 	State.UiWindowH = windowH
