@@ -3837,7 +3837,7 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
 
-local SCALE = 0.82 -- compact Redfinger 2x2 window target
+local SCALE = 0.76 -- compact Redfinger 2x2 window target
 
 local T = {
 	BG        = Color3.fromRGB(8, 12, 22),
@@ -4020,8 +4020,9 @@ function Library:CreateWindow(cfg)
 	local windowH = math.clamp(math.floor((vp.Y - 18) / windowScale), 300, 380)
 	local windowX = math.max(4, math.floor((vp.X - (windowW * windowScale)) / 2))
 	local windowY = math.max(4, math.floor((vp.Y - (windowH * windowScale)) / 2))
-	local compactRows = vp.X < 740 or windowW < 650
-	local sidebarW = compactRows and 126 or 150
+	local compactHeader = vp.X < 740 or windowW < 650
+	local compactRows = windowW < 600
+	local sidebarW = compactHeader and 126 or 150
 	local contentX = sidebarW + 8
 	State.UiWindowW = windowW
 	State.UiWindowH = windowH
@@ -4060,7 +4061,7 @@ function Library:CreateWindow(cfg)
 	local top = make("Frame", {Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1}, main)
 
 	local search = make("TextBox", {
-		Size = UDim2.fromOffset(compactRows and 1 or 185, 32),
+		Size = UDim2.fromOffset(compactHeader and 1 or 185, 32),
 		Position = UDim2.fromOffset(contentX + 6, 10),
 		BackgroundColor3 = T.Card,
 		Text = "",
@@ -4072,36 +4073,36 @@ function Library:CreateWindow(cfg)
 		TextXAlignment = Enum.TextXAlignment.Left,
 		ClearTextOnFocus = false,
 		BorderSizePixel = 0,
-		Visible = not compactRows,
+		Visible = not compactHeader,
 	}, top)
 	corner(search, 8); stroke(search); pad(search, 0, 0, 8, 8)
 
 	-- status pills (right side)
 	local pillHolder = make("Frame", {
-		Size = compactRows and UDim2.new(1, -(contentX + 84), 0, 32) or UDim2.new(1, -430, 0, 32),
-		Position = compactRows and UDim2.fromOffset(contentX + 6, 10) or UDim2.new(1, -74, 0, 10),
-		AnchorPoint = compactRows and Vector2.new(0, 0) or Vector2.new(1, 0),
+		Size = compactHeader and UDim2.new(1, -(contentX + 84), 0, 32) or UDim2.new(1, -430, 0, 32),
+		Position = compactHeader and UDim2.fromOffset(contentX + 6, 10) or UDim2.new(1, -74, 0, 10),
+		AnchorPoint = compactHeader and Vector2.new(0, 0) or Vector2.new(1, 0),
 		BackgroundTransparency = 1,
 	}, top)
 	make("UIListLayout", {
 		FillDirection = Enum.FillDirection.Horizontal,
 		HorizontalAlignment = Enum.HorizontalAlignment.Right,
-		Padding = UDim.new(0, compactRows and 5 or 8),
+		Padding = UDim.new(0, compactHeader and 5 or 8),
 		SortOrder = Enum.SortOrder.LayoutOrder,
 	}, pillHolder)
 
 	local function makePill(label, value, color)
-		local f = make("Frame", {Size = UDim2.fromOffset(compactRows and 74 or 86, 32), BackgroundColor3 = T.Card, BorderSizePixel = 0}, pillHolder)
+		local f = make("Frame", {Size = UDim2.fromOffset(compactHeader and 74 or 86, 32), BackgroundColor3 = T.Card, BorderSizePixel = 0}, pillHolder)
 		corner(f, 8); stroke(f)
 		make("TextLabel", {
 			Size = UDim2.new(1, -8, 0, 12), Position = UDim2.fromOffset(8, 4),
 			BackgroundTransparency = 1, Text = label, TextColor3 = T.Sub,
-			Font = Enum.Font.Gotham, TextSize = compactRows and 8 or 9, TextXAlignment = Enum.TextXAlignment.Left,
+			Font = Enum.Font.Gotham, TextSize = compactHeader and 8 or 9, TextXAlignment = Enum.TextXAlignment.Left,
 		}, f)
 		local v = make("TextLabel", {
 			Size = UDim2.new(1, -8, 0, 12), Position = UDim2.fromOffset(8, 16),
 			BackgroundTransparency = 1, Text = value, TextColor3 = color or T.Text,
-			Font = Enum.Font.GothamBold, TextSize = compactRows and 10 or 11, TextXAlignment = Enum.TextXAlignment.Left,
+			Font = Enum.Font.GothamBold, TextSize = compactHeader and 10 or 11, TextXAlignment = Enum.TextXAlignment.Left,
 		}, f)
 		return {Set = function(_, txt, col) v.Text = txt if col then v.TextColor3 = col end end}
 	end
