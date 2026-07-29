@@ -3848,7 +3848,7 @@ local T = {
 	Accent    = Color3.fromRGB(56, 132, 255),
 	AccentSoft= Color3.fromRGB(19, 34, 62),
 	Text      = Color3.fromRGB(230, 237, 248),
-	Sub       = Color3.fromRGB(122, 138, 166),
+	Sub       = Color3.fromRGB(164, 178, 205),
 	Green     = Color3.fromRGB(52, 199, 123),
 	Yellow    = Color3.fromRGB(235, 190, 80),
 	Red       = Color3.fromRGB(240, 85, 85),
@@ -4097,7 +4097,7 @@ function Library:CreateWindow(cfg)
 		make("TextLabel", {
 			Size = UDim2.new(1, -8, 0, 12), Position = UDim2.fromOffset(8, 4),
 			BackgroundTransparency = 1, Text = label, TextColor3 = T.Sub,
-			Font = Enum.Font.Gotham, TextSize = compactHeader and 8 or 9, TextXAlignment = Enum.TextXAlignment.Left,
+			Font = Enum.Font.GothamMedium, TextSize = compactHeader and 9 or 9, TextXAlignment = Enum.TextXAlignment.Left,
 		}, f)
 		local v = make("TextLabel", {
 			Size = UDim2.new(1, -8, 0, 12), Position = UDim2.fromOffset(8, 16),
@@ -4314,7 +4314,7 @@ function Library:CreateWindow(cfg)
 	make("TextLabel", {
 		Size = UDim2.new(1, -20, 0, 12), Position = UDim2.fromOffset(16, 36),
 		BackgroundTransparency = 1, Text = cfg.Subtitle or "SELLER LITE",
-		TextColor3 = T.Accent, Font = Enum.Font.Gotham, TextSize = 10,
+		TextColor3 = T.Accent, Font = Enum.Font.GothamBold, TextSize = 10,
 		TextXAlignment = Enum.TextXAlignment.Left,
 	}, side)
 
@@ -4344,7 +4344,7 @@ function Library:CreateWindow(cfg)
 	make("TextLabel", {
 		Size = UDim2.new(1, -12, 0, 12), Position = UDim2.fromOffset(12, 23),
 		BackgroundTransparency = 1, Text = cfg.PlanText or "LITE PLAN",
-		TextColor3 = T.Sub, Font = Enum.Font.Gotham, TextSize = 9,
+		TextColor3 = T.Sub, Font = Enum.Font.GothamMedium, TextSize = 9,
 		TextXAlignment = Enum.TextXAlignment.Left,
 	}, prof)
 	make("TextLabel", {
@@ -4400,7 +4400,7 @@ function Library:CreateWindow(cfg)
 			Size = UDim2.new(1, 0, 0, 34),
 			BackgroundColor3 = T.Sidebar, BackgroundTransparency = 1,
 			Text = name, TextColor3 = T.Sub,
-			Font = Enum.Font.GothamMedium, TextSize = 13, BorderSizePixel = 0,
+			Font = Enum.Font.GothamBold, TextSize = 13, BorderSizePixel = 0,
 		}, navHolder)
 		corner(btn, 8)
 		pad(btn, 0, 0, 12, 0)
@@ -4458,7 +4458,7 @@ function Library:CreateWindow(cfg)
 			local function rowLabel(row, text)
 				make("TextLabel", {
 					Size = UDim2.new(1, -150, 1, 0), BackgroundTransparency = 1,
-					Text = text, TextColor3 = T.Text, Font = Enum.Font.Gotham,
+					Text = text, TextColor3 = T.Text, Font = Enum.Font.GothamMedium,
 					TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
 				}, row)
 			end
