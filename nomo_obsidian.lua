@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V14.9 STABLE QUIET BOOTH CLAIM"
+local VERSION = "V15.6 STABLE UI READABLE"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -205,6 +205,9 @@ local State = {
     LastSoldCheckAt = 0,
     LastAutoClaimAt = 0,
     LastListAt = 0,
+    LastAutoListNoCandidateSig = "",
+    LastAutoListNoCandidateAt = 0,
+    LastAutoListWaitLogAt = 0,
     ListTimes = {},
     ListedThisSession = 0,
     SnipedThisSession = 0,
@@ -1362,13 +1365,13 @@ local function claimBestFreeBooth()
         if verifyTarget(target, label) then
             return true
         end
-        State.MarkOwnBooth(target, 60)
-        State.InvalidateListingCache()
-        if os.clock() - (tonumber(State.LastClaimAssumedLogAt) or 0) > 45 then
-            State.LastClaimAssumedLogAt = os.clock()
-            log("Claim accepted assumed", target.Id, "data stale", tostring(label))
+        if State.AssumedBoothId == tostring(target.Id) then
+            State.AssumedBoothId = nil
+            State.AssumedBoothUntil = 0
         end
-        return true
+        State.BestBoothCache = nil
+        State.LastBestBoothCacheAt = 0
+        return false
     end
 
     local limit = math.min(#candidates, 8)
@@ -1762,7 +1765,7 @@ local function applyRemoteConfig(data)
     if type(data.Seller) == "table" then
         shallowMerge(CFG.Seller, data.Seller)
         CFG.Seller.MinPetCountKeep = 0
-        CFG.Seller.MaxListPerMinute = 50
+        CFG.Seller.MaxListPerMinute = 999
         CFG.Seller.MaxAutoListSession = CFG.Seller.BoothCap or 50
     end
 
@@ -1774,7 +1777,7 @@ local function applyRemoteConfig(data)
             shallowMerge(CFG.Listings, data.Config.Listings)
         end
         CFG.Seller.MinPetCountKeep = 0
-        CFG.Seller.MaxListPerMinute = 50
+        CFG.Seller.MaxListPerMinute = 999
         CFG.Seller.MaxAutoListSession = CFG.Seller.BoothCap or 50
     end
 
@@ -2826,7 +2829,7 @@ local function buildCandidates()
     local pets = getOwnPetsFromData()
     local filters = getFilters()
     local counts, chosenName, chosenFilter = {}, {}, {}
-    local myListings = getMyListings()
+    local myListings = getMyListings(false)
     local currentBoothListings = #myListings
     local alreadyListedByFilter = countMyGoodListingsByFilter(filters, myListings)
     for _, p in ipairs(pets) do counts[p.NameNorm] = (counts[p.NameNorm] or 0) + 1 end
@@ -2865,10 +2868,6 @@ local function buildCandidates()
 
             if remainingBoothSlots <= 0 then
                 reason = "booth full"
-            elseif maxFruitListings > 0 and currentFruitListings >= maxFruitListings then
-                reason = "fruit global cap reached"
-            elseif maxFruitListings > 0 and chosenFruitTotal >= math.max(0, maxFruitListings - currentFruitListings) then
-                reason = "fruit global cap"
             elseif maxListed > 0 and currentListed >= maxListed then
                 reason = "filter cap reached"
             elseif nameChosen >= allowed then
@@ -2888,6 +2887,63 @@ local function buildCandidates()
     local scan = {Pets = pets, Filters = filters, Candidates = candidates, Skipped = skipped}
     State.LastScan = scan
     return scan
+end
+
+local function summarizeCandidateSkips(scan)
+    local counts = {}
+    local order = {}
+    for _, item in ipairs((scan and scan.Skipped) or {}) do
+        local reason = tostring(item and item.Reason or "unknown")
+        if counts[reason] == nil then
+            table.insert(order, reason)
+            counts[reason] = 0
+        end
+        counts[reason] += 1
+    end
+
+    table.sort(order, function(a, b)
+        return (counts[a] or 0) > (counts[b] or 0)
+    end)
+
+    local parts = {}
+    for i, reason in ipairs(order) do
+        if i > 4 then break end
+        table.insert(parts, reason .. "=" .. tostring(counts[reason] or 0))
+    end
+
+    local sample = "-"
+    for _, item in ipairs((scan and scan.Skipped) or {}) do
+        if item and item.Pet and item.Pet.Name then
+            sample = tostring(item.Pet.Name) .. ":" .. tostring(item.Reason or "unknown")
+            break
+        end
+    end
+
+    return table.concat(parts, ", "), sample
+end
+
+local function reportNoListingCandidates(scan)
+    if not scan or #scan.Candidates > 0 then return end
+    local now = os.clock()
+    local summary, sample = summarizeCandidateSkips(scan)
+    local sig = table.concat({
+        tostring(#(scan.Pets or {})),
+        tostring(#(scan.Filters or {})),
+        tostring(summary),
+        tostring(sample),
+    }, "|")
+    if State.LastAutoListNoCandidateSig == sig and now - (State.LastAutoListNoCandidateAt or 0) < 20 then
+        return
+    end
+    State.LastAutoListNoCandidateSig = sig
+    State.LastAutoListNoCandidateAt = now
+    log(
+        "AutoList no candidates",
+        "pets=" .. tostring(#(scan.Pets or {})),
+        "filters=" .. tostring(#(scan.Filters or {})),
+        summary ~= "" and summary or "no skip data",
+        "sample=" .. tostring(sample)
+    )
 end
 
 local function cleanupTimes(arr)
@@ -3024,6 +3080,7 @@ local function autoList(scan)
     end
 
     scan = scan or buildCandidates()
+    reportNoListingCandidates(scan)
     local i = 1
     while i <= #scan.Candidates do
         local c = scan.Candidates[i]
@@ -3034,7 +3091,13 @@ local function autoList(scan)
         end
 
         local can, why = canListNow()
-        if not can then dlog("list wait", why) break end
+        if not can then
+            if os.clock() - (State.LastAutoListWaitLogAt or 0) >= 10 then
+                State.LastAutoListWaitLogAt = os.clock()
+                log("AutoList waiting", tostring(why))
+            end
+            break
+        end
         local ok, whyList = listPet(c.Pet, c.Filter.Price, true, c.Filter)
         if ok then
             i += 1
@@ -3473,16 +3536,34 @@ local function snipeDryRun(force)
         end
     end
 
+    local watchCount = 0
     for name, cfg in pairs(CFG.Sniper.Watchlist or {}) do
-        watchNorm[norm(name)] = {
-            Name = name,
-            MaxPrice = tonumber(type(cfg) == "table" and cfg.MaxPrice or cfg) or 0,
-            MinWeight = getSniperMinWeight(cfg),
-            MaxWeight = getSniperMaxWeight(cfg),
-            WeightMode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode or cfg.weightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode),
-            MaxMatchesPerPet = 0,
-            Priority = getSniperPriority(cfg),
-        }
+        local key = norm(name)
+        if key ~= "" then
+            watchCount += 1
+            watchNorm[key] = {
+                Name = name,
+                MaxPrice = tonumber(type(cfg) == "table" and cfg.MaxPrice or cfg) or 0,
+                MinWeight = getSniperMinWeight(cfg),
+                MaxWeight = getSniperMaxWeight(cfg),
+                WeightMode = type(cfg) == "table" and normalizeSniperWeightMode(cfg.WeightMode or cfg.weightMode) or normalizeSniperWeightMode(CFG.Sniper.WeightMode),
+                MaxMatchesPerPet = 0,
+                Priority = getSniperPriority(cfg),
+            }
+        end
+    end
+
+    if watchCount <= 0 then
+        State.LastSniperMatches = {}
+        State.LastSniperRawCount = 0
+        State.LastSniperSkipReasons = {}
+        State.LastSniperSkipTotal = 0
+        local now = os.clock()
+        if (now - (State.LastSniperEmptyWatchLogAt or 0)) >= 30 then
+            State.LastSniperEmptyWatchLogAt = now
+            log("Sniper scan skipped", "empty watchlist")
+        end
+        return {}
     end
 
     local raw = {}
@@ -3631,10 +3712,14 @@ validateSniperMatch = function(m)
         return false, "missing listing id"
     end
 
-    local watch = getCurrentSniperWatch(l.PetType)
+    local watch = type(m.Watch) == "table" and m.Watch or nil
+    if not watch or norm(watch.Name) ~= norm(l.PetType) then
+        watch = getCurrentSniperWatch(l.PetType)
+    end
     if not watch then
         return false, "not in current watchlist"
     end
+    m.Watch = watch
 
     local price = clampPrice(l.Price)
     if not price then
@@ -3752,7 +3837,7 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
 
-local SCALE = 0.8 -- compact Redfinger 2x2 window target
+local SCALE = 0.76 -- compact Redfinger 2x2 window target
 
 local T = {
 	BG        = Color3.fromRGB(8, 12, 22),
@@ -3763,7 +3848,7 @@ local T = {
 	Accent    = Color3.fromRGB(56, 132, 255),
 	AccentSoft= Color3.fromRGB(19, 34, 62),
 	Text      = Color3.fromRGB(230, 237, 248),
-	Sub       = Color3.fromRGB(122, 138, 166),
+	Sub       = Color3.fromRGB(164, 178, 205),
 	Green     = Color3.fromRGB(52, 199, 123),
 	Yellow    = Color3.fromRGB(235, 190, 80),
 	Red       = Color3.fromRGB(240, 85, 85),
@@ -3928,6 +4013,22 @@ end
 
 function Library:CreateWindow(cfg)
 	cfg = cfg or {}
+	local cam = workspace.CurrentCamera
+	local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
+	local windowScale = SCALE or 1
+	local windowW = math.clamp(math.floor((vp.X - 18) / windowScale), 520, 690)
+	local windowH = math.clamp(math.floor((vp.Y - 18) / windowScale), 300, 380)
+	local windowX = math.max(4, math.floor((vp.X - (windowW * windowScale)) / 2))
+	local windowY = math.max(4, math.floor((vp.Y - (windowH * windowScale)) / 2))
+	local compactHeader = vp.X < 740 or windowW < 650
+	local compactRows = windowW < 600
+	local sidebarW = compactHeader and 126 or 150
+	local contentX = sidebarW + 8
+	State.UiWindowW = windowW
+	State.UiWindowH = windowH
+	State.UiCompactRows = compactRows
+	State.UiModalW = math.max(320, math.min(500, windowW - 24))
+	State.UiModalH = math.max(220, math.min(270, windowH - 34))
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "NomoHub"
 	pcall(function() gui.AutoLocalize = false end)
@@ -3943,8 +4044,8 @@ function Library:CreateWindow(cfg)
 	gui.Parent = pg
 
 	local main = make("Frame", {
-		Size = UDim2.fromOffset(700, 400),
-		Position = UDim2.new(0, 110, 0, 58),
+		Size = UDim2.fromOffset(windowW, windowH),
+		Position = UDim2.fromOffset(windowX, windowY),
 		BackgroundColor3 = T.BG,
 		BorderSizePixel = 0,
 		Active = true,
@@ -3960,8 +4061,8 @@ function Library:CreateWindow(cfg)
 	local top = make("Frame", {Size = UDim2.new(1, 0, 0, 52), BackgroundTransparency = 1}, main)
 
 	local search = make("TextBox", {
-		Size = UDim2.fromOffset(185, 32),
-		Position = UDim2.fromOffset(164, 10),
+		Size = UDim2.fromOffset(compactHeader and 1 or 185, 32),
+		Position = UDim2.fromOffset(contentX + 6, 10),
 		BackgroundColor3 = T.Card,
 		Text = "",
 		PlaceholderText = "  Search pets, UUIDs, users...",
@@ -3972,35 +4073,36 @@ function Library:CreateWindow(cfg)
 		TextXAlignment = Enum.TextXAlignment.Left,
 		ClearTextOnFocus = false,
 		BorderSizePixel = 0,
+		Visible = not compactHeader,
 	}, top)
 	corner(search, 8); stroke(search); pad(search, 0, 0, 8, 8)
 
 	-- status pills (right side)
 	local pillHolder = make("Frame", {
-		Size = UDim2.new(1, -430, 0, 32),
-		Position = UDim2.new(1, -74, 0, 10),
-		AnchorPoint = Vector2.new(1, 0),
+		Size = compactHeader and UDim2.new(1, -(contentX + 84), 0, 32) or UDim2.new(1, -430, 0, 32),
+		Position = compactHeader and UDim2.fromOffset(contentX + 6, 10) or UDim2.new(1, -74, 0, 10),
+		AnchorPoint = compactHeader and Vector2.new(0, 0) or Vector2.new(1, 0),
 		BackgroundTransparency = 1,
 	}, top)
 	make("UIListLayout", {
 		FillDirection = Enum.FillDirection.Horizontal,
 		HorizontalAlignment = Enum.HorizontalAlignment.Right,
-		Padding = UDim.new(0, 8),
+		Padding = UDim.new(0, compactHeader and 5 or 8),
 		SortOrder = Enum.SortOrder.LayoutOrder,
 	}, pillHolder)
 
 	local function makePill(label, value, color)
-		local f = make("Frame", {Size = UDim2.fromOffset(86, 32), BackgroundColor3 = T.Card, BorderSizePixel = 0}, pillHolder)
+		local f = make("Frame", {Size = UDim2.fromOffset(compactHeader and 74 or 86, 32), BackgroundColor3 = T.Card, BorderSizePixel = 0}, pillHolder)
 		corner(f, 8); stroke(f)
 		make("TextLabel", {
-			Size = UDim2.new(1, -10, 0, 12), Position = UDim2.fromOffset(10, 4),
+			Size = UDim2.new(1, -8, 0, 12), Position = UDim2.fromOffset(8, 4),
 			BackgroundTransparency = 1, Text = label, TextColor3 = T.Sub,
-			Font = Enum.Font.Gotham, TextSize = 9, TextXAlignment = Enum.TextXAlignment.Left,
+			Font = Enum.Font.GothamMedium, TextSize = compactHeader and 9 or 9, TextXAlignment = Enum.TextXAlignment.Left,
 		}, f)
 		local v = make("TextLabel", {
-			Size = UDim2.new(1, -10, 0, 12), Position = UDim2.fromOffset(10, 16),
+			Size = UDim2.new(1, -8, 0, 12), Position = UDim2.fromOffset(8, 16),
 			BackgroundTransparency = 1, Text = value, TextColor3 = color or T.Text,
-			Font = Enum.Font.GothamBold, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
+			Font = Enum.Font.GothamBold, TextSize = compactHeader and 10 or 11, TextXAlignment = Enum.TextXAlignment.Left,
 		}, f)
 		return {Set = function(_, txt, col) v.Text = txt if col then v.TextColor3 = col end end}
 	end
@@ -4197,7 +4299,7 @@ function Library:CreateWindow(cfg)
 	-- SIDEBAR
 	----------------------------------------------------------------
 	local side = make("Frame", {
-		Size = UDim2.new(0, 150, 1, 0),
+		Size = UDim2.new(0, sidebarW, 1, 0),
 		BackgroundColor3 = T.Sidebar,
 		BorderSizePixel = 0,
 	}, main)
@@ -4212,7 +4314,7 @@ function Library:CreateWindow(cfg)
 	make("TextLabel", {
 		Size = UDim2.new(1, -20, 0, 12), Position = UDim2.fromOffset(16, 36),
 		BackgroundTransparency = 1, Text = cfg.Subtitle or "SELLER LITE",
-		TextColor3 = T.Accent, Font = Enum.Font.Gotham, TextSize = 10,
+		TextColor3 = T.Accent, Font = Enum.Font.GothamBold, TextSize = 10,
 		TextXAlignment = Enum.TextXAlignment.Left,
 	}, side)
 
@@ -4242,7 +4344,7 @@ function Library:CreateWindow(cfg)
 	make("TextLabel", {
 		Size = UDim2.new(1, -12, 0, 12), Position = UDim2.fromOffset(12, 23),
 		BackgroundTransparency = 1, Text = cfg.PlanText or "LITE PLAN",
-		TextColor3 = T.Sub, Font = Enum.Font.Gotham, TextSize = 9,
+		TextColor3 = T.Sub, Font = Enum.Font.GothamMedium, TextSize = 9,
 		TextXAlignment = Enum.TextXAlignment.Left,
 	}, prof)
 	make("TextLabel", {
@@ -4256,13 +4358,13 @@ function Library:CreateWindow(cfg)
 	-- CONTENT / PAGES
 	----------------------------------------------------------------
 	local content = make("Frame", {
-		Size = UDim2.new(1, -166, 1, -100), Position = UDim2.fromOffset(158, 60),
+		Size = UDim2.new(1, -(contentX + 8), 1, -100), Position = UDim2.fromOffset(contentX, 60),
 		BackgroundTransparency = 1,
 	}, main)
 
 	local runtimeFooter = make("Frame", {
-		Size = UDim2.new(1, -174, 0, 26),
-		Position = UDim2.new(0, 158, 1, -34),
+		Size = UDim2.new(1, -(contentX + 16), 0, 26),
+		Position = UDim2.new(0, contentX, 1, -34),
 		BackgroundColor3 = T.Card,
 		BorderSizePixel = 0,
 	}, main)
@@ -4298,7 +4400,7 @@ function Library:CreateWindow(cfg)
 			Size = UDim2.new(1, 0, 0, 34),
 			BackgroundColor3 = T.Sidebar, BackgroundTransparency = 1,
 			Text = name, TextColor3 = T.Sub,
-			Font = Enum.Font.GothamMedium, TextSize = 13, BorderSizePixel = 0,
+			Font = Enum.Font.GothamBold, TextSize = 13, BorderSizePixel = 0,
 		}, navHolder)
 		corner(btn, 8)
 		pad(btn, 0, 0, 12, 0)
@@ -4325,15 +4427,17 @@ function Library:CreateWindow(cfg)
 				BackgroundTransparency = 1,
 			}, frame)
 			make("UIListLayout", {
-				FillDirection = Enum.FillDirection.Horizontal,
+				FillDirection = compactRows and Enum.FillDirection.Vertical or Enum.FillDirection.Horizontal,
 				Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder,
 			}, row)
+			row:SetAttribute("NomoCompactRow", compactRows)
 			return row
 		end
 
 		local function newSection(parent, title, widthScale)
+			local forceFullWidth = parent and parent:GetAttribute("NomoCompactRow") == true
 			local card = make("Frame", {
-				Size = UDim2.new(widthScale or 1, widthScale and -6 or -6, 0, 0),
+				Size = forceFullWidth and UDim2.new(1, -6, 0, 0) or UDim2.new(widthScale or 1, widthScale and -6 or -6, 0, 0),
 				AutomaticSize = Enum.AutomaticSize.Y,
 				BackgroundColor3 = T.Card, BorderSizePixel = 0,
 			}, parent)
@@ -4354,7 +4458,7 @@ function Library:CreateWindow(cfg)
 			local function rowLabel(row, text)
 				make("TextLabel", {
 					Size = UDim2.new(1, -150, 1, 0), BackgroundTransparency = 1,
-					Text = text, TextColor3 = T.Text, Font = Enum.Font.Gotham,
+					Text = text, TextColor3 = T.Text, Font = Enum.Font.GothamMedium,
 					TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
 				}, row)
 			end
@@ -5128,6 +5232,22 @@ State.RefreshCloneStatus = function(forceInventory)
 end
 
 State.RefreshDashboard = function()
+    if State.DashFruitStatusLabel then
+        local scan = State.LastFruitScan
+        local ready = type(scan) == "table" and #(scan.Candidates or {}) or nil
+        local filters = type(scan) == "table" and #(scan.Filters or {}) or nil
+        local text, color
+        if CFG.Fruit.Enabled ~= true then
+            text, color = "OFF", T.Sub
+        elseif ready then
+            text = "Ready " .. tostring(ready) .. " | F" .. tostring(filters or 0)
+            color = ready > 0 and T.Green or T.Sub
+        else
+            text, color = "No Scan", T.Sub
+        end
+        State.DashFruitStatusLabel:Set(text, color)
+    end
+
     if State.DashLog then
         State.DashLog:Clear()
         for i = 1, math.min(5, #State.Logs) do
@@ -5245,6 +5365,7 @@ State.DashListingsSec = State.DashboardPage:AddSectionInRow(State.DashActionRow,
 State.DashFiltersSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Filters", 0.20)
 State.DashSniperNavSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Sniper", 0.20)
 State.DashFruitSec = State.DashboardPage:AddSectionInRow(State.DashActionRow, "Fruit", 0.20)
+State.DashFruitStatusLabel = State.DashFruitSec:AddLabel("No Scan", T.Sub)
 
 State.DashRebuildSec:AddButton("Smart Rebuild", function()
     task.spawn(function()
@@ -5334,7 +5455,7 @@ local function refreshBoothLog()
 
     local items = getBoothSnapshot()
     local target, status = findBestBooth()
-    local myListings = getMyListings()
+    local myListings = getMyListings(false)
     if State.BoothStatusLabel then
         State.BoothStatusLabel:Set("Booth: " .. tostring(status) .. " | " .. tostring(target and tostring(target.Id):sub(1, 8) or "none"), status == "MINE" and T.Green or (status == "FREE" and T.Yellow or T.Sub))
         State.BoothListingLabel:Set("Listings: " .. tostring(#myListings) .. "/50", T.Text)
@@ -5718,7 +5839,7 @@ State.OpenFilterManager = function()
     local modal = make("Frame", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.new(0.5, 0, 0.5, 0),
-        Size = UDim2.fromOffset(540, 300),
+        Size = UDim2.fromOffset(State.UiModalW or 500, State.UiModalH or 270),
         BackgroundColor3 = T.Card,
         BorderSizePixel = 0,
         ZIndex = 91,
@@ -5927,7 +6048,7 @@ end
 
 refreshSellerLog = function(showCandidates)
     local filters = getFilters()
-    local myListings = getMyListings()
+    local myListings = getMyListings(false)
     local lines = {
         "Filters: " .. tostring(#filters),
         "Booth listings: " .. tostring(#myListings) .. " / " .. tostring(CFG.Seller.BoothCap or 50),
@@ -6169,7 +6290,7 @@ State.OpenMyListingsManager = function()
     local modal = make("Frame", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.new(0.5, 0, 0.5, 0),
-        Size = UDim2.fromOffset(540, 300),
+        Size = UDim2.fromOffset(State.UiModalW or 500, State.UiModalH or 270),
         BackgroundColor3 = T.Card,
         BorderSizePixel = 0,
         ZIndex = 91,
@@ -6476,9 +6597,8 @@ State.SniperWatchSec:AddToggle("Rescan Before Buy", CFG.Sniper.RescanBeforeBuy, 
     log("Sniper RescanBeforeBuy", tostring(v))
 end)
 
-local sPet = State.SniperWatchSec:AddSearchDropdown("Pet", State.PetList or {}, "Red Fox")
-State.SniperPetInput = sPet
-local sMax = State.SniperWatchSec:AddInput("Max Price", "6")
+State.SniperPetInput = State.SniperWatchSec:AddSearchDropdown("Pet", State.PetList or {}, "Red Fox")
+State.SniperMaxPriceInput = State.SniperWatchSec:AddInput("Max Price", "6")
 State.SniperWeightModeInput = State.SniperLimitSec:AddDropdown("Weight Mode", {"Base", "Visual"}, CFG.Sniper.WeightMode or "Base", function(v)
     CFG.Sniper.WeightMode = normalizeSniperWeightMode(v)
     log("SniperWeightMode", CFG.Sniper.WeightMode)
@@ -6489,17 +6609,17 @@ end)
 State.SniperMaxKgInput = State.SniperLimitSec:AddInput("Max KG", "", function(v)
     CFG.Sniper.MaxWeight = toNumber(v)
 end)
-local sShow = State.SniperLimitSec:AddInput("Show", tostring(CFG.Sniper.MaxMatchesShown or 20), function(v)
+State.SniperShowInput = State.SniperLimitSec:AddInput("Show", tostring(CFG.Sniper.MaxMatchesShown or 20), function(v)
     CFG.Sniper.MaxMatchesShown = toInt(v) or CFG.Sniper.MaxMatchesShown or 20
 end)
-local sniperLog = State.SniperResultSec:AddLog(138)
+State.SniperLog = State.SniperResultSec:AddLog(138)
 
 State.ApplySniperLimits = function()
     CFG.Sniper.BuyCooldown = 0
     CFG.Sniper.WeightMode = normalizeSniperWeightMode(State.SniperWeightModeInput:Get())
     CFG.Sniper.MinWeight = toNumber(State.SniperMinKgInput:Get()) or 0
     CFG.Sniper.MaxWeight = toNumber(State.SniperMaxKgInput:Get())
-    CFG.Sniper.MaxMatchesShown = toInt(sShow:Get()) or CFG.Sniper.MaxMatchesShown or 20
+    CFG.Sniper.MaxMatchesShown = toInt(State.SniperShowInput:Get()) or CFG.Sniper.MaxMatchesShown or 20
     CFG.Sniper.MaxMatchesPerPet = 0
 end
 
@@ -6861,7 +6981,7 @@ State.OpenSniperWatchlistManager = function()
     local modal = make("Frame", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.new(0.5, 0, 0.5, 0),
-        Size = UDim2.fromOffset(540, 300),
+        Size = UDim2.fromOffset(State.UiModalW or 500, State.UiModalH or 270),
         BackgroundColor3 = T.Card,
         BorderSizePixel = 0,
         ZIndex = 91,
@@ -7014,7 +7134,7 @@ State.RefreshSniperLog = function()
         table.insert(lines, "Skipped: " .. tostring(State.LastSniperSkipTotal) .. " safety reject(s)")
         local reasonCounts, reasonOrder = {}, {}
         for _, why in ipairs(State.LastSniperSkipReasons or {}) do
-            local reason = tostring(why):match("|%s*price%s+[^|]+%|%s*(.+)$") or tostring(why)
+            local reason = tostring(why):match("|%s*price%s+[^|]+|%s*(.+)$") or tostring(why)
             if not reasonCounts[reason] then table.insert(reasonOrder, reason) end
             reasonCounts[reason] = (reasonCounts[reason] or 0) + 1
         end
@@ -7049,12 +7169,12 @@ State.RefreshSniperLog = function()
         ))
     end
 
-    addLines(sniperLog, lines)
+    addLines(State.SniperLog, lines)
 end
 
 State.SniperWatchSec:AddButton("Add Watch", function()
     State.ApplySniperLimits()
-    addWatch(sPet:Get(), sMax:Get())
+    addWatch(State.SniperPetInput:Get(), State.SniperMaxPriceInput:Get())
     State.RefreshSniperLog()
 end)
 
@@ -7122,7 +7242,7 @@ State.FruitControlSec:AddButton("Reload Config", function()
         if ok then State.RefreshFruitOptions(scan); State.RefreshFruitLog(scan) end
     end
 end, "outline")
-State.FruitControlSec:AddButton("Manage Filters", function()
+State.FruitControlSec:AddButton("Manage Fruit Filters", function()
     if State.OpenFruitFilterManager then
         State.OpenFruitFilterManager()
     else
@@ -7211,7 +7331,7 @@ State.RefreshFruitLog = function(scan)
             tostring(type(scan) == "table" and #(scan.Fruits or {}) or 0),
             tostring(type(scan) == "table" and #(scan.Candidates or {}) or 0)
         ),
-        "Path: " .. tostring(State.GetFruitFilterPath()),
+        "Config: " .. tostring(State.GetFruitFilterPath()),
     }
     if type(scan) == "table" then
         if #(scan.Candidates or {}) > 0 then
@@ -7243,6 +7363,7 @@ State.RefreshFruitLog = function(scan)
         table.insert(lines, "Press Scan Fruits to inspect current inventory fruit.")
     end
     addLines(State.FruitLog, lines)
+    if State.RefreshDashboard then pcall(State.RefreshDashboard) end
 end
 State.RefreshFruitLog()
 --// WEBHOOK PAGE
@@ -7712,7 +7833,7 @@ State.OpenFruitFilterManager = function()
     local modal = make("Frame", {
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.new(0.5, 0, 0.5, 0),
-        Size = UDim2.fromOffset(540, 300),
+        Size = UDim2.fromOffset(State.UiModalW or 500, State.UiModalH or 270),
         BackgroundColor3 = T.Card,
         BorderSizePixel = 0,
         ZIndex = 91,
@@ -8004,17 +8125,10 @@ end
 local function buildFruitCandidates()
     local fruits = getOwnFruitsFromInventoryData()
     local filters = getFruitFilters()
-    local myListings = getMyListings()
+    local myListings = getMyListings(false)
     local alreadyListedByFilter = countMyGoodFruitListingsByFilter(filters, myListings)
     local currentBoothListings = #myListings
-    local currentFruitListings = 0
-    for _, l in ipairs(myListings) do
-        if tostring(l.ItemType or "") == tostring(CFG.Fruit.ItemType or "Holdable") then
-            currentFruitListings += 1
-        end
-    end
-    local maxFruitListings = math.max(0, toInt(CFG.Fruit.MaxListed) or 10)
-    local chosenFruitTotal = 0
+
     local chosenFilter = {}
     local candidates, skipped = {}, {}
 
@@ -8046,17 +8160,12 @@ local function buildFruitCandidates()
 
             if remainingBoothSlots <= 0 then
                 reason = "booth full"
-            elseif maxFruitListings > 0 and currentFruitListings >= maxFruitListings then
-                reason = "fruit global cap reached"
-            elseif maxFruitListings > 0 and chosenFruitTotal >= math.max(0, maxFruitListings - currentFruitListings) then
-                reason = "fruit global cap"
             elseif maxListed > 0 and currentListed >= maxListed then
                 reason = "filter cap reached"
             elseif maxListed > 0 and chosen >= math.max(0, maxListed - currentListed) then
                 reason = "filter cap"
             else
                 chosenFilter[key] = chosen + 1
-                chosenFruitTotal += 1
                 table.insert(candidates, {Fruit = fruit, Filter = matched})
             end
         end
