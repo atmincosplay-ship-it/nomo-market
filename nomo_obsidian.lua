@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V15.7 LOW PLAYER HOP"
+local VERSION = "V15.8 RECLAIM MIDDLE"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -389,6 +389,7 @@ local GameEvents = ReplicatedStorage:WaitForChild("GameEvents")
 local BoothRemotes = GameEvents:WaitForChild("TradeEvents"):WaitForChild("Booths")
 
 local ClaimBooth = BoothRemotes:WaitForChild("ClaimBooth")
+local RemoveBooth = BoothRemotes:FindFirstChild("RemoveBooth")
 local CreateListing = BoothRemotes:WaitForChild("CreateListing")
 local RemoveListing = BoothRemotes:WaitForChild("RemoveListing")
 local BuyListing = BoothRemotes:WaitForChild("BuyListing")
@@ -1313,6 +1314,40 @@ local function equipSkin()
     return ok
 end
 
+local function clearOwnBoothCache()
+    State.LastBooth = nil
+    State.AssumedBoothId = nil
+    State.AssumedBoothUntil = 0
+    State.BestBoothCache = nil
+    State.LastBestBoothCacheAt = 0
+    State.AutoClaimOwnedSleepUntil = 0
+end
+
+local function removeOwnedBooth(reason)
+    if not RemoveBooth then
+        log("RemoveBooth remote missing", tostring(reason or ""))
+        return false
+    end
+
+    local ok, err = pcall(function()
+        if RemoveBooth:IsA("RemoteFunction") then
+            RemoveBooth:InvokeServer()
+        else
+            RemoveBooth:FireServer()
+        end
+    end)
+
+    if not ok then
+        log("RemoveBooth failed", tostring(err))
+        return false
+    end
+
+    clearOwnBoothCache()
+    log("Removed current booth", tostring(reason or ""))
+    task.wait(0.65)
+    return true
+end
+
 local function claimBestFreeBooth()
     local maxDist = tonumber(CFG.Booth.MaxMiddleDistance) or 85
     local candidates = {}
@@ -1342,6 +1377,32 @@ local function claimBestFreeBooth()
     if #candidates == 0 then
         log("No FREE/MINE booth in distance", tostring(CFG.Booth.MaxMiddleDistance))
         return false
+    end
+
+    local ownedCandidate
+    local hasMiddleFree = false
+    for _, target in ipairs(candidates) do
+        if target.Status == "MINE" then
+            ownedCandidate = ownedCandidate or target
+        elseif target.Status == "FREE" and target.ClaimRangeLabel == "normal" then
+            hasMiddleFree = true
+        end
+    end
+
+    if ownedCandidate and hasMiddleFree then
+        if removeOwnedBooth("better middle booth available") then
+            candidates = {}
+            seen = {}
+            now = os.clock()
+            addCandidates(maxDist, "normal")
+            if #candidates == 0 then
+                addCandidates(999999, "fallback")
+            end
+        else
+            State.MarkOwnBooth(ownedCandidate, 60)
+            State.AutoClaimOwnedSleepUntil = os.clock() + failCooldown
+            return true
+        end
     end
 
     for _, target in ipairs(candidates) do
@@ -6858,7 +6919,7 @@ getgenv().NOMO_FIND_SELLER = State.FindIndexSellerForPet
 _G.NOMO_FIND_SELLER = State.FindIndexSellerForPet
 log("Find Seller hook registered", "use NOMO_FIND_SELLER('Pet Name')")
 
-local function getServerPlayerCount()
+State.GetServerPlayerCount = function()
     local ok, count = pcall(function()
         return #Players:GetPlayers()
     end)
@@ -6866,14 +6927,14 @@ local function getServerPlayerCount()
     return 0
 end
 
-local function maybeLowPlayerIndexHop(now)
+State.MaybeLowPlayerIndexHop = function(now)
     if not CFG.Server or CFG.Server.LowPlayerHop ~= true then return end
     if State.FindSellerLoopRunning then return end
 
     local minPlayers = tonumber(CFG.Server.MinPlayers) or 10
     local grace = tonumber(CFG.Server.GraceSeconds) or 180
     local cooldown = tonumber(CFG.Server.CooldownSeconds) or 600
-    local count = getServerPlayerCount()
+    local count = State.GetServerPlayerCount()
 
     if count <= 0 or count >= minPlayers then
         State.LowPlayerSince = nil
@@ -7666,7 +7727,7 @@ getgenv().NOMO_V32_STOP = function() State.Stop("manual") end
 --// startup
 State.SetBootStatus("startup")
 ensureFolder()
-local function bootStep(name, fn)
+State.BootStep = function(name, fn)
     log("Boot step", tostring(name))
     local ok, result = pcall(fn)
     if ok then
@@ -7677,8 +7738,8 @@ local function bootStep(name, fn)
     return nil
 end
 
-bootStep("ListingFilters", reloadFilters)
-bootStep("WarnFilter", installWarnFilter)
+State.BootStep("ListingFilters", reloadFilters)
+State.BootStep("WarnFilter", installWarnFilter)
 
 log("Started", VERSION .. " PRIVATE UI")
 State.SetBootStatus("select dashboard")
@@ -8489,11 +8550,6 @@ task.spawn(function()
                 local target, status = findBestBooth(true)
                 if status ~= "MINE" and status ~= "FREE" then
                     target, status = findBestBooth(true, 999999)
-                elseif status == "FREE" then
-                    local ownedTarget, ownedStatus = findBestBooth(true, 999999)
-                    if ownedStatus == "MINE" and ownedTarget then
-                        target, status = ownedTarget, ownedStatus
-                    end
                 end
                 if status == "MINE" then
                     State.LastBooth = target
@@ -8537,7 +8593,7 @@ task.spawn(function()
         if now - (tonumber(State.LastLowPlayerCheckAt) or 0) >= (tonumber(CFG.Server.CheckInterval) or 10) then
             State.LastLowPlayerCheckAt = now
             local ok, err = pcall(function()
-                maybeLowPlayerIndexHop(now)
+                State.MaybeLowPlayerIndexHop(now)
             end)
             if not ok then log("Low player hop error", tostring(err)) end
         end
