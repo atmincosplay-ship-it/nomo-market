@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V16.1 RECLAIM ANY CLOSER"
+local VERSION = "V16.2 OUTER OWNED DETECT"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -1220,13 +1220,11 @@ local function findBestBooth(force, maxDistOverride)
     local mine, free
 
     for _, item in ipairs(getBoothSnapshot(force)) do
-        if (item.MiddleDistance or 999999) <= maxDist then
-            if item.Status == "MINE" then
-                mine = item
-                break
-            elseif item.Status == "FREE" and not free then
-                free = item
-            end
+        if item.Status == "MINE" then
+            mine = item
+            break
+        elseif item.Status == "FREE" and not free and (item.MiddleDistance or 999999) <= maxDist then
+            free = item
         end
     end
 
@@ -5572,11 +5570,19 @@ local function refreshBoothLog()
         "------------------------------",
     }
 
+    local displayItems = {}
+    local hasMineInDisplay = false
     for i, item in ipairs(items) do
-        if i > 8 then
-            table.insert(lines, "... +" .. tostring(#items - 8) .. " more")
-            break
+        if i <= 8 then
+            table.insert(displayItems, item)
+            if item.Status == "MINE" then hasMineInDisplay = true end
+        elseif item.Status == "MINE" and not hasMineInDisplay then
+            table.insert(displayItems, item)
+            hasMineInDisplay = true
         end
+    end
+
+    for i, item in ipairs(displayItems) do
 
         local shortId = tostring(item.Id):sub(1, 8)
         local status = item.Status
@@ -5609,6 +5615,9 @@ local function refreshBoothLog()
                 math.floor(item.MiddleDistance or 0)
             ))
         end
+    end
+    if #items > #displayItems then
+        table.insert(lines, "... +" .. tostring(#items - #displayItems) .. " more")
     end
 
     addLines(boothLog, lines)
