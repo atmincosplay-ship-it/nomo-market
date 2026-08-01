@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V15.6 STABLE UI READABLE"
+local VERSION = "V15.7 LOW PLAYER HOP"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -75,6 +75,14 @@ CFG.Webhook = CFG.Webhook or {
     DeviceName = tostring(getgenv().nomo_device_name or getgenv().NOMO_DEVICE_NAME or ""),
     PetSold = true,
     SuccessfulSnipe = true,
+}
+
+CFG.Server = CFG.Server or {
+    LowPlayerHop = true,
+    MinPlayers = 10,
+    GraceSeconds = 180,
+    CooldownSeconds = 600,
+    CheckInterval = 10,
 }
 
 CFG.Debug = CFG.Debug or false
@@ -153,6 +161,15 @@ end
 CFG.Performance.AntiAfk = CFG.Performance.AntiAfk ~= false
 CFG.Performance.ClearLoadingScreens = CFG.Performance.ClearLoadingScreens ~= false
 CFG.Performance.ConsoleLogs = CFG.Performance.ConsoleLogs == true
+if CFG.Server.LowPlayerHop == nil then CFG.Server.LowPlayerHop = true end
+CFG.Server.MinPlayers = tonumber(CFG.Server.MinPlayers) or 10
+CFG.Server.GraceSeconds = tonumber(CFG.Server.GraceSeconds) or 180
+CFG.Server.CooldownSeconds = tonumber(CFG.Server.CooldownSeconds) or 600
+CFG.Server.CheckInterval = tonumber(CFG.Server.CheckInterval) or 10
+if CFG.Server.MinPlayers < 2 then CFG.Server.MinPlayers = 2 end
+if CFG.Server.GraceSeconds < 30 then CFG.Server.GraceSeconds = 30 end
+if CFG.Server.CooldownSeconds < 180 then CFG.Server.CooldownSeconds = 180 end
+if CFG.Server.CheckInterval < 5 then CFG.Server.CheckInterval = 5 end
 CFG.Sniper.BuyCooldown = 0
 CFG.Sniper.WeightMode = CFG.Sniper.WeightMode or "Base"
 CFG.Sniper.MaxMatchesPerPet = 0
@@ -204,6 +221,10 @@ local State = {
     LastSniperScanAt = 0,
     LastSoldCheckAt = 0,
     LastAutoClaimAt = 0,
+    LastLowPlayerCheckAt = 0,
+    LastLowPlayerHopAt = 0,
+    LastLowPlayerLogAt = 0,
+    LowPlayerSince = nil,
     LastListAt = 0,
     LastAutoListNoCandidateSig = "",
     LastAutoListNoCandidateAt = 0,
@@ -1298,6 +1319,7 @@ local function claimBestFreeBooth()
     local seen = {}
     State.FailedClaimBooths = State.FailedClaimBooths or {}
     local now = os.clock()
+    local failCooldown = 120
 
     local function addCandidates(limit, label)
         for _, item in ipairs(getBoothSnapshot(true)) do
@@ -1389,13 +1411,15 @@ local function claimBestFreeBooth()
                 equipSkin()
                 return true
             end
-            State.FailedClaimBooths[target.Id] = os.clock() + 30
-            log("Claim candidate failed", target.Id, "skip 30s")
+            State.FailedClaimBooths[target.Id] = os.clock() + failCooldown
+            State.AutoClaimOwnedSleepUntil = os.clock() + failCooldown
+            log("Claim candidate failed", target.Id, "skip " .. tostring(failCooldown) .. "s")
             task.wait(0.25)
         end
     end
 
     log("Claim not verified", tostring(limit) .. "/" .. tostring(#candidates), "candidate(s)")
+    State.AutoClaimOwnedSleepUntil = os.clock() + failCooldown
     return false
 end
 local function hasOwnBooth(force)
@@ -6833,6 +6857,49 @@ end
 getgenv().NOMO_FIND_SELLER = State.FindIndexSellerForPet
 _G.NOMO_FIND_SELLER = State.FindIndexSellerForPet
 log("Find Seller hook registered", "use NOMO_FIND_SELLER('Pet Name')")
+
+local function getServerPlayerCount()
+    local ok, count = pcall(function()
+        return #Players:GetPlayers()
+    end)
+    if ok then return tonumber(count) or 0 end
+    return 0
+end
+
+local function maybeLowPlayerIndexHop(now)
+    if not CFG.Server or CFG.Server.LowPlayerHop ~= true then return end
+    if State.FindSellerLoopRunning then return end
+
+    local minPlayers = tonumber(CFG.Server.MinPlayers) or 10
+    local grace = tonumber(CFG.Server.GraceSeconds) or 180
+    local cooldown = tonumber(CFG.Server.CooldownSeconds) or 600
+    local count = getServerPlayerCount()
+
+    if count <= 0 or count >= minPlayers then
+        State.LowPlayerSince = nil
+        return
+    end
+
+    if now - (tonumber(State.LastLowPlayerHopAt) or 0) < cooldown then
+        return
+    end
+
+    State.LowPlayerSince = tonumber(State.LowPlayerSince) or now
+    local waited = now - State.LowPlayerSince
+    if waited < grace then
+        if now - (tonumber(State.LastLowPlayerLogAt) or 0) >= 60 then
+            State.LastLowPlayerLogAt = now
+            log("Low player server", tostring(count) .. "/" .. tostring(Players.MaxPlayers or "?"), "waiting", tostring(math.floor(grace - waited)) .. "s")
+        end
+        return
+    end
+
+    State.LowPlayerSince = nil
+    State.LastLowPlayerHopAt = now
+    log("Low player server", tostring(count) .. "/" .. tostring(Players.MaxPlayers or "?"), "index hop")
+    State.FindSellerHopWatchlist()
+end
+
 State.OpenSniperWatchEditPopup = function(name, managerOverlay)
     local cfg = CFG.Sniper.Watchlist and CFG.Sniper.Watchlist[name]
     if not cfg then
@@ -8422,6 +8489,11 @@ task.spawn(function()
                 local target, status = findBestBooth(true)
                 if status ~= "MINE" and status ~= "FREE" then
                     target, status = findBestBooth(true, 999999)
+                elseif status == "FREE" then
+                    local ownedTarget, ownedStatus = findBestBooth(true, 999999)
+                    if ownedStatus == "MINE" and ownedTarget then
+                        target, status = ownedTarget, ownedStatus
+                    end
                 end
                 if status == "MINE" then
                     State.LastBooth = target
@@ -8460,6 +8532,14 @@ task.spawn(function()
                 end
             end)
             if not ok then log("Sniper scan error", tostring(err)) end
+        end
+
+        if now - (tonumber(State.LastLowPlayerCheckAt) or 0) >= (tonumber(CFG.Server.CheckInterval) or 10) then
+            State.LastLowPlayerCheckAt = now
+            local ok, err = pcall(function()
+                maybeLowPlayerIndexHop(now)
+            end)
+            if not ok then log("Low player hop error", tostring(err)) end
         end
 
         if CFG.Webhook.Enabled and CFG.Webhook.PetSold and now - (State.LastSoldCheckAt or 0) >= 5 then
