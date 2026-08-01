@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V15.8 RECLAIM MIDDLE"
+local VERSION = "V15.9 RECLAIM MIDDLE FIX"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -1386,6 +1386,14 @@ local function claimBestFreeBooth()
             ownedCandidate = ownedCandidate or target
         elseif target.Status == "FREE" and target.ClaimRangeLabel == "normal" then
             hasMiddleFree = true
+        end
+    end
+    if hasMiddleFree and not ownedCandidate then
+        for _, target in ipairs(getBoothSnapshot(true)) do
+            if target.Status == "MINE" then
+                ownedCandidate = target
+                break
+            end
         end
     end
 
@@ -8551,11 +8559,8 @@ task.spawn(function()
                 if status ~= "MINE" and status ~= "FREE" then
                     target, status = findBestBooth(true, 999999)
                 end
-                if status == "MINE" then
-                    State.LastBooth = target
-                    State.AutoClaimOwnedSleepUntil = now + 60
-                elseif status == "FREE" then
-                    log("AutoClaim attempting best free booth")
+                if status == "MINE" or status == "FREE" then
+                    log("AutoClaim checking booth position")
                     claimBestFreeBooth()
                 end
             end)
