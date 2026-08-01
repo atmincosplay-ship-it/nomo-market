@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V16.2 OUTER OWNED DETECT"
+local VERSION = "V16.3 RECLAIM TRACE"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -1321,17 +1321,54 @@ local function clearOwnBoothCache()
     State.AutoClaimOwnedSleepUntil = 0
 end
 
+local function listBoothRemoteNames()
+    local names = {}
+    pcall(function()
+        for _, child in ipairs(BoothRemotes:GetChildren()) do
+            if child:IsA("RemoteEvent") or child:IsA("RemoteFunction") then
+                table.insert(names, child.Name)
+            end
+        end
+    end)
+    table.sort(names)
+    return table.concat(names, ",")
+end
+
+local function resolveRemoveBoothRemote()
+    if RemoveBooth then
+        return RemoveBooth
+    end
+
+    for _, name in ipairs({"RemoveBooth", "UnclaimBooth", "LeaveBooth", "ClearBooth", "ResetBooth"}) do
+        local remote = nil
+        pcall(function()
+            remote = BoothRemotes:FindFirstChild(name)
+        end)
+        if remote and (remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction")) then
+            RemoveBooth = remote
+            log("Remove booth remote", name)
+            return remote
+        end
+    end
+
+    if os.clock() - (tonumber(State.LastRemoveRemoteLogAt) or 0) > 30 then
+        State.LastRemoveRemoteLogAt = os.clock()
+        log("RemoveBooth remote missing", listBoothRemoteNames())
+    end
+    return nil
+end
+
 local function removeOwnedBooth(reason)
-    if not RemoveBooth then
-        log("RemoveBooth remote missing", tostring(reason or ""))
+    local remote = resolveRemoveBoothRemote()
+    if not remote then
         return false
     end
 
     local ok, err = pcall(function()
-        if RemoveBooth:IsA("RemoteFunction") then
-            RemoveBooth:InvokeServer()
+        if remote:IsA("RemoteFunction") then
+            remote:InvokeServer()
         else
-            RemoveBooth:FireServer()
+            remote:FireServer()
         end
     end)
 
@@ -1344,6 +1381,17 @@ local function removeOwnedBooth(reason)
     log("Removed current booth", tostring(reason or ""))
     task.wait(0.65)
     return true
+end
+
+local function describeBoothForLog(item)
+    if not item then
+        return "none"
+    end
+    local id = tostring(item.Id or "?")
+    if #id > 8 then
+        id = id:sub(1, 8)
+    end
+    return id .. " " .. tostring(item.Status or "?") .. " d" .. tostring(math.floor(tonumber(item.MiddleDistance) or 0))
 end
 
 local function claimBestFreeBooth()
@@ -1395,6 +1443,16 @@ local function claimBestFreeBooth()
                 break
             end
         end
+    end
+
+    if os.clock() - (tonumber(State.LastReclaimTraceAt) or 0) > 30 then
+        State.LastReclaimTraceAt = os.clock()
+        log(
+            "Reclaim trace",
+            "owned", describeBoothForLog(ownedCandidate),
+            "free", describeBoothForLog(bestFree),
+            "max", tostring(maxDist)
+        )
     end
 
     if ownedCandidate and bestFree then
