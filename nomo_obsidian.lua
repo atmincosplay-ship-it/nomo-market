@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V15.9 RECLAIM MIDDLE FIX"
+local VERSION = "V16.0 RECLAIM DISTANCE"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -18,7 +18,7 @@ local CFG = getgenv().NOMO_MARKET
 CFG.Booth = CFG.Booth or {
     AutoClaim = true,
     SmartReclaim = true,
-    MaxMiddleDistance = 85,
+    MaxMiddleDistance = 65,
     BoothSkin = "Auto",
     ClaimInterval = 10,
 }
@@ -86,8 +86,8 @@ CFG.Server = CFG.Server or {
 }
 
 CFG.Debug = CFG.Debug or false
-if CFG.Booth.MaxMiddleDistance == nil or tonumber(CFG.Booth.MaxMiddleDistance) == 200 then
-    CFG.Booth.MaxMiddleDistance = 85
+if CFG.Booth.MaxMiddleDistance == nil or tonumber(CFG.Booth.MaxMiddleDistance) == 200 or tonumber(CFG.Booth.MaxMiddleDistance) == 85 then
+    CFG.Booth.MaxMiddleDistance = 65
 end
 CFG.Booth.ClaimInterval = CFG.Booth.ClaimInterval or 10
 CFG.Booth.DataCacheSeconds = tonumber(CFG.Booth.DataCacheSeconds) or 1
@@ -1349,7 +1349,7 @@ local function removeOwnedBooth(reason)
 end
 
 local function claimBestFreeBooth()
-    local maxDist = tonumber(CFG.Booth.MaxMiddleDistance) or 85
+    local maxDist = tonumber(CFG.Booth.MaxMiddleDistance) or 65
     local candidates = {}
     local seen = {}
     State.FailedClaimBooths = State.FailedClaimBooths or {}
@@ -1380,15 +1380,17 @@ local function claimBestFreeBooth()
     end
 
     local ownedCandidate
-    local hasMiddleFree = false
+    local bestMiddleFree
     for _, target in ipairs(candidates) do
         if target.Status == "MINE" then
             ownedCandidate = ownedCandidate or target
         elseif target.Status == "FREE" and target.ClaimRangeLabel == "normal" then
-            hasMiddleFree = true
+            if not bestMiddleFree or (target.MiddleDistance or 999999) < (bestMiddleFree.MiddleDistance or 999999) then
+                bestMiddleFree = target
+            end
         end
     end
-    if hasMiddleFree and not ownedCandidate then
+    if bestMiddleFree and not ownedCandidate then
         for _, target in ipairs(getBoothSnapshot(true)) do
             if target.Status == "MINE" then
                 ownedCandidate = target
@@ -1397,8 +1399,17 @@ local function claimBestFreeBooth()
         end
     end
 
-    if ownedCandidate and hasMiddleFree then
-        if removeOwnedBooth("better middle booth available") then
+    if ownedCandidate and bestMiddleFree then
+        local ownedDist = tonumber(ownedCandidate.MiddleDistance) or 999999
+        local freeDist = tonumber(bestMiddleFree.MiddleDistance) or 999999
+        local improveBy = tonumber(CFG.Booth.ReclaimImproveDistance) or 8
+        if freeDist + improveBy < ownedDist then
+            log("Better middle booth", tostring(bestMiddleFree.Id), "free", math.floor(freeDist), "owned", math.floor(ownedDist))
+        elseif os.clock() - (tonumber(State.LastReclaimSkipLogAt) or 0) > 45 then
+            State.LastReclaimSkipLogAt = os.clock()
+            log("Keep booth", tostring(ownedCandidate.Id), "owned", math.floor(ownedDist), "best free", math.floor(freeDist))
+        end
+        if freeDist + improveBy < ownedDist and removeOwnedBooth("better middle booth available") then
             candidates = {}
             seen = {}
             now = os.clock()
@@ -1406,7 +1417,7 @@ local function claimBestFreeBooth()
             if #candidates == 0 then
                 addCandidates(999999, "fallback")
             end
-        else
+        elseif freeDist + improveBy < ownedDist then
             State.MarkOwnBooth(ownedCandidate, 60)
             State.AutoClaimOwnedSleepUntil = os.clock() + failCooldown
             return true
