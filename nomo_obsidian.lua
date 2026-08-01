@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V16.0 RECLAIM DISTANCE"
+local VERSION = "V16.1 RECLAIM ANY CLOSER"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -1380,17 +1380,17 @@ local function claimBestFreeBooth()
     end
 
     local ownedCandidate
-    local bestMiddleFree
+    local bestFree
     for _, target in ipairs(candidates) do
         if target.Status == "MINE" then
             ownedCandidate = ownedCandidate or target
-        elseif target.Status == "FREE" and target.ClaimRangeLabel == "normal" then
-            if not bestMiddleFree or (target.MiddleDistance or 999999) < (bestMiddleFree.MiddleDistance or 999999) then
-                bestMiddleFree = target
+        elseif target.Status == "FREE" then
+            if not bestFree or (target.MiddleDistance or 999999) < (bestFree.MiddleDistance or 999999) then
+                bestFree = target
             end
         end
     end
-    if bestMiddleFree and not ownedCandidate then
+    if bestFree and not ownedCandidate then
         for _, target in ipairs(getBoothSnapshot(true)) do
             if target.Status == "MINE" then
                 ownedCandidate = target
@@ -1399,12 +1399,12 @@ local function claimBestFreeBooth()
         end
     end
 
-    if ownedCandidate and bestMiddleFree then
+    if ownedCandidate and bestFree then
         local ownedDist = tonumber(ownedCandidate.MiddleDistance) or 999999
-        local freeDist = tonumber(bestMiddleFree.MiddleDistance) or 999999
+        local freeDist = tonumber(bestFree.MiddleDistance) or 999999
         local improveBy = tonumber(CFG.Booth.ReclaimImproveDistance) or 8
         if freeDist + improveBy < ownedDist then
-            log("Better middle booth", tostring(bestMiddleFree.Id), "free", math.floor(freeDist), "owned", math.floor(ownedDist))
+            log("Better booth", tostring(bestFree.Id), "free", math.floor(freeDist), "owned", math.floor(ownedDist), tostring(bestFree.ClaimRangeLabel or ""))
         elseif os.clock() - (tonumber(State.LastReclaimSkipLogAt) or 0) > 45 then
             State.LastReclaimSkipLogAt = os.clock()
             log("Keep booth", tostring(ownedCandidate.Id), "owned", math.floor(ownedDist), "best free", math.floor(freeDist))
@@ -5557,8 +5557,8 @@ local function refreshBoothLog()
     CFG.Booth.BoothSkin = tostring(CFG.Booth.BoothSkin or "Default")
     CFG.Booth.ClaimInterval = tonumber(CFG.Booth.ClaimInterval) or 10
 
-    local items = getBoothSnapshot()
-    local target, status = findBestBooth()
+    local items = getBoothSnapshot(true)
+    local target, status = findBestBooth(true)
     local myListings = getMyListings(false)
     if State.BoothStatusLabel then
         State.BoothStatusLabel:Set("Booth: " .. tostring(status) .. " | " .. tostring(target and tostring(target.Id):sub(1, 8) or "none"), status == "MINE" and T.Green or (status == "FREE" and T.Yellow or T.Sub))
@@ -5625,6 +5625,12 @@ State.BoothRebuildSec:AddButton("Smart Rebuild", function()
         task.wait(0.6)
         refreshBoothLog()
     end)
+end)
+task.defer(function()
+    task.wait(1)
+    if State.Running then
+        pcall(refreshBoothLog)
+    end
 end)
 
 --// SELLER PAGE
@@ -8573,6 +8579,9 @@ task.spawn(function()
                 if status == "MINE" or status == "FREE" then
                     log("AutoClaim checking booth position")
                     claimBestFreeBooth()
+                    if State.BoothStatusLabel then
+                        pcall(refreshBoothLog)
+                    end
                 end
             end)
             if not ok then
