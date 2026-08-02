@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V17.0 AUTO CONFIG REBUILD"
+local VERSION = "V17.1 WEBHOOK DEFAULT ON"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -68,7 +68,7 @@ local DEFAULT_SNIPE_WEBHOOK_URL = "https://discord.com/api/webhooks/151378923345
 local DEFAULT_SOLD_WEBHOOK_URL = "https://discord.com/api/webhooks/1513789342492131449/Eucoqq2nxHD_7-lrM_l8LXDKRXEJiQcsZZySuqOf6z0Mf5hakp8B5tTB_EoW62lX_rZL"
 
 CFG.Webhook = CFG.Webhook or {
-    Enabled = false,
+    Enabled = true,
     Url = "",
     SnipeUrl = tostring(getgenv().nomo_sniper_webhook or getgenv().NOMO_SNIPER_WEBHOOK or DEFAULT_SNIPE_WEBHOOK_URL),
     SoldUrl = tostring(getgenv().nomo_market_webhook or getgenv().NOMO_MARKET_WEBHOOK or DEFAULT_SOLD_WEBHOOK_URL),
@@ -786,7 +786,7 @@ end
 
 State.LoadRuntimeSettings = function()
     local data = readJson(State.GetSettingsPath())
-    local defaultsVersion = "v9_9_fruit_perf_off"
+    local defaultsVersion = "v17_1_webhook_default_on"
     local applyLiveAutomationDefaults = type(data.Meta) ~= "table" or data.Meta.DefaultsVersion ~= defaultsVersion
     if type(data.Booth) == "table" then
         if data.Booth.AutoClaim ~= nil then CFG.Booth.AutoClaim = data.Booth.AutoClaim == true end
@@ -848,6 +848,9 @@ State.LoadRuntimeSettings = function()
         CFG.UI.AutoMinimized = true
         CFG.Fruit.Enabled = false
         CFG.Fruit.AutoList = false
+        CFG.Webhook.Enabled = true
+        CFG.Webhook.PetSold = true
+        CFG.Webhook.SuccessfulSnipe = true
         State.PendingRuntimeDefaultsSave = true
     end
     return data
@@ -856,7 +859,7 @@ end
 State.SaveRuntimeSettings = function()
     local data = {
         Meta = {
-            DefaultsVersion = "v9_9_fruit_perf_off",
+            DefaultsVersion = "v17_1_webhook_default_on",
         },
         Booth = {
             AutoClaim = CFG.Booth.AutoClaim == true,
