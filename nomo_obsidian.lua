@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V16.8 SHARED FILTER CONFIG"
+local VERSION = "V16.9 LOW PLAYER UI"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -821,6 +821,12 @@ State.LoadRuntimeSettings = function()
         if data.UI.CompactBoothData ~= nil then CFG.UI.CompactBoothData = data.UI.CompactBoothData == true end
     end
     if tostring(CFG.Webhook.DeviceName or "") == "" then CFG.Webhook.DeviceName = tostring(getgenv().nomo_device_name or getgenv().NOMO_DEVICE_NAME or "") end
+    if type(data.Server) == "table" then
+        if data.Server.LowPlayerHop ~= nil then CFG.Server.LowPlayerHop = data.Server.LowPlayerHop == true end
+        if data.Server.MinPlayers ~= nil then CFG.Server.MinPlayers = tonumber(data.Server.MinPlayers) or CFG.Server.MinPlayers end
+        if data.Server.GraceSeconds ~= nil then CFG.Server.GraceSeconds = tonumber(data.Server.GraceSeconds) or CFG.Server.GraceSeconds end
+        if data.Server.CooldownSeconds ~= nil then CFG.Server.CooldownSeconds = tonumber(data.Server.CooldownSeconds) or CFG.Server.CooldownSeconds end
+    end
     if tostring(CFG.Webhook.SnipeUrl or "") == "" then CFG.Webhook.SnipeUrl = tostring(CFG.Webhook.Url or DEFAULT_SNIPE_WEBHOOK_URL) end
     if tostring(CFG.Webhook.SoldUrl or "") == "" then CFG.Webhook.SoldUrl = tostring(CFG.Webhook.Url or DEFAULT_SOLD_WEBHOOK_URL) end
     if tostring(CFG.Webhook.SnipeUrl or "") == "" then CFG.Webhook.SnipeUrl = DEFAULT_SNIPE_WEBHOOK_URL end
@@ -880,6 +886,12 @@ State.SaveRuntimeSettings = function()
         UI = {
             AutoMinimized = CFG.UI.AutoMinimized == true,
             CompactBoothData = CFG.UI.CompactBoothData ~= false,
+        },
+        Server = {
+            LowPlayerHop = CFG.Server.LowPlayerHop == true,
+            MinPlayers = tonumber(CFG.Server.MinPlayers) or 10,
+            GraceSeconds = tonumber(CFG.Server.GraceSeconds) or 180,
+            CooldownSeconds = tonumber(CFG.Server.CooldownSeconds) or 600,
         },
     }
     return saveJson(State.GetSettingsPath(), data)
@@ -7863,6 +7875,8 @@ State.SettingsTopRow = State.SettingsPage:AddRow()
 State.SettingPathSec = State.SettingsPage:AddSectionInRow(State.SettingsTopRow, "Paths", 0.36)
 State.SettingUiSec = State.SettingsPage:AddSectionInRow(State.SettingsTopRow, "UI", 0.31)
 State.SettingActionSec = State.SettingsPage:AddSectionInRow(State.SettingsTopRow, "Actions", 0.33)
+State.SettingsServerRow = State.SettingsPage:AddRow()
+State.SettingServerSec = State.SettingsPage:AddSectionInRow(State.SettingsServerRow, "Server Hop", 1)
 
 State.FilterPathInput = State.SettingPathSec:AddInput("Filter Folder", getConfigFolder(), function(v)
     CFG.Seller.ListingFilterPath = v
@@ -7886,6 +7900,30 @@ State.SettingUiSec:AddToggle("Fruit Listing", CFG.Fruit.Enabled == true, functio
     CFG.Fruit.AutoList = v == true
     State.SaveRuntimeSettings()
     log("FruitListing", tostring(v), "path", State.GetFruitFilterPath())
+end)
+
+State.SettingServerSec:AddToggle("Low Player Hop", CFG.Server.LowPlayerHop == true, function(v)
+    CFG.Server.LowPlayerHop = v == true
+    State.LowPlayerSince = nil
+    State.SaveRuntimeSettings()
+    log("LowPlayerHop", tostring(v))
+end)
+
+State.SettingServerSec:AddInput("Min Players", tostring(CFG.Server.MinPlayers or 10), function(v)
+    CFG.Server.MinPlayers = math.max(2, toNumber(v) or CFG.Server.MinPlayers or 10)
+    State.LowPlayerSince = nil
+    State.SaveRuntimeSettings()
+end)
+
+State.SettingServerSec:AddInput("Grace Sec", tostring(CFG.Server.GraceSeconds or 180), function(v)
+    CFG.Server.GraceSeconds = math.max(30, toNumber(v) or CFG.Server.GraceSeconds or 180)
+    State.LowPlayerSince = nil
+    State.SaveRuntimeSettings()
+end)
+
+State.SettingServerSec:AddInput("Cooldown Sec", tostring(CFG.Server.CooldownSeconds or 600), function(v)
+    CFG.Server.CooldownSeconds = math.max(180, toNumber(v) or CFG.Server.CooldownSeconds or 600)
+    State.SaveRuntimeSettings()
 end)
 
 State.SettingActionSec:AddButton("Reload Pet List", function()
