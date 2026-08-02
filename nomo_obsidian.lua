@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V16.9 LOW PLAYER UI"
+local VERSION = "V17.0 AUTO CONFIG REBUILD"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -111,7 +111,11 @@ CFG.Seller.StartupSmartRebuildRetryDelay = CFG.Seller.StartupSmartRebuildRetryDe
 CFG.Seller.RemoteConfigEnabled = CFG.Seller.RemoteConfigEnabled ~= false
 CFG.Seller.RemoteConfigSaveLocal = CFG.Seller.RemoteConfigSaveLocal ~= false
 CFG.Seller.RemoteConfigURL = CFG.Seller.RemoteConfigURL or tostring((getgenv().NOMO_MARKET_CONFIG_URL or getgenv().NOMO_MARKET_FILTER_URL or "https://nomo-market-config.atmincosplay.workers.dev/market-config"))
-CFG.Seller.RemoteConfigRefreshSeconds = CFG.Seller.RemoteConfigRefreshSeconds or 0
+CFG.Seller.RemoteConfigRefreshSeconds = tonumber(CFG.Seller.RemoteConfigRefreshSeconds) or 120
+if CFG.Seller.RemoteConfigRefreshSeconds < 30 then CFG.Seller.RemoteConfigRefreshSeconds = 30 end
+CFG.Seller.AutoRebuildAfterConfigRefresh = CFG.Seller.AutoRebuildAfterConfigRefresh ~= false
+CFG.Seller.AutoRebuildEverySeconds = tonumber(CFG.Seller.AutoRebuildEverySeconds) or 3600
+if CFG.Seller.AutoRebuildEverySeconds < 600 then CFG.Seller.AutoRebuildEverySeconds = 600 end
 CFG.SharedConfig = CFG.SharedConfig or getgenv().NOMO_MARKET_SHARED_CONFIG or getgenv().NOMO_MARKET_FILTERS
 CFG.Seller.HighPriceWarnTokens = CFG.Seller.HighPriceWarnTokens or 1000000
 CFG.Seller.VerifyAfterList = CFG.Seller.VerifyAfterList ~= false
@@ -3785,6 +3789,28 @@ State.ReloadSniperConfig = function()
     return false
 end
 
+State.ReloadRemoteConfig = function(force)
+    local sharedData = getSharedConfig(force == true)
+    if type(sharedData) ~= "table" then
+        log("Shared config refresh", "no data")
+        return false
+    end
+
+    local listingOk, listingCount = applyRemoteConfig(sharedData)
+    local sniperOk, sniperCount = importSniperWatchlist("shared:" .. tostring(State.SharedConfigSource or "config"), sharedData, true)
+    if sniperOk and (tonumber(sniperCount) or 0) > 0 then
+        log("Shared sniper config loaded", tostring(sniperCount) .. " watch(es)", tostring(State.SharedConfigSource or "config"))
+    end
+
+    State.LastSellerScanAt = 0
+    State.LastSniperScanAt = 0
+    pcall(function() refreshSellerLog(false) end)
+    pcall(State.RefreshSniperLog)
+    pcall(refreshPills)
+    pcall(State.RefreshDashboard)
+    log("Shared config refreshed", "listing", tostring(listingCount or 0), "sniper", tostring(sniperCount or 0))
+    return listingOk == true or sniperOk == true
+end
 local function removeWatch(name)
     CFG.Sniper.Watchlist = CFG.Sniper.Watchlist or {}
     local target = norm(name)
@@ -4449,9 +4475,9 @@ function Library:CreateWindow(cfg)
 	end
 
 	local pills = {
-		Status  = makePill("STATUS", "● Online", T.Green),
+        Status  = makePill("STATUS", "● Online", T.Green),
 		Booth   = makePill("BOOTH", "Active", T.Green),
-		Balance = makePill("BALANCE", "0¢", T.Yellow),
+        Balance = makePill("BALANCE", "0¢", T.Yellow),
 	}
 
 	-- window buttons
@@ -4465,7 +4491,7 @@ function Library:CreateWindow(cfg)
 		b.Activated:Connect(cb)
 		return b
 	end
-	winBtn("×", -36, function() State.Stop("window close") end)
+    winBtn("×", -36, function() State.Stop("window close") end)
 
 	-- Hydra/Holy-style minimize: hide full window and show compact floating button.
 	local mini = make("TextButton", {
@@ -4582,7 +4608,7 @@ function Library:CreateWindow(cfg)
 		State.UiRefreshDirty = true
 	end
 
-	winBtn("–", -66, function()
+    winBtn("–", -66, function()
 		setMinimized(true)
 	end)
 
@@ -4856,7 +4882,7 @@ function Library:CreateWindow(cfg)
 					corner(b, 6); stroke(b)
 					b.Activated:Connect(function() set(val + delta) end)
 				end
-				stepBtn("–", -104, -1)
+                stepBtn("–", -104, -1)
 				stepBtn("+", -24, 1)
 				box.FocusLost:Connect(function() set(tonumber(box.Text) or val) end)
 				return {Set = function(_, v) set(v) end, Get = function() return val end}
@@ -5232,7 +5258,7 @@ function Library:CreateWindow(cfg)
 						make("TextLabel", {
 							Size = UDim2.new(col[2], -4, 1, 0), Position = UDim2.new(cx, 0, 0, 0),
 							BackgroundTransparency = 1,
-							Text = isStatus and ("● " .. status[1]) or tostring(values[i] or ""),
+                            Text = isStatus and ("● " .. status[1]) or tostring(values[i] or ""),
 							TextColor3 = isStatus and status[2] or T.Text,
 							Font = Enum.Font.Gotham, TextSize = 11,
 							TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
@@ -7926,6 +7952,32 @@ State.SettingServerSec:AddInput("Cooldown Sec", tostring(CFG.Server.CooldownSeco
     State.SaveRuntimeSettings()
 end)
 
+State.SettingsRemoteRow = State.SettingsPage:AddRow()
+State.SettingRemoteSec = State.SettingsPage:AddSectionInRow(State.SettingsRemoteRow, "Remote Config", 1)
+State.SettingRemoteSec:AddToggle("Auto Refresh", CFG.Seller.RemoteConfigEnabled == true, function(v)
+    CFG.Seller.RemoteConfigEnabled = v == true
+    State.SaveRuntimeSettings()
+    log("RemoteConfigAutoRefresh", tostring(v))
+end)
+State.SettingRemoteSec:AddInput("Refresh Sec", tostring(CFG.Seller.RemoteConfigRefreshSeconds or 120), function(v)
+    CFG.Seller.RemoteConfigRefreshSeconds = math.max(30, toNumber(v) or CFG.Seller.RemoteConfigRefreshSeconds or 120)
+    State.SaveRuntimeSettings()
+end)
+State.SettingRemoteSec:AddToggle("Hourly Rebuild", CFG.Seller.AutoRebuildAfterConfigRefresh == true, function(v)
+    CFG.Seller.AutoRebuildAfterConfigRefresh = v == true
+    State.SaveRuntimeSettings()
+    log("HourlyRebuild", tostring(v))
+end)
+State.SettingRemoteSec:AddInput("Rebuild Sec", tostring(CFG.Seller.AutoRebuildEverySeconds or 3600), function(v)
+    CFG.Seller.AutoRebuildEverySeconds = math.max(600, toNumber(v) or CFG.Seller.AutoRebuildEverySeconds or 3600)
+    State.SaveRuntimeSettings()
+end)
+State.SettingRemoteSec:AddButton("Refresh Config Now", function()
+    local ok, err = pcall(function()
+        State.ReloadRemoteConfig(true)
+    end)
+    if not ok then log("Remote refresh error", tostring(err)) end
+end, "primary")
 State.SettingActionSec:AddButton("Reload Pet List", function()
     loadGamePetList()
     log("PetList reloaded", tostring(#State.PetList))
@@ -8833,6 +8885,44 @@ task.spawn(function()
     log("Auto Smart Rebuild gave up", "will retry next reload/server")
 end)
 
+State.MaybeHourlySmartRebuild = function(now, reason)
+    if CFG.Seller.AutoRebuildAfterConfigRefresh ~= true then return false end
+    local interval = math.max(600, tonumber(CFG.Seller.AutoRebuildEverySeconds) or 3600)
+    if State.AutoSmartRebuildRunning then return false end
+    if now - (tonumber(State.LastAutoConfigRebuildAt) or 0) < interval then return false end
+    State.LastAutoConfigRebuildAt = now
+    State.AutoSmartRebuildRunning = true
+    log("Hourly Smart Rebuild queued", tostring(reason or "timer"), tostring(interval) .. "s")
+    task.spawn(function()
+        local ok, err = pcall(function()
+            if ensureBoothForListing() and #(getFilters() or {}) > 0 then
+                smartRebuildBooth()
+            else
+                log("Hourly Smart Rebuild skipped", "no booth/filters")
+            end
+        end)
+        State.AutoSmartRebuildRunning = false
+        if not ok then log("Hourly Smart Rebuild error", tostring(err)) end
+    end)
+    return true
+end
+
+State.MaybeAutoRemoteRefresh = function(now)
+    if CFG.Seller.RemoteConfigEnabled ~= true then return false end
+    local interval = math.max(30, tonumber(CFG.Seller.RemoteConfigRefreshSeconds) or 120)
+    if now - (tonumber(State.LastAutoRemoteRefreshAt) or 0) < interval then return false end
+    State.LastAutoRemoteRefreshAt = now
+    local ok = false
+    if State.ReloadRemoteConfig then
+        ok = State.ReloadRemoteConfig(false) == true
+    else
+        ok = reloadFilters() == true
+    end
+    if ok then
+        State.MaybeHourlySmartRebuild(now, "remote config")
+    end
+    return ok
+end
 --// Main background loops
 State.SetBootStatus("automation loop")
 State.BootComplete = true
@@ -8891,6 +8981,11 @@ task.spawn(function()
             if not ok then log("Low player hop error", tostring(err)) end
         end
 
+        local okRemote, remoteErr = pcall(function()
+            State.MaybeAutoRemoteRefresh(now)
+        end)
+        if not okRemote then log("Remote auto refresh error", tostring(remoteErr)) end
+
         if CFG.Webhook.Enabled and CFG.Webhook.PetSold and now - (State.LastSoldCheckAt or 0) >= 5 then
             State.LastSoldCheckAt = now
             local ok, err = pcall(function()
@@ -8903,3 +8998,4 @@ task.spawn(function()
         task.wait(1)
     end
 end)
+
