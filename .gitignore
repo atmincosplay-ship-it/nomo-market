@@ -8,5 +8,7 @@
 !nomo_stable.lua
 !nomo_obsidian.lua
 !nomo_dev.lua
+!cloudflare/
+!cloudflare/**
 !.gitignore
 !README.md

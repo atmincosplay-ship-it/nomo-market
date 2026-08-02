@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "listing": [
+    {
+      "Enabled": true,
+      "Pet": "Red Fox",
+      "Price": 6,
+      "weightMode": "Base",
+      "minKg": 0,
+      "maxKg": 3,
+      "minAge": 1,
+      "maxAge": 100,
+      "Mutation": "Any",
+      "MaxListedPet": 5
+    }
+  ],
+  "sniper": [
+    {
+      "Enabled": true,
+      "pet": "Red Fox",
+      "price": 6,
+      "weightMode": "Base",
+      "minKg": 0,
+      "maxKg": null,
+      "priority": 0
+    }
+  ]
+}

@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V16.7 BOOTH RECLAIM HOLY GATE"
+local VERSION = "V16.8 SHARED FILTER CONFIG"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -110,8 +110,9 @@ CFG.Seller.StartupSmartRebuildRetries = CFG.Seller.StartupSmartRebuildRetries or
 CFG.Seller.StartupSmartRebuildRetryDelay = CFG.Seller.StartupSmartRebuildRetryDelay or 4
 CFG.Seller.RemoteConfigEnabled = CFG.Seller.RemoteConfigEnabled ~= false
 CFG.Seller.RemoteConfigSaveLocal = CFG.Seller.RemoteConfigSaveLocal ~= false
-CFG.Seller.RemoteConfigURL = CFG.Seller.RemoteConfigURL or tostring((getgenv().NOMO_MARKET_CONFIG_URL or getgenv().NOMO_MARKET_FILTER_URL or ""))
+CFG.Seller.RemoteConfigURL = CFG.Seller.RemoteConfigURL or tostring((getgenv().NOMO_MARKET_CONFIG_URL or getgenv().NOMO_MARKET_FILTER_URL or "https://nomo-market-config.atmincosplay.workers.dev/market-config"))
 CFG.Seller.RemoteConfigRefreshSeconds = CFG.Seller.RemoteConfigRefreshSeconds or 0
+CFG.SharedConfig = CFG.SharedConfig or getgenv().NOMO_MARKET_SHARED_CONFIG or getgenv().NOMO_MARKET_FILTERS
 CFG.Seller.HighPriceWarnTokens = CFG.Seller.HighPriceWarnTokens or 1000000
 CFG.Seller.VerifyAfterList = CFG.Seller.VerifyAfterList ~= false
 CFG.Seller.VerifyAfterListDelay = CFG.Seller.VerifyAfterListDelay or 0.2
@@ -1908,6 +1909,8 @@ end
 --//====================================================--
 
 local saveFilters
+local parseRemoteConfig
+local fetchRemoteConfig
 
 local function shallowMerge(dst, srcTable)
     if type(dst) ~= "table" or type(srcTable) ~= "table" then return dst end
@@ -1930,10 +1933,30 @@ local function normalizeRemoteConfig(data)
         out.Filters = data.filters
     elseif type(data.ListingFilters) == "table" then
         out.Filters = data.ListingFilters
+    elseif type(data.listing) == "table" then
+        out.Filters = data.listing
+    elseif type(data.Listing) == "table" then
+        out.Filters = data.Listing
+    elseif type(data.listings) == "table" then
+        out.Filters = data.listings
     elseif type(data[1]) == "table" then
         out.Filters = data
     else
         out.Filters = {}
+    end
+
+    if type(data.sniper) == "table" then
+        out.sniper = data.sniper
+    elseif type(data.SniperFilters) == "table" then
+        out.sniper = data.SniperFilters
+    elseif type(data.sniperFilters) == "table" then
+        out.sniper = data.sniperFilters
+    elseif type(data.Sniper) == "table" then
+        out.Sniper = data.Sniper
+    elseif type(data.Watchlist) == "table" then
+        out.Watchlist = data.Watchlist
+    elseif type(data.watchlist) == "table" then
+        out.watchlist = data.watchlist
     end
 
     if type(data.Seller) == "table" then
@@ -1951,7 +1974,50 @@ local function normalizeRemoteConfig(data)
     return out
 end
 
-local function parseRemoteConfig(raw)
+local function getInlineSharedConfig()
+    local inline = CFG.SharedConfig
+    if type(inline) == "nil" then
+        inline = getgenv().NOMO_MARKET_SHARED_CONFIG or getgenv().NOMO_MARKET_FILTERS
+    end
+
+    local base = nil
+    if type(inline) == "string" then
+        base = parseRemoteConfig(inline)
+    elseif type(inline) == "table" then
+        base = normalizeRemoteConfig(inline)
+    end
+
+    local hasDirect = false
+    local direct = type(base) == "table" and base or {}
+    if type(CFG.ListingFilters) == "table" then
+        direct.Filters = CFG.ListingFilters
+        hasDirect = true
+    end
+    if type(CFG.SniperFilters) == "table" then
+        direct.sniper = CFG.SniperFilters
+        hasDirect = true
+    end
+
+    if type(base) == "table" or hasDirect then
+        return direct
+    end
+    return nil
+end
+
+local function getSharedConfig(force)
+    local inline = getInlineSharedConfig()
+    if type(inline) == "table" then
+        return inline, "getgenv"
+    end
+
+    local remoteData, remoteErr = fetchRemoteConfig(force)
+    if type(remoteData) == "table" then
+        return remoteData, "remote"
+    end
+    return nil, remoteErr
+end
+
+parseRemoteConfig = function(raw)
     raw = tostring(raw or "")
     raw = raw:gsub("^%s+", ""):gsub("%s+$", "")
     if raw == "" then return nil, "empty" end
@@ -1984,7 +2050,7 @@ local function parseRemoteConfig(raw)
     return nil, "parse failed"
 end
 
-local function fetchRemoteConfig()
+fetchRemoteConfig = function()
     local url = tostring(CFG.Seller.RemoteConfigURL or "")
     if url == "" then
         return nil, "no url"
@@ -2079,14 +2145,15 @@ local function reloadFilters(force)
         return State.FilterData
     end
 
+    local hasInlineShared = type(getInlineSharedConfig()) == "table"
     local remoteURL = tostring(CFG.Seller.RemoteConfigURL or "")
-    if CFG.Seller.RemoteConfigEnabled and remoteURL ~= "" then
-        local remoteData, remoteErr = fetchRemoteConfig()
+    if hasInlineShared or (CFG.Seller.RemoteConfigEnabled and remoteURL ~= "") then
+        local remoteData, remoteErr = getSharedConfig(force)
         if type(remoteData) == "table" and applyRemoteConfig(remoteData) then
-            log("Remote config loaded", tostring(#(State.FilterData.Filters or {})) .. " filters")
+            log("Shared config loaded", tostring(#(State.FilterData.Filters or {})) .. " listing filter(s)")
             return State.FilterData
         else
-            log("Remote config failed", tostring(remoteErr), "using local")
+            log("Shared config failed", tostring(remoteErr), "using local")
         end
     end
 
@@ -3596,12 +3663,14 @@ local function extractSniperWatchSource(data)
     return nil, nil
 end
 
-local function importSniperWatchlist(path)
+local function importSniperWatchlist(path, dataOverride, quiet)
     path = tostring(path or getSniperFilterPath())
-    local data = readJson(path)
+    local data = type(dataOverride) == "table" and dataOverride or readJson(path)
     local source, usedId = extractSniperWatchSource(data)
     if type(source) ~= "table" then
-        log("Sniper config import failed", "no sniper entries", path)
+        if not quiet then
+            log("Sniper config import failed", "no sniper entries", path)
+        end
         return false, 0
     end
 
@@ -3675,6 +3744,15 @@ local function importSniperWatchlist(path)
 end
 
 State.ReloadSniperConfig = function()
+    local sharedData, sharedSource = getSharedConfig(false)
+    if type(sharedData) == "table" then
+        local ok, count = importSniperWatchlist("shared:" .. tostring(sharedSource or "config"), sharedData, true)
+        if ok and (tonumber(count) or 0) > 0 then
+            log("Shared sniper config loaded", tostring(count) .. " watch(es)", tostring(sharedSource or "config"))
+            return true
+        end
+    end
+
     local path = getSniperFilterPath()
     local ok, count = importSniperWatchlist(path)
     if ok and (tonumber(count) or 0) > 0 then

@@ -1,0 +1,7 @@
+name = "nomo-market-config"
+main = "market-config-worker.js"
+compatibility_date = "2026-08-02"
+
+[[kv_namespaces]]
+binding = "MARKET_CONFIG"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"

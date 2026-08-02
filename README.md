@@ -14,3 +14,14 @@ Private Roblox market script workspace.
 getgenv().NOMO_MODE = "status" -- full, status, noui
 loadstring(game:HttpGet("YOUR_RAW_GITHUB_URL"))()
 ```
+
+## Shared Config
+
+Shared listing/sniper config can be served from Cloudflare instead of GitHub.
+See `cloudflare/README_MARKET_CONFIG.md`.
+
+Default shared config URL:
+
+```text
+https://nomo-market-config.atmincosplay.workers.dev/market-config
+```
