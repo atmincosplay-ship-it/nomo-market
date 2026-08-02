@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V16.4 SMART RECLAIM"
+local VERSION = "V16.3 RECLAIM TRACE"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -1246,11 +1246,7 @@ State.MarkOwnBooth = function(target, assumeSeconds)
     end
     local now = os.clock()
     State.AssumedBoothUntil = now + (tonumber(assumeSeconds) or 60)
-    local ownedSleep = 60
-    if CFG.Booth and CFG.Booth.SmartReclaim then
-        ownedSleep = math.max(tonumber(CFG.Booth.ClaimInterval) or 10, 10)
-    end
-    State.AutoClaimOwnedSleepUntil = now + ownedSleep
+    State.AutoClaimOwnedSleepUntil = now + 60
     State.BestBoothCache = {Target = target, Status = "MINE"}
     State.LastBestBoothCacheAt = now
 end
@@ -1398,44 +1394,6 @@ local function describeBoothForLog(item)
     return id .. " " .. tostring(item.Status or "?") .. " d" .. tostring(math.floor(tonumber(item.MiddleDistance) or 0))
 end
 
-local function findOwnedAndBestFreeBooths(maxDist)
-    local items = getBoothSnapshot(true)
-    local owned
-    local bestFree
-    local bestFreeAny
-    local failed = State.FailedClaimBooths or {}
-    local now = os.clock()
-
-    for _, item in ipairs(items) do
-        if item.Status == "MINE" then
-            if not owned or (item.MiddleDistance or 999999) < (owned.MiddleDistance or 999999) then
-                owned = item
-            end
-        elseif item.Status == "FREE" then
-            local failedUntil = tonumber(failed[item.Id]) or 0
-            if failedUntil <= now then
-                if not bestFreeAny or (item.MiddleDistance or 999999) < (bestFreeAny.MiddleDistance or 999999) then
-                    bestFreeAny = item
-                end
-                if (item.MiddleDistance or 999999) <= maxDist then
-                    if not bestFree or (item.MiddleDistance or 999999) < (bestFree.MiddleDistance or 999999) then
-                        bestFree = item
-                    end
-                end
-            end
-        end
-    end
-
-    if bestFree then
-        bestFree.ClaimRangeLabel = "normal"
-    elseif bestFreeAny then
-        bestFreeAny.ClaimRangeLabel = "fallback"
-        bestFree = bestFreeAny
-    end
-
-    return owned, bestFree, items
-end
-
 local function claimBestFreeBooth()
     local maxDist = tonumber(CFG.Booth.MaxMiddleDistance) or 65
     local candidates = {}
@@ -1443,17 +1401,46 @@ local function claimBestFreeBooth()
     State.FailedClaimBooths = State.FailedClaimBooths or {}
     local now = os.clock()
     local failCooldown = 120
-    local ownedCandidate, bestFree = findOwnedAndBestFreeBooths(maxDist)
 
     local function addCandidates(limit, label)
         for _, item in ipairs(getBoothSnapshot(true)) do
-            if item.Status == "FREE" and not seen[item.Id] then
+            if (item.Status == "MINE" or item.Status == "FREE") and not seen[item.Id] then
                 local failedUntil = tonumber(State.FailedClaimBooths[item.Id]) or 0
                 if failedUntil <= now and (item.MiddleDistance or 999999) <= limit then
                     seen[item.Id] = true
                     item.ClaimRangeLabel = label
                     table.insert(candidates, item)
                 end
+            end
+        end
+    end
+
+    addCandidates(maxDist, "normal")
+    if #candidates == 0 then
+        addCandidates(999999, "fallback")
+    end
+
+    if #candidates == 0 then
+        log("No FREE/MINE booth in distance", tostring(CFG.Booth.MaxMiddleDistance))
+        return false
+    end
+
+    local ownedCandidate
+    local bestFree
+    for _, target in ipairs(candidates) do
+        if target.Status == "MINE" then
+            ownedCandidate = ownedCandidate or target
+        elseif target.Status == "FREE" then
+            if not bestFree or (target.MiddleDistance or 999999) < (bestFree.MiddleDistance or 999999) then
+                bestFree = target
+            end
+        end
+    end
+    if bestFree and not ownedCandidate then
+        for _, target in ipairs(getBoothSnapshot(true)) do
+            if target.Status == "MINE" then
+                ownedCandidate = target
+                break
             end
         end
     end
@@ -1468,7 +1455,7 @@ local function claimBestFreeBooth()
         )
     end
 
-    if ownedCandidate and bestFree and CFG.Booth.SmartReclaim then
+    if ownedCandidate and bestFree then
         local ownedDist = tonumber(ownedCandidate.MiddleDistance) or 999999
         local freeDist = tonumber(bestFree.MiddleDistance) or 999999
         local improveBy = tonumber(CFG.Booth.ReclaimImproveDistance) or 8
@@ -1493,23 +1480,15 @@ local function claimBestFreeBooth()
         end
     end
 
-    if ownedCandidate then
-        if os.clock() - (tonumber(State.LastOwnBoothLogAt) or 0) > 45 then
-            State.LastOwnBoothLogAt = os.clock()
-            log("Already own booth", ownedCandidate.Id, "dist", math.floor(ownedCandidate.MiddleDistance or 0))
+    for _, target in ipairs(candidates) do
+        if target.Status == "MINE" then
+            if os.clock() - (tonumber(State.LastOwnBoothLogAt) or 0) > 45 then
+                State.LastOwnBoothLogAt = os.clock()
+                log("Already own booth", target.Id, "dist", math.floor(target.MiddleDistance or 0))
+            end
+            State.MarkOwnBooth(target, 60)
+            return true
         end
-        State.MarkOwnBooth(ownedCandidate, 60)
-        return true
-    end
-
-    addCandidates(maxDist, "normal")
-    if #candidates == 0 then
-        addCandidates(999999, "fallback")
-    end
-
-    if #candidates == 0 then
-        log("No FREE booth in distance", tostring(CFG.Booth.MaxMiddleDistance))
-        return false
     end
 
     local delay = math.max(tonumber(CFG.Booth.ClaimVerifyDelay) or 0.35, 0.55)
