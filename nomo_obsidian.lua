@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V16.3 RECLAIM TRACE"
+local VERSION = "V16.3.1 LISTING ROW COMPILE FIX"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6370,7 +6370,7 @@ local function clearListingRows()
     end
 end
 
-local function makeListingRow(i, l)
+function State.MakeListingRow(i, l)
     local row = make("Frame", {
         Size = UDim2.new(1, -4, 0, 34),
         BackgroundColor3 = T.Card2,
@@ -6449,7 +6449,7 @@ function refreshMyListingsLog()
             }, myListingList)
             break
         end
-        makeListingRow(i, l)
+        State.MakeListingRow(i, l)
     end
 end
 
@@ -6608,7 +6608,7 @@ State.OpenMyListingsManager = function()
     end
 end
 
-local function refreshMarketSample()
+function State.RefreshMarketSample()
     local all = getAllListings()
     local my = getMyListings()
     local myId = tostring(getPlayerId())
@@ -6745,15 +6745,15 @@ State.ListingRemoveSec:AddButton("Remove All", function()
         refreshMyListingsLog()
     end)
 end, "outline")
-State.ListingMarketSec:AddButton("Price Check", refreshMarketSample, "outline")
+State.ListingMarketSec:AddButton("Price Check", State.RefreshMarketSample, "outline")
 
 --// SNIPER PAGE
 State.SetBootStatus("sniper ui")
-local sniperPage = win:CreatePage("Sniper")
-State.SniperConfigRow = sniperPage:AddRow()
-State.SniperWatchSec = sniperPage:AddSectionInRow(State.SniperConfigRow, "Watch Builder", 0.5)
-State.SniperLimitSec = sniperPage:AddSectionInRow(State.SniperConfigRow, "Watch Limits", 0.5)
-State.SniperResultSec = sniperPage:AddSection("Current Server Matches")
+State.SniperPage = win:CreatePage("Sniper")
+State.SniperConfigRow = State.SniperPage:AddRow()
+State.SniperWatchSec = State.SniperPage:AddSectionInRow(State.SniperConfigRow, "Watch Builder", 0.5)
+State.SniperLimitSec = State.SniperPage:AddSectionInRow(State.SniperConfigRow, "Watch Limits", 0.5)
+State.SniperResultSec = State.SniperPage:AddSection("Current Server Matches")
 
 State.SniperWatchSec:AddToggle("Enabled", CFG.Sniper.Enabled, function(v)
     CFG.Sniper.Enabled = v
@@ -7764,7 +7764,7 @@ end)
 --// Public helpers
 getgenv().NOMO_V32_REFRESH_BOOTH = refreshBoothLog
 getgenv().NOMO_V32_REFRESH_SELLER = function() refreshSellerLog(true) end
-getgenv().NOMO_V32_REFRESH_LISTINGS = function() refreshMyListingsLog(); refreshMarketSample() end
+getgenv().NOMO_V32_REFRESH_LISTINGS = function() refreshMyListingsLog(); State.RefreshMarketSample() end
 getgenv().NOMO_V39_REMOVE_ALL_MY_LISTINGS = removeAllMyListings
 getgenv().NOMO_V40_LIST_ONCE = listOnce
 getgenv().NOMO_V42_LIST_UNTIL_BOOTH_FULL = listOnce
