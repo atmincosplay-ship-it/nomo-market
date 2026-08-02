@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V16.4 BOOTH DISTANCE FIX"
+local VERSION = "V16.6 BOOTH RANK RECLAIM"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -1149,12 +1149,10 @@ end
 
 local function getModelPos(model)
     if not model then return nil end
-    local okPrimary, primary = pcall(function() return model.PrimaryPart end)
-    if okPrimary and primary and primary:IsA("BasePart") then
-        return primary.Position
-    end
 
-    for _, d in ipairs(model:GetDescendants()) do
+    local descendants = model:GetDescendants()
+
+    for _, d in ipairs(descendants) do
         if d:IsA("ProximityPrompt") and d.Parent and d.Parent:IsA("BasePart") then
             return d.Parent.Position
         end
@@ -1164,16 +1162,26 @@ local function getModelPos(model)
         "claim", "prompt", "interact", "stand", "base", "platform", "counter", "table", "booth"
     }
     for _, key in ipairs(priority) do
-        for _, d in ipairs(model:GetDescendants()) do
+        for _, d in ipairs(descendants) do
             if d:IsA("BasePart") and tostring(d.Name):lower():find(key, 1, true) then
                 return d.Position
             end
         end
     end
 
+    local okPrimary, primary = pcall(function() return model.PrimaryPart end)
+    if okPrimary and primary and primary:IsA("BasePart") then
+        return primary.Position
+    end
+
     local minPos, maxPos
-    for _, d in ipairs(model:GetDescendants()) do
+    local partCount = 0
+    for _, d in ipairs(descendants) do
         if d:IsA("BasePart") then
+            partCount += 1
+            if partCount > 80 then
+                break
+            end
             local p = d.Position
             if not minPos then
                 minPos = p
@@ -1222,7 +1230,14 @@ local function getBoothSnapshot(force)
     for boothId, bd in pairs(data.Booths) do
         local id = tostring(boothId)
         local inst = folder:FindFirstChild(id)
-        local pos = inst and getPos(inst)
+        State.BoothPosCache = State.BoothPosCache or {}
+        local pos = State.BoothPosCache[id]
+        if not pos and inst then
+            pos = getPos(inst)
+            if pos then
+                State.BoothPosCache[id] = pos
+            end
+        end
         if pos then
             local owner = bd.Owner
             local status = boothOwnerStatus(owner)
@@ -1251,6 +1266,12 @@ local function getBoothSnapshot(force)
     table.sort(items, function(a,b)
         return (a.MiddleDistance or 999999) < (b.MiddleDistance or 999999)
     end)
+
+    local innerCount = math.max(1, math.ceil(#items * 0.55))
+    for index, item in ipairs(items) do
+        item.BoothRank = index
+        item.BoothRing = index <= innerCount and 1 or 2
+    end
 
     return items
 end
@@ -1436,7 +1457,7 @@ local function describeBoothForLog(item)
     if #id > 8 then
         id = id:sub(1, 8)
     end
-    return id .. " " .. tostring(item.Status or "?") .. " d" .. tostring(math.floor(tonumber(item.MiddleDistance) or 0))
+    return id .. " " .. tostring(item.Status or "?") .. " r" .. tostring(item.BoothRing or "?") .. " #" .. tostring(item.BoothRank or "?") .. " d" .. tostring(math.floor(tonumber(item.MiddleDistance) or 0))
 end
 
 local function claimBestFreeBooth()
@@ -1446,9 +1467,10 @@ local function claimBestFreeBooth()
     State.FailedClaimBooths = State.FailedClaimBooths or {}
     local now = os.clock()
     local failCooldown = 120
+    local snapshot = getBoothSnapshot(true)
 
     local function addCandidates(limit, label)
-        for _, item in ipairs(getBoothSnapshot(true)) do
+        for _, item in ipairs(snapshot) do
             if (item.Status == "MINE" or item.Status == "FREE") and not seen[item.Id] then
                 local failedUntil = tonumber(State.FailedClaimBooths[item.Id]) or 0
                 if failedUntil <= now and (item.MiddleDistance or 999999) <= limit then
@@ -1482,7 +1504,7 @@ local function claimBestFreeBooth()
         end
     end
     if bestFree and not ownedCandidate then
-        for _, target in ipairs(getBoothSnapshot(true)) do
+        for _, target in ipairs(snapshot) do
             if target.Status == "MINE" then
                 ownedCandidate = target
                 break
@@ -1503,22 +1525,30 @@ local function claimBestFreeBooth()
     if ownedCandidate and bestFree then
         local ownedDist = tonumber(ownedCandidate.MiddleDistance) or 999999
         local freeDist = tonumber(bestFree.MiddleDistance) or 999999
-        local improveBy = tonumber(CFG.Booth.ReclaimImproveDistance) or 8
-        if freeDist + improveBy < ownedDist then
-            log("Better booth", tostring(bestFree.Id), "free", math.floor(freeDist), "owned", math.floor(ownedDist), tostring(bestFree.ClaimRangeLabel or ""))
+        local ownedRank = tonumber(ownedCandidate.BoothRank) or 999999
+        local freeRank = tonumber(bestFree.BoothRank) or 999999
+        local ownedRing = tonumber(ownedCandidate.BoothRing) or 9
+        local freeRing = tonumber(bestFree.BoothRing) or 9
+        local clearRingUpgrade = freeRing < ownedRing
+        local clearRankUpgrade = freeRank + 2 < ownedRank
+        local clearDistanceUpgrade = freeDist + 6 < ownedDist
+        local shouldReclaim = clearRingUpgrade or clearRankUpgrade or clearDistanceUpgrade
+        if shouldReclaim then
+            log("Better booth", tostring(bestFree.Id), "free", "r" .. tostring(freeRing), "#" .. tostring(freeRank), "d" .. tostring(math.floor(freeDist)), "owned", "r" .. tostring(ownedRing), "#" .. tostring(ownedRank), "d" .. tostring(math.floor(ownedDist)), tostring(bestFree.ClaimRangeLabel or ""))
         elseif os.clock() - (tonumber(State.LastReclaimSkipLogAt) or 0) > 45 then
             State.LastReclaimSkipLogAt = os.clock()
-            log("Keep booth", tostring(ownedCandidate.Id), "owned", math.floor(ownedDist), "best free", math.floor(freeDist))
+            log("Keep booth", tostring(ownedCandidate.Id), "owned", "r" .. tostring(ownedRing), "#" .. tostring(ownedRank), "d" .. tostring(math.floor(ownedDist)), "best free", "r" .. tostring(freeRing), "#" .. tostring(freeRank), "d" .. tostring(math.floor(freeDist)))
         end
-        if freeDist + improveBy < ownedDist and removeOwnedBooth("better middle booth available") then
+        if shouldReclaim and removeOwnedBooth("better middle booth available") then
             candidates = {}
             seen = {}
             now = os.clock()
+            snapshot = getBoothSnapshot(true)
             addCandidates(maxDist, "normal")
             if #candidates == 0 then
                 addCandidates(999999, "fallback")
             end
-        elseif freeDist + improveBy < ownedDist then
+        elseif shouldReclaim then
             State.MarkOwnBooth(ownedCandidate, 60)
             State.AutoClaimOwnedSleepUntil = os.clock() + failCooldown
             return true
