@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V16.3.1 LISTING ROW COMPILE FIX"
+local VERSION = "V16.4 BOOTH DISTANCE FIX"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -1147,9 +1147,54 @@ local function getBoothsFolder()
     return tw and tw:FindFirstChild("Booths") or nil
 end
 
+local function getModelPos(model)
+    if not model then return nil end
+    local okPrimary, primary = pcall(function() return model.PrimaryPart end)
+    if okPrimary and primary and primary:IsA("BasePart") then
+        return primary.Position
+    end
+
+    for _, d in ipairs(model:GetDescendants()) do
+        if d:IsA("ProximityPrompt") and d.Parent and d.Parent:IsA("BasePart") then
+            return d.Parent.Position
+        end
+    end
+
+    local priority = {
+        "claim", "prompt", "interact", "stand", "base", "platform", "counter", "table", "booth"
+    }
+    for _, key in ipairs(priority) do
+        for _, d in ipairs(model:GetDescendants()) do
+            if d:IsA("BasePart") and tostring(d.Name):lower():find(key, 1, true) then
+                return d.Position
+            end
+        end
+    end
+
+    local minPos, maxPos
+    for _, d in ipairs(model:GetDescendants()) do
+        if d:IsA("BasePart") then
+            local p = d.Position
+            if not minPos then
+                minPos = p
+                maxPos = p
+            else
+                minPos = Vector3.new(math.min(minPos.X, p.X), math.min(minPos.Y, p.Y), math.min(minPos.Z, p.Z))
+                maxPos = Vector3.new(math.max(maxPos.X, p.X), math.max(maxPos.Y, p.Y), math.max(maxPos.Z, p.Z))
+            end
+        end
+    end
+    if minPos and maxPos then
+        return (minPos + maxPos) / 2
+    end
+    return nil
+end
+
 local function getPos(inst)
     if not inst then return nil end
     if inst:IsA("Model") then
+        local modelPos = getModelPos(inst)
+        if modelPos then return modelPos end
         local ok, cf = pcall(function() return inst:GetPivot() end)
         if ok and cf then return cf.Position end
     elseif inst:IsA("BasePart") then
@@ -6339,15 +6384,15 @@ end, "outline")
 
 --// LISTINGS PAGE
 State.SetBootStatus("listings ui")
-local listingsPage = win:CreatePage("Listings")
-State.ListingActionRow = listingsPage:AddRow()
-State.ListingManageSec = listingsPage:AddSectionInRow(State.ListingActionRow, "My Listing", 0.25)
-State.ListingRefreshSec = listingsPage:AddSectionInRow(State.ListingActionRow, "Refresh", 0.25)
-State.ListingRemoveSec = listingsPage:AddSectionInRow(State.ListingActionRow, "Remove All", 0.25)
-State.ListingMarketSec = listingsPage:AddSectionInRow(State.ListingActionRow, "Compare", 0.25)
-local listingRow = listingsPage:AddRow()
-local myListingSec = listingsPage:AddSectionInRow(listingRow, "My Listings", 0.55)
-local allListingSec = listingsPage:AddSectionInRow(listingRow, "Price Compare", 0.45)
+State.ListingsPage = win:CreatePage("Listings")
+State.ListingActionRow = State.ListingsPage:AddRow()
+State.ListingManageSec = State.ListingsPage:AddSectionInRow(State.ListingActionRow, "My Listing", 0.25)
+State.ListingRefreshSec = State.ListingsPage:AddSectionInRow(State.ListingActionRow, "Refresh", 0.25)
+State.ListingRemoveSec = State.ListingsPage:AddSectionInRow(State.ListingActionRow, "Remove All", 0.25)
+State.ListingMarketSec = State.ListingsPage:AddSectionInRow(State.ListingActionRow, "Compare", 0.25)
+State.ListingRow = State.ListingsPage:AddRow()
+State.MyListingSec = State.ListingsPage:AddSectionInRow(State.ListingRow, "My Listings", 0.55)
+State.AllListingSec = State.ListingsPage:AddSectionInRow(State.ListingRow, "Price Compare", 0.45)
 
 local myListingList = make("ScrollingFrame", {
     Size = UDim2.new(1, 0, 0, 156),
@@ -6357,12 +6402,12 @@ local myListingList = make("ScrollingFrame", {
     ScrollBarImageColor3 = T.Border,
     CanvasSize = UDim2.new(0, 0, 0, 0),
     AutomaticCanvasSize = Enum.AutomaticSize.Y,
-}, myListingSec.Frame)
+}, State.MyListingSec.Frame)
 corner(myListingList, 8); stroke(myListingList); pad(myListingList, 6, 6, 6, 6); vlist(myListingList, 4)
 
-local marketLog = allListingSec:AddLog(156)
+State.MarketLog = State.AllListingSec:AddLog(156)
 
-local function clearListingRows()
+function State.ClearListingRows()
     for _, child in ipairs(myListingList:GetChildren()) do
         if child:IsA("Frame") or child:IsA("TextLabel") then
             child:Destroy()
@@ -6424,7 +6469,7 @@ end
 function refreshMyListingsLog()
     local my = getMyListings()
     State.TrackSoldListings(my)
-    clearListingRows()
+    State.ClearListingRows()
 
     make("TextLabel", {
         Size = UDim2.new(1, 0, 0, 22),
@@ -6727,7 +6772,7 @@ function State.RefreshMarketSample()
         table.insert(lines, "No matching market listings found for your booth pets.")
     end
 
-    addLines(marketLog, lines)
+    addLines(State.MarketLog, lines)
 end
 
 State.ListingManageSec:AddButton("Manage", function()
