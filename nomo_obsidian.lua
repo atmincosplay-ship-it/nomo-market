@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V16.6 BOOTH RANK RECLAIM"
+local VERSION = "V16.7 BOOTH RECLAIM HOLY GATE"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -18,7 +18,8 @@ local CFG = getgenv().NOMO_MARKET
 CFG.Booth = CFG.Booth or {
     AutoClaim = true,
     SmartReclaim = true,
-    MaxMiddleDistance = 65,
+    MaxMiddleDistance = 75,
+    SmartReclaimMinImprovement = 2,
     BoothSkin = "Auto",
     ClaimInterval = 10,
 }
@@ -86,9 +87,10 @@ CFG.Server = CFG.Server or {
 }
 
 CFG.Debug = CFG.Debug or false
-if CFG.Booth.MaxMiddleDistance == nil or tonumber(CFG.Booth.MaxMiddleDistance) == 200 or tonumber(CFG.Booth.MaxMiddleDistance) == 85 then
-    CFG.Booth.MaxMiddleDistance = 65
+if CFG.Booth.MaxMiddleDistance == nil or tonumber(CFG.Booth.MaxMiddleDistance) == 200 or tonumber(CFG.Booth.MaxMiddleDistance) == 85 or tonumber(CFG.Booth.MaxMiddleDistance) == 65 then
+    CFG.Booth.MaxMiddleDistance = 75
 end
+CFG.Booth.SmartReclaimMinImprovement = tonumber(CFG.Booth.SmartReclaimMinImprovement) or 2
 CFG.Booth.ClaimInterval = CFG.Booth.ClaimInterval or 10
 CFG.Booth.DataCacheSeconds = tonumber(CFG.Booth.DataCacheSeconds) or 1
 if CFG.Booth.DataCacheSeconds < 1 then CFG.Booth.DataCacheSeconds = 1 end
@@ -784,6 +786,7 @@ State.LoadRuntimeSettings = function()
     if type(data.Booth) == "table" then
         if data.Booth.AutoClaim ~= nil then CFG.Booth.AutoClaim = data.Booth.AutoClaim == true end
         if data.Booth.SmartReclaim ~= nil then CFG.Booth.SmartReclaim = data.Booth.SmartReclaim == true end
+        if data.Booth.SmartReclaimMinImprovement ~= nil then CFG.Booth.SmartReclaimMinImprovement = tonumber(data.Booth.SmartReclaimMinImprovement) or CFG.Booth.SmartReclaimMinImprovement end
     end
     if type(data.Seller) == "table" then
         if data.Seller.AutoList ~= nil then CFG.Seller.AutoList = data.Seller.AutoList == true end
@@ -847,6 +850,7 @@ State.SaveRuntimeSettings = function()
         Booth = {
             AutoClaim = CFG.Booth.AutoClaim == true,
             SmartReclaim = CFG.Booth.SmartReclaim == true,
+            SmartReclaimMinImprovement = tonumber(CFG.Booth.SmartReclaimMinImprovement) or 2,
         },
         Seller = {
             AutoList = CFG.Seller.AutoList == true,
@@ -1461,7 +1465,7 @@ local function describeBoothForLog(item)
 end
 
 local function claimBestFreeBooth()
-    local maxDist = tonumber(CFG.Booth.MaxMiddleDistance) or 65
+    local maxDist = tonumber(CFG.Booth.MaxMiddleDistance) or 75
     local candidates = {}
     local seen = {}
     State.FailedClaimBooths = State.FailedClaimBooths or {}
@@ -1527,19 +1531,30 @@ local function claimBestFreeBooth()
         local freeDist = tonumber(bestFree.MiddleDistance) or 999999
         local ownedRank = tonumber(ownedCandidate.BoothRank) or 999999
         local freeRank = tonumber(bestFree.BoothRank) or 999999
-        local ownedRing = tonumber(ownedCandidate.BoothRing) or 9
-        local freeRing = tonumber(bestFree.BoothRing) or 9
-        local clearRingUpgrade = freeRing < ownedRing
-        local clearRankUpgrade = freeRank + 2 < ownedRank
-        local clearDistanceUpgrade = freeDist + 6 < ownedDist
-        local shouldReclaim = clearRingUpgrade or clearRankUpgrade or clearDistanceUpgrade
-        if shouldReclaim then
-            log("Better booth", tostring(bestFree.Id), "free", "r" .. tostring(freeRing), "#" .. tostring(freeRank), "d" .. tostring(math.floor(freeDist)), "owned", "r" .. tostring(ownedRing), "#" .. tostring(ownedRank), "d" .. tostring(math.floor(ownedDist)), tostring(bestFree.ClaimRangeLabel or ""))
+        local ownedTooFar = ownedDist > maxDist
+        local minImprove = math.max(tonumber(CFG.Booth.SmartReclaimMinImprovement) or 2, 1)
+        local clearDistanceUpgrade = freeDist + minImprove < ownedDist
+        local clearRankUpgrade = freeRank < ownedRank and freeDist < ownedDist
+        local shouldReclaim = CFG.Booth.SmartReclaim == true and ownedTooFar and (clearDistanceUpgrade or clearRankUpgrade)
+        local reclaimCooldownUntil = tonumber(State.NextSmartReclaimAt) or 0
+        local reclaimCoolingDown = shouldReclaim and os.clock() < reclaimCooldownUntil
+        if shouldReclaim and not reclaimCoolingDown then
+            log("Better booth", tostring(bestFree.Id), "free", "#" .. tostring(freeRank), "d" .. tostring(math.floor(freeDist)), "owned", "#" .. tostring(ownedRank), "d" .. tostring(math.floor(ownedDist)), "max", tostring(maxDist), tostring(bestFree.ClaimRangeLabel or ""))
+        elseif reclaimCoolingDown then
+            if os.clock() - (tonumber(State.LastReclaimSkipLogAt) or 0) > 45 then
+                State.LastReclaimSkipLogAt = os.clock()
+                log("Reclaim cooldown", tostring(math.ceil(reclaimCooldownUntil - os.clock())) .. "s", "owned d" .. tostring(math.floor(ownedDist)), "free d" .. tostring(math.floor(freeDist)))
+            end
         elseif os.clock() - (tonumber(State.LastReclaimSkipLogAt) or 0) > 45 then
             State.LastReclaimSkipLogAt = os.clock()
-            log("Keep booth", tostring(ownedCandidate.Id), "owned", "r" .. tostring(ownedRing), "#" .. tostring(ownedRank), "d" .. tostring(math.floor(ownedDist)), "best free", "r" .. tostring(freeRing), "#" .. tostring(freeRank), "d" .. tostring(math.floor(freeDist)))
+            log("Keep booth", tostring(ownedCandidate.Id), "owned", "#" .. tostring(ownedRank), "d" .. tostring(math.floor(ownedDist)), "best free", "#" .. tostring(freeRank), "d" .. tostring(math.floor(freeDist)), "max", tostring(maxDist))
+        end
+        if shouldReclaim and reclaimCoolingDown then
+            State.MarkOwnBooth(ownedCandidate, 60)
+            return true
         end
         if shouldReclaim and removeOwnedBooth("better middle booth available") then
+            State.NextSmartReclaimAt = os.clock() + 60
             candidates = {}
             seen = {}
             now = os.clock()
@@ -1549,6 +1564,7 @@ local function claimBestFreeBooth()
                 addCandidates(999999, "fallback")
             end
         elseif shouldReclaim then
+            State.NextSmartReclaimAt = os.clock() + 60
             State.MarkOwnBooth(ownedCandidate, 60)
             State.AutoClaimOwnedSleepUntil = os.clock() + failCooldown
             return true
@@ -8714,16 +8730,10 @@ task.spawn(function()
         if CFG.Booth.AutoClaim and now >= (tonumber(State.AutoClaimOwnedSleepUntil) or 0) and now - (State.LastAutoClaimAt or 0) >= (tonumber(CFG.Booth.ClaimInterval) or 10) then
             State.LastAutoClaimAt = now
             local ok, err = pcall(function()
-                local target, status = findBestBooth(true)
-                if status ~= "MINE" and status ~= "FREE" then
-                    target, status = findBestBooth(true, 999999)
-                end
-                if status == "MINE" or status == "FREE" then
-                    log("AutoClaim checking booth position")
-                    claimBestFreeBooth()
-                    if State.BoothStatusLabel then
-                        pcall(refreshBoothLog)
-                    end
+                log("AutoClaim checking booth position")
+                claimBestFreeBooth()
+                if State.BoothStatusLabel then
+                    pcall(refreshBoothLog)
                 end
             end)
             if not ok then
