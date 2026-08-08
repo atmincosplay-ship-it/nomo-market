@@ -5917,8 +5917,8 @@ local sellerCtrl = sellerPage:AddSection("Seller Control")
 sellerCtrl.Frame.LayoutOrder = 30
 local filterRow = sellerPage:AddRow()
 filterRow.LayoutOrder = 10
-local filterSec = sellerPage:AddSectionInRow(filterRow, "Filter Builder", 0.5)
-local filterRangeSec = sellerPage:AddSectionInRow(filterRow, "Filter Limits", 0.5)
+State.SellerFilterSec = sellerPage:AddSectionInRow(filterRow, "Filter Builder", 0.5)
+State.SellerFilterRangeSec = sellerPage:AddSectionInRow(filterRow, "Filter Limits", 0.5)
 
 State.SellerCompactRow = function(section, height)
     local row = make("Frame", {
@@ -6036,25 +6036,24 @@ State.SellerCompactButton(State.SellerActionRow, "RELOAD CONFIG", function()
 end, "outline")
 
 local sellerLog
-local diagnosePetFilter
 
-filterSec:AddDropdown("Listing Weight Mode", {"Base", "Visual"}, CFG.Seller.WeightMode or "Base", function(v)
+State.SellerFilterSec:AddDropdown("Listing Weight Mode", {"Base", "Visual"}, CFG.Seller.WeightMode or "Base", function(v)
     CFG.Seller.WeightMode = tostring(v or "Base")
     log("ListingWeightMode", CFG.Seller.WeightMode)
 end)
 
-local petInput = filterSec:AddSearchDropdown("Pet", State.PetList or {}, "Ankylosaurus")
+local petInput = State.SellerFilterSec:AddSearchDropdown("Pet", State.PetList or {}, "Ankylosaurus")
 State.PetNameInput = petInput
-local priceInput = filterSec:AddInput("Price", "111")
-local mutationInput = filterSec:AddSearchDropdown("Mutation", State.MutationList or {"Any", "Normal", "Mutated Only"}, "Any")
+local priceInput = State.SellerFilterSec:AddInput("Price", "111")
+local mutationInput = State.SellerFilterSec:AddSearchDropdown("Mutation", State.MutationList or {"Any", "Normal", "Mutated Only"}, "Any")
 State.MutationInput = mutationInput
-local minKgInput = filterRangeSec:AddInput("Min Base KG", "0")
-local maxKgInput = filterRangeSec:AddInput("Max Base KG", "3")
-local minAgeInput = filterRangeSec:AddInput("Min Age", "1")
-local maxAgeInput = filterRangeSec:AddInput("Max Age", "100")
+local minKgInput = State.SellerFilterRangeSec:AddInput("Min Base KG", "0")
+local maxKgInput = State.SellerFilterRangeSec:AddInput("Max Base KG", "3")
+local minAgeInput = State.SellerFilterRangeSec:AddInput("Min Age", "1")
+local maxAgeInput = State.SellerFilterRangeSec:AddInput("Max Age", "100")
 local variantInput = { Get = function() return "Any" end } -- hatch type is part of Pet name, e.g. GIANT Barn Owl
-local maxListedInput = filterRangeSec:AddInput("Per Filter Cap", "5")
-filterRangeSec:AddButton("Manage Filters", function()
+State.SellerMaxListedInput = State.SellerFilterRangeSec:AddInput("Per Filter Cap", "5")
+State.SellerFilterRangeSec:AddButton("Manage Filters", function()
     if State.OpenFilterManager then
         State.OpenFilterManager()
     end
@@ -6358,11 +6357,11 @@ State.OpenFilterManager = function()
     end
 end
 
-local filterLogSec = sellerPage:AddSection("Active Filters / Candidates")
-filterLogSec.Frame.LayoutOrder = 20
-sellerLog = filterLogSec:AddLog(125)
+State.SellerFilterLogSec = sellerPage:AddSection("Active Filters / Candidates")
+State.SellerFilterLogSec.Frame.LayoutOrder = 20
+sellerLog = State.SellerFilterLogSec:AddLog(125)
 
-diagnosePetFilter = function(petName)
+State.DiagnosePetFilter = function(petName)
     petName = tostring(petName or "")
     local target = norm(petName)
     local pets = getInventoryPets()
@@ -6521,7 +6520,7 @@ refreshSellerLog = function(showCandidates)
     addLines(sellerLog, lines)
 end
 
-filterSec:AddButton("+ Add Filter", function()
+State.SellerFilterSec:AddButton("+ Add Filter", function()
     addFilter(
         petInput:Get(),
         priceInput:Get(),
@@ -6530,17 +6529,17 @@ filterSec:AddButton("+ Add Filter", function()
         minAgeInput:Get(),
         maxAgeInput:Get(),
         mutationInput:Get(),
-        maxListedInput:Get(),
+        State.SellerMaxListedInput:Get(),
         variantInput:Get()
     )
     refreshSellerLog(true)
 end)
 
-filterSec:AddButton("Preview Candidates", function()
+State.SellerFilterSec:AddButton("Preview Candidates", function()
     refreshSellerLog(true)
 end, "outline")
 
-filterLogSec:AddButton("Clear All Filters", function()
+State.SellerFilterLogSec:AddButton("Clear All Filters", function()
     State.OpenConfirmPopup("Clear Filters", "Remove every listing filter from config?", "Clear", function()
         clearFilters()
         refreshSellerLog(false)
@@ -8060,7 +8059,7 @@ getgenv().NOMO_V51_RELOAD_REMOTE_CONFIG = function(url)
     return reloadFilters()
 end
 getgenv().NOMO_V46_DIAGNOSE_PET = function(name)
-    local lines = diagnosePetFilter(name)
+    local lines = State.DiagnosePetFilter(name)
     for _, line in ipairs(lines) do print("[NOMO DIAG]", line) end
     return lines
 end
@@ -9004,4 +9003,3 @@ task.spawn(function()
         task.wait(1)
     end
 end)
-
