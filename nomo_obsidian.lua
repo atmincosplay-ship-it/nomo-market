@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V17.1 WEBHOOK DEFAULT ON"
+local VERSION = "V17.2 CLAIM SPAM GUARD"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -1336,7 +1336,7 @@ State.MarkOwnBooth = function(target, assumeSeconds)
     end
     local now = os.clock()
     State.AssumedBoothUntil = now + (tonumber(assumeSeconds) or 60)
-    State.AutoClaimOwnedSleepUntil = now + 60
+    State.AutoClaimOwnedSleepUntil = now + 300
     State.BestBoothCache = {Target = target, Status = "MINE"}
     State.LastBestBoothCacheAt = now
 end
@@ -1490,7 +1490,7 @@ local function claimBestFreeBooth()
     local seen = {}
     State.FailedClaimBooths = State.FailedClaimBooths or {}
     local now = os.clock()
-    local failCooldown = 120
+    local failCooldown = 180
     local snapshot = getBoothSnapshot(true)
 
     local function addCandidates(limit, label)
@@ -8939,7 +8939,10 @@ task.spawn(function()
         if CFG.Booth.AutoClaim and now >= (tonumber(State.AutoClaimOwnedSleepUntil) or 0) and now - (State.LastAutoClaimAt or 0) >= (tonumber(CFG.Booth.ClaimInterval) or 10) then
             State.LastAutoClaimAt = now
             local ok, err = pcall(function()
-                log("AutoClaim checking booth position")
+                if now - (tonumber(State.LastAutoClaimCheckLogAt) or 0) > 60 then
+                    State.LastAutoClaimCheckLogAt = now
+                    log("AutoClaim checking booth position")
+                end
                 claimBestFreeBooth()
                 if State.BoothStatusLabel then
                     pcall(refreshBoothLog)
