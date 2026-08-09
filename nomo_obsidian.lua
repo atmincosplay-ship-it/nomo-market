@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V17.3 REMOTE CONFIG CACHE"
+local VERSION = "V17.4 REMOTE CONFIG CHANGE GUARD"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -112,9 +112,9 @@ CFG.Seller.RemoteConfigEnabled = CFG.Seller.RemoteConfigEnabled ~= false
 CFG.Seller.RemoteConfigSaveLocal = CFG.Seller.RemoteConfigSaveLocal ~= false
 CFG.Seller.RemoteConfigURL = CFG.Seller.RemoteConfigURL or tostring((getgenv().NOMO_MARKET_CONFIG_URL or getgenv().NOMO_MARKET_FILTER_URL or "https://nomo-market-config.atmincosplay.workers.dev/market-config"))
 -- Remote config is intentionally very low-frequency. Normal seller/sniper scans use memory cache only.
-CFG.Seller.RemoteConfigRefreshSeconds = tonumber(CFG.Seller.RemoteConfigRefreshSeconds) or 21600 -- 6 hours
-if CFG.Seller.RemoteConfigRefreshSeconds < 3600 then CFG.Seller.RemoteConfigRefreshSeconds = 21600 end
-CFG.Seller.RemoteConfigRetrySeconds = math.max(600, tonumber(CFG.Seller.RemoteConfigRetrySeconds) or 600)
+CFG.Seller.RemoteConfigRefreshSeconds = 21600 -- locked local policy: 6 hours
+CFG.Seller.RemoteConfigRetrySeconds = math.max(1800, tonumber(CFG.Seller.RemoteConfigRetrySeconds) or 1800) -- generic fetch failure: 30m
+CFG.Seller.RemoteConfigRateLimitBackoffSeconds = math.max(21600, tonumber(CFG.Seller.RemoteConfigRateLimitBackoffSeconds) or 21600) -- 429/1027: 6h
 CFG.Seller.AutoRebuildAfterConfigRefresh = CFG.Seller.AutoRebuildAfterConfigRefresh ~= false
 CFG.Seller.AutoRebuildEverySeconds = tonumber(CFG.Seller.AutoRebuildEverySeconds) or 3600
 if CFG.Seller.AutoRebuildEverySeconds < 600 then CFG.Seller.AutoRebuildEverySeconds = 600 end
@@ -806,10 +806,9 @@ State.LoadRuntimeSettings = function()
             CFG.Seller.ListingFilterPath = data.Seller.ListingFilterPath
         end
         if data.Seller.RemoteConfigEnabled ~= nil then CFG.Seller.RemoteConfigEnabled = data.Seller.RemoteConfigEnabled == true end
-        if data.Seller.RemoteConfigRefreshSeconds ~= nil then
-            CFG.Seller.RemoteConfigRefreshSeconds = tonumber(data.Seller.RemoteConfigRefreshSeconds) or CFG.Seller.RemoteConfigRefreshSeconds
-            if CFG.Seller.RemoteConfigRefreshSeconds < 3600 then CFG.Seller.RemoteConfigRefreshSeconds = 21600 end
-        end
+        -- Remote refresh cadence is intentionally locked locally at 6h.
+        -- Do not let an old settings file or remote Seller config lower it.
+        CFG.Seller.RemoteConfigRefreshSeconds = 21600
     end
     if type(data.Sniper) == "table" then
         if data.Sniper.Enabled ~= nil then CFG.Sniper.Enabled = data.Sniper.Enabled == true end
@@ -882,7 +881,7 @@ State.SaveRuntimeSettings = function()
             PreviewOnly = CFG.Seller.PreviewOnly == true,
             ListingFilterPath = CFG.Seller.ListingFilterPath or "Nomo",
             RemoteConfigEnabled = CFG.Seller.RemoteConfigEnabled == true,
-            RemoteConfigRefreshSeconds = tonumber(CFG.Seller.RemoteConfigRefreshSeconds) or 21600,
+            RemoteConfigRefreshSeconds = 21600,
         },
         Sniper = {
             Enabled = CFG.Sniper.Enabled == true,
@@ -2003,7 +2002,84 @@ local function normalizeRemoteConfig(data)
         out.Config = data.config
     end
 
+    -- Optional Worker revision marker. If present, it is preferred for change detection.
+    local updatedAt = data.updatedAt or data.UpdatedAt or data.updated_at or data.updated_at_ms
+    if updatedAt ~= nil then
+        out.__RemoteUpdatedAt = tostring(updatedAt)
+    end
+
     return out
+end
+
+-- Deterministic signature for parsed config. This avoids rebuilds when the Worker
+-- returns the same JSON with harmless whitespace/key-order differences.
+local function stableConfigSerialize(v, depth)
+    depth = depth or 0
+    if depth > 20 then return '"<depth>"' end
+
+    local tv = type(v)
+    if tv == "nil" then return "null" end
+    if tv == "boolean" then return v and "true" or "false" end
+    if tv == "number" then return tostring(v) end
+    if tv == "string" then
+        local ok, encoded = pcall(function() return HttpService:JSONEncode(v) end)
+        return ok and encoded or string.format('%q', v)
+    end
+    if tv ~= "table" then return tostring(v) end
+
+    local maxIndex, numericCount, total = 0, 0, 0
+    local array = true
+    for k in pairs(v) do
+        total += 1
+        if type(k) == "number" and k >= 1 and k % 1 == 0 then
+            numericCount += 1
+            if k > maxIndex then maxIndex = k end
+        else
+            array = false
+        end
+    end
+    if array and numericCount == total and maxIndex == total then
+        local parts = {}
+        for i = 1, maxIndex do
+            parts[i] = stableConfigSerialize(v[i], depth + 1)
+        end
+        return "[" .. table.concat(parts, ",") .. "]"
+    end
+
+    local keys = {}
+    for k in pairs(v) do table.insert(keys, tostring(k)) end
+    table.sort(keys)
+    local parts = {}
+    for _, key in ipairs(keys) do
+        local value = v[key]
+        if value == nil then
+            local numericKey = tonumber(key)
+            if numericKey ~= nil then value = v[numericKey] end
+        end
+        table.insert(parts, stableConfigSerialize(key, depth + 1) .. ":" .. stableConfigSerialize(value, depth + 1))
+    end
+    return "{" .. table.concat(parts, ",") .. "}"
+end
+
+local function configSignature(data)
+    local serialized = stableConfigSerialize(data)
+    local hash = 5381
+    for i = 1, #serialized do
+        hash = (hash * 33 + string.byte(serialized, i)) % 4294967296
+    end
+    return tostring(#serialized) .. ":" .. tostring(math.floor(hash))
+end
+
+local function configChanged(previousSig, previousUpdatedAt, newSig, newUpdatedAt)
+    previousSig = tostring(previousSig or "")
+    newSig = tostring(newSig or "")
+    previousUpdatedAt = tostring(previousUpdatedAt or "")
+    newUpdatedAt = tostring(newUpdatedAt or "")
+
+    if previousSig == "" then return true end
+    if previousSig ~= newSig then return true end
+    if previousUpdatedAt ~= "" and newUpdatedAt ~= "" and previousUpdatedAt ~= newUpdatedAt then return true end
+    return false
 end
 
 local function getInlineSharedConfig()
@@ -2036,36 +2112,57 @@ local function getInlineSharedConfig()
     return nil
 end
 
-local function getSharedConfig(force)
+local function getSharedConfig(forceFresh, ignoreBackoff)
     local inline = getInlineSharedConfig()
     if type(inline) == "table" then
         State.SharedConfigSource = "getgenv"
-        return inline, "getgenv"
+        State.RemoteConfigChanged = true
+        return inline, "getgenv", true
     end
 
     local url = tostring(CFG.Seller.RemoteConfigURL or "")
     local now = os.clock()
     local nowUnix = os.time()
-    local refreshSeconds = math.max(3600, tonumber(CFG.Seller.RemoteConfigRefreshSeconds) or 21600)
+    local refreshSeconds = 21600
 
-    -- Critical rate-limit guard: normal calls NEVER re-fetch while a valid memory cache exists.
-    if force ~= true
+    -- Normal seller/sniper/filter reads never hit Cloudflare while cache is valid.
+    if forceFresh ~= true
         and type(State.RemoteConfigCache) == "table"
         and State.RemoteConfigCacheURL == url
         and (nowUnix - (tonumber(State.RemoteConfigCacheUnix) or nowUnix)) < refreshSeconds
     then
         State.SharedConfigSource = "remote-cache"
-        return State.RemoteConfigCache, "remote-cache"
+        State.RemoteConfigChanged = false
+        return State.RemoteConfigCache, "remote-cache", false
     end
 
-    -- Persist cache across Roblox rejoin/teleport/script restart.
+    -- Persistent cache survives rejoin/teleport/script restart.
     local diskCache
     if State.GetRemoteConfigCachePath then
         diskCache = readJson(State.GetRemoteConfigCachePath())
         local fetchedAt = tonumber(diskCache and diskCache.FetchedAt)
         local cacheData = diskCache and diskCache.Data
         local cacheURL = tostring(diskCache and diskCache.URL or "")
-        if force ~= true
+        local backoffUntil = tonumber(diskCache and diskCache.BackoffUntil) or 0
+
+        State.RemoteConfigSignature = tostring(diskCache and diskCache.Signature or State.RemoteConfigSignature or "")
+        State.RemoteConfigUpdatedAt = tostring(diskCache and diskCache.UpdatedAt or State.RemoteConfigUpdatedAt or "")
+        State.RemoteConfigBackoffUntil = math.max(tonumber(State.RemoteConfigBackoffUntil) or 0, backoffUntil)
+
+        if ignoreBackoff ~= true and nowUnix < State.RemoteConfigBackoffUntil then
+            if type(cacheData) == "table" and cacheURL == url then
+                State.RemoteConfigCache = cacheData
+                State.RemoteConfigCacheURL = url
+                State.RemoteConfigCacheUnix = fetchedAt or 0
+                State.LastRemoteConfigUnix = fetchedAt or 0
+                State.SharedConfigSource = "backoff-disk-cache"
+                State.RemoteConfigChanged = false
+                return cacheData, "backoff-disk-cache", false
+            end
+            return nil, "remote hard backoff", false
+        end
+
+        if forceFresh ~= true
             and fetchedAt
             and type(cacheData) == "table"
             and cacheURL == url
@@ -2077,49 +2174,95 @@ local function getSharedConfig(force)
             State.RemoteConfigCacheUnix = fetchedAt
             State.LastRemoteConfigUnix = fetchedAt
             State.SharedConfigSource = "disk-cache"
-            return cacheData, "disk-cache"
+            State.RemoteConfigChanged = false
+            return cacheData, "disk-cache", false
         end
     end
 
-    -- If Cloudflare/network failed, do not let 1s seller/sniper loops hammer the Worker.
-    if force ~= true and (now - (tonumber(State.LastRemoteConfigAttemptAt) or -math.huge)) < (tonumber(CFG.Seller.RemoteConfigRetrySeconds) or 600) then
-        return nil, "remote retry cooldown"
+    -- Generic failure cooldown. Manual reload can intentionally bypass this.
+    if ignoreBackoff ~= true and (now - (tonumber(State.LastRemoteConfigAttemptAt) or -math.huge)) < (tonumber(CFG.Seller.RemoteConfigRetrySeconds) or 1800) then
+        if type(State.RemoteConfigCache) == "table" then
+            State.SharedConfigSource = "retry-cache"
+            State.RemoteConfigChanged = false
+            return State.RemoteConfigCache, "retry-cache", false
+        end
+        return nil, "remote retry cooldown", false
     end
 
     State.LastRemoteConfigAttemptAt = now
-    local remoteData, remoteErr = fetchRemoteConfig()
+    local remoteData, remoteErr, fetchMeta = fetchRemoteConfig()
     if type(remoteData) == "table" then
         local fetchedAt = os.time()
+        local newSig = tostring(fetchMeta and fetchMeta.Signature or configSignature(remoteData))
+        local newUpdatedAt = tostring(fetchMeta and fetchMeta.UpdatedAt or remoteData.__RemoteUpdatedAt or "")
+        local previousSig = tostring(State.RemoteConfigSignature or (diskCache and diskCache.Signature) or "")
+        local previousUpdatedAt = tostring(State.RemoteConfigUpdatedAt or (diskCache and diskCache.UpdatedAt) or "")
+        local changed = configChanged(previousSig, previousUpdatedAt, newSig, newUpdatedAt)
+
         State.RemoteConfigCache = remoteData
         State.RemoteConfigCacheURL = url
         State.RemoteConfigCacheAt = now
         State.RemoteConfigCacheUnix = fetchedAt
         State.LastRemoteConfigUnix = fetchedAt
-        State.SharedConfigSource = "remote"
+        State.RemoteConfigSignature = newSig
+        State.RemoteConfigUpdatedAt = newUpdatedAt
+        State.RemoteConfigBackoffUntil = 0
+        State.RemoteConfigChanged = changed
+        State.SharedConfigSource = changed and "remote-changed" or "remote-unchanged"
+
         if State.GetRemoteConfigCachePath then
             pcall(function()
                 saveJson(State.GetRemoteConfigCachePath(), {
                     FetchedAt = fetchedAt,
                     URL = url,
+                    Signature = newSig,
+                    UpdatedAt = newUpdatedAt,
+                    BackoffUntil = 0,
                     Data = remoteData,
                 })
             end)
         end
-        return remoteData, "remote"
+        return remoteData, State.SharedConfigSource, changed
     end
 
-    -- On ordinary startup/reload, stale disk config is safer than hammering Cloudflare.
-    -- A forced manual/scheduled refresh must report failure instead of pretending stale data is fresh.
-    if force ~= true and type(diskCache) == "table" and type(diskCache.Data) == "table" and tostring(diskCache.URL or "") == url then
-        State.RemoteConfigCache = diskCache.Data
+    local errText = tostring(remoteErr or "fetch failed"):lower()
+    local rateLimited = errText:find("429", 1, true)
+        or errText:find("1027", 1, true)
+        or errText:find("rate limit", 1, true)
+        or errText:find("too many requests", 1, true)
+    local backoffSeconds = rateLimited
+        and (tonumber(CFG.Seller.RemoteConfigRateLimitBackoffSeconds) or 21600)
+        or (tonumber(CFG.Seller.RemoteConfigRetrySeconds) or 1800)
+    local backoffUntil = os.time() + backoffSeconds
+    State.RemoteConfigBackoffUntil = backoffUntil
+
+    -- Persist failure backoff so rejoining cannot restart the rate-limit spiral.
+    local staleData = type(State.RemoteConfigCache) == "table" and State.RemoteConfigCache or (diskCache and diskCache.Data)
+    local staleURL = tostring(State.RemoteConfigCacheURL or (diskCache and diskCache.URL) or url)
+    if State.GetRemoteConfigCachePath then
+        pcall(function()
+            saveJson(State.GetRemoteConfigCachePath(), {
+                FetchedAt = tonumber(State.RemoteConfigCacheUnix) or tonumber(diskCache and diskCache.FetchedAt) or 0,
+                URL = staleURL,
+                Signature = tostring(State.RemoteConfigSignature or (diskCache and diskCache.Signature) or ""),
+                UpdatedAt = tostring(State.RemoteConfigUpdatedAt or (diskCache and diskCache.UpdatedAt) or ""),
+                BackoffUntil = backoffUntil,
+                LastError = tostring(remoteErr or "fetch failed"),
+                Data = staleData,
+            })
+        end)
+    end
+
+    if type(staleData) == "table" and staleURL == url then
+        State.RemoteConfigCache = staleData
         State.RemoteConfigCacheURL = url
-        State.RemoteConfigCacheUnix = tonumber(diskCache.FetchedAt) or 0
-        State.LastRemoteConfigUnix = State.RemoteConfigCacheUnix
-        State.SharedConfigSource = "stale-disk-cache"
-        return diskCache.Data, "stale-disk-cache"
+        State.SharedConfigSource = rateLimited and "rate-limit-cache" or "failure-cache"
+        State.RemoteConfigChanged = false
+        log("Remote config fetch failed", rateLimited and "RATE LIMITED" or "network", "backoff", tostring(backoffSeconds) .. "s", "using cached config")
+        return staleData, State.SharedConfigSource, false
     end
 
-    return nil, remoteErr
+    return nil, tostring(remoteErr or "fetch failed"), false
 end
 
 parseRemoteConfig = function(raw)
@@ -2167,8 +2310,22 @@ fetchRemoteConfig = function()
     local ok, raw = pcall(function()
         return game:HttpGet(url)
     end)
-    if not ok or type(raw) ~= "string" or raw == "" then
-        return nil, "fetch failed"
+    if not ok then
+        return nil, tostring(raw or "fetch failed")
+    end
+    if type(raw) ~= "string" or raw == "" then
+        return nil, "empty response"
+    end
+
+    -- Some executors return Cloudflare error bodies instead of throwing HttpGet.
+    local rawLower = raw:lower()
+    if rawLower:find("error code: 1027", 1, true)
+        or rawLower:find("too many requests", 1, true)
+        or rawLower:find("rate limit", 1, true)
+        or rawLower:find('"status":429', 1, true)
+        or rawLower:find('"code":1027', 1, true)
+    then
+        return nil, "Cloudflare rate limit 429/1027"
     end
 
     local data, err = parseRemoteConfig(raw)
@@ -2180,11 +2337,24 @@ fetchRemoteConfig = function()
     State.LastAutoRemoteRefreshAt = State.LastRemoteConfigAt
     State.LastRemoteConfigUnix = os.time()
     State.LastRemoteConfigURL = url
-    return data
+    return data, nil, {
+        Signature = configSignature(data),
+        UpdatedAt = tostring(data.__RemoteUpdatedAt or ""),
+    }
 end
 
 local function applyRemoteConfig(data)
     if type(data) ~= "table" then return false end
+
+    -- Network polling policy is LOCAL ONLY. Remote config cannot lower the 6h cadence
+    -- or rewrite its own URL/retry/backoff behavior.
+    local protectedRemote = {
+        RemoteConfigEnabled = CFG.Seller.RemoteConfigEnabled,
+        RemoteConfigURL = CFG.Seller.RemoteConfigURL,
+        RemoteConfigSaveLocal = CFG.Seller.RemoteConfigSaveLocal,
+        RemoteConfigRetrySeconds = CFG.Seller.RemoteConfigRetrySeconds,
+        RemoteConfigRateLimitBackoffSeconds = CFG.Seller.RemoteConfigRateLimitBackoffSeconds,
+    }
 
     if type(data.Seller) == "table" then
         shallowMerge(CFG.Seller, data.Seller)
@@ -2204,6 +2374,13 @@ local function applyRemoteConfig(data)
         CFG.Seller.MaxListPerMinute = 999
         CFG.Seller.MaxAutoListSession = CFG.Seller.BoothCap or 50
     end
+
+    CFG.Seller.RemoteConfigEnabled = protectedRemote.RemoteConfigEnabled
+    CFG.Seller.RemoteConfigURL = protectedRemote.RemoteConfigURL
+    CFG.Seller.RemoteConfigSaveLocal = protectedRemote.RemoteConfigSaveLocal
+    CFG.Seller.RemoteConfigRetrySeconds = protectedRemote.RemoteConfigRetrySeconds
+    CFG.Seller.RemoteConfigRateLimitBackoffSeconds = protectedRemote.RemoteConfigRateLimitBackoffSeconds
+    CFG.Seller.RemoteConfigRefreshSeconds = 21600
 
     local filters = data.Filters or data.listing or data.Listing or data.listings
     if type(filters) == "table" then
@@ -3864,7 +4041,7 @@ local function importSniperWatchlist(path, dataOverride, quiet)
 end
 
 State.ReloadSniperConfig = function()
-    local sharedData, sharedSource = getSharedConfig(false)
+    local sharedData, sharedSource = getSharedConfig(false, false)
     if type(sharedData) == "table" then
         local ok, count = importSniperWatchlist("shared:" .. tostring(sharedSource or "config"), sharedData, true)
         if ok and (tonumber(count) or 0) > 0 then
@@ -3893,11 +4070,18 @@ State.ReloadSniperConfig = function()
     return false
 end
 
-State.ReloadRemoteConfig = function(force)
-    local sharedData = getSharedConfig(force == true)
+State.ReloadRemoteConfig = function(forceFresh, ignoreBackoff)
+    local sharedData, sharedSource, changed = getSharedConfig(forceFresh == true, ignoreBackoff == true)
     if type(sharedData) ~= "table" then
-        log("Shared config refresh", "no data")
-        return false
+        log("Shared config refresh", tostring(sharedSource or "no data"))
+        return false, false
+    end
+
+    -- Fresh fetch succeeded but content is identical: only cache timestamp changed.
+    -- Do NOT re-apply filters, rewrite local files, reset scans, or trigger Smart Rebuild.
+    if forceFresh == true and changed == false then
+        log("Shared config unchanged", tostring(sharedSource or "cache"), "no apply/rebuild")
+        return true, false
     end
 
     local listingOk, listingCount = applyRemoteConfig(sharedData)
@@ -3917,9 +4101,10 @@ State.ReloadRemoteConfig = function(force)
     pcall(State.RefreshSniperLog)
     pcall(refreshPills)
     pcall(State.RefreshDashboard)
-    log("Shared config refreshed", "listing", tostring(listingCount or 0), "sniper", tostring(sniperCount or 0))
-    return listingOk == true or sniperOk == true
+    log("Shared config applied", "listing", tostring(listingCount or 0), "sniper", tostring(sniperCount or 0), "changed", tostring(changed ~= false))
+    return listingOk == true or sniperOk == true, changed ~= false
 end
+
 local function removeWatch(name)
     CFG.Sniper.Watchlist = CFG.Sniper.Watchlist or {}
     local target = norm(name)
@@ -6136,7 +6321,7 @@ end, "outline")
 State.SellerCompactButton(State.SellerActionRow, "RELOAD CONFIG", function()
     task.spawn(function()
         local ok, err = pcall(function()
-            State.ReloadRemoteConfig(true) -- manual button = force one fresh Cloudflare fetch
+            State.ReloadRemoteConfig(true, true) -- manual = fresh fetch, intentionally bypass timer/backoff
         end)
         if not ok then log("Manual remote reload error", tostring(err)) end
         task.wait(0.2)
@@ -8070,9 +8255,10 @@ State.SettingRemoteSec:AddToggle("Auto Refresh", CFG.Seller.RemoteConfigEnabled 
     State.SaveRuntimeSettings()
     log("RemoteConfigAutoRefresh", tostring(v))
 end)
-State.SettingRemoteSec:AddInput("Refresh Sec (6h=21600)", tostring(CFG.Seller.RemoteConfigRefreshSeconds or 21600), function(v)
-    CFG.Seller.RemoteConfigRefreshSeconds = math.max(3600, toNumber(v) or CFG.Seller.RemoteConfigRefreshSeconds or 21600)
+State.SettingRemoteSec:AddInput("Refresh Sec (locked 21600)", "21600", function(v)
+    CFG.Seller.RemoteConfigRefreshSeconds = 21600
     State.SaveRuntimeSettings()
+    log("RemoteConfigRefresh", "locked at 21600s / 6h")
 end)
 State.SettingRemoteSec:AddToggle("Hourly Rebuild", CFG.Seller.AutoRebuildAfterConfigRefresh == true, function(v)
     CFG.Seller.AutoRebuildAfterConfigRefresh = v == true
@@ -8085,7 +8271,7 @@ State.SettingRemoteSec:AddInput("Rebuild Sec", tostring(CFG.Seller.AutoRebuildEv
 end)
 State.SettingRemoteSec:AddButton("Refresh Config Now", function()
     local ok, err = pcall(function()
-        State.ReloadRemoteConfig(true)
+        State.ReloadRemoteConfig(true, true)
     end)
     if not ok then log("Remote refresh error", tostring(err)) end
 end, "primary")
@@ -9020,32 +9206,41 @@ end
 
 State.MaybeAutoRemoteRefresh = function(now)
     if CFG.Seller.RemoteConfigEnabled ~= true then return false end
-    local interval = math.max(3600, tonumber(CFG.Seller.RemoteConfigRefreshSeconds) or 21600)
+    local interval = 21600
+    local nowUnix = os.time()
     local lastUnix = tonumber(State.LastRemoteConfigUnix) or 0
 
-    -- Use wall-clock time so the 6h cache survives Roblox rejoin/teleport/script restart.
-    if lastUnix > 0 and (os.time() - lastUnix) < interval then return false end
+    -- Persistent hard backoff (429/1027/network failure) wins over scheduled refresh.
+    if nowUnix < (tonumber(State.RemoteConfigBackoffUntil) or 0) then return false end
+
+    -- Wall-clock cadence survives Roblox rejoin/teleport/script restart.
+    if lastUnix > 0 and (nowUnix - lastUnix) < interval then return false end
     if lastUnix <= 0 and now < interval then return false end
 
-    -- Scheduled refresh is one intentional fresh request. All normal scans keep using cache.
-    -- Failed refreshes retry at most once per retry window, never once per main-loop tick.
-    local retrySeconds = tonumber(CFG.Seller.RemoteConfigRetrySeconds) or 600
+    local retrySeconds = tonumber(CFG.Seller.RemoteConfigRetrySeconds) or 1800
     if now - (tonumber(State.LastScheduledRemoteAttemptAt) or -math.huge) < retrySeconds then return false end
     State.LastScheduledRemoteAttemptAt = now
 
-    local ok = false
+    local ok, changed = false, false
     if State.ReloadRemoteConfig then
-        ok = State.ReloadRemoteConfig(true) == true
+        -- Fresh scheduled request, but unlike manual reload it MUST obey Cloudflare backoff.
+        ok, changed = State.ReloadRemoteConfig(true, false)
     else
-        ok = reloadFilters(true) == true
+        ok = reloadFilters(false) == true
+        changed = ok
     end
+
     if ok then
         State.LastAutoRemoteRefreshAt = now
-        State.LastRemoteConfigUnix = os.time()
-        State.MaybeHourlySmartRebuild(now, "remote config")
+        if changed then
+            State.MaybeHourlySmartRebuild(now, "remote config changed")
+        else
+            log("Remote scheduled refresh", "unchanged", "no rebuild")
+        end
     end
     return ok
 end
+
 --// Main background loops
 State.SetBootStatus("automation loop")
 State.BootComplete = true
