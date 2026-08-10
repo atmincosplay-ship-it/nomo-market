@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V17.5 PERFORMANCE CACHE GUARD"
+local VERSION = "V17.6 JSON DURABILITY GUARD"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -683,20 +683,43 @@ local function ensureFolder()
     end
 end
 
-local function readJson(path)
-    if type(isfile) == "function" and type(readfile) == "function" and isfile(path) then
-        local ok, raw = pcall(readfile, path)
-        if ok and raw and raw ~= "" then
-            local ok2, data = pcall(function() return HttpService:JSONDecode(raw) end)
-            if ok2 and type(data) == "table" then
-                return data
-            end
-        end
+local function decodeJsonFile(path)
+    if type(isfile) ~= "function" or type(readfile) ~= "function" or not isfile(path) then
+        return nil, "missing"
     end
-    return {Filters = {}}
+    local ok, raw = pcall(readfile, path)
+    if not ok or type(raw) ~= "string" or raw == "" then
+        return nil, "read_failed"
+    end
+    local ok2, data = pcall(function() return HttpService:JSONDecode(raw) end)
+    if not ok2 or type(data) ~= "table" then
+        return nil, "corrupt"
+    end
+    return data, "ok"
 end
 
-local function saveJson(path, data)
+local function readJson(path, allowBackup)
+    local data, status = decodeJsonFile(path)
+    if data then
+        return data, "primary"
+    end
+
+    if allowBackup ~= false then
+        local backupPath = tostring(path) .. ".last_good"
+        local backup = decodeJsonFile(backupPath)
+        if backup then
+            log("JSON recovered from last-good", tostring(path), "primary=" .. tostring(status))
+            return backup, "last_good"
+        end
+    end
+
+    if status == "missing" then
+        return {Filters = {}}, "missing"
+    end
+    return {Filters = {}}, "corrupt"
+end
+
+local function saveJson(path, data, saveBackup)
     data = type(data) == "table" and data or {}
     if type(writefile) ~= "function" then
         log("writefile unsupported")
@@ -708,7 +731,30 @@ local function saveJson(path, data)
         log("JSON encode failed", tostring(encoded))
         return false
     end
-    writefile(path, encoded)
+
+    local writeOk, writeErr = pcall(writefile, path, encoded)
+    if not writeOk then
+        log("JSON write failed", tostring(path), tostring(writeErr))
+        return false
+    end
+
+    -- Verify the primary before promoting it to last-good. This matters on the
+    -- global Arceus Workspace where several Roblox processes can touch shared
+    -- config/cache files at nearly the same time. A partial/corrupt write must
+    -- never replace the previous known-good copy.
+    local verified = decodeJsonFile(path)
+    if type(verified) ~= "table" then
+        log("JSON write verify failed", tostring(path))
+        return false
+    end
+
+    if saveBackup ~= false then
+        local backupPath = tostring(path) .. ".last_good"
+        local backupOk, backupErr = pcall(writefile, backupPath, encoded)
+        if not backupOk then
+            log("JSON last-good write failed", tostring(backupPath), tostring(backupErr))
+        end
+    end
     return true
 end
 
@@ -757,7 +803,8 @@ State.GetRemoteConfigCachePath = function()
 end
 
 State.GetFindSellerLandingPath = function()
-    return joinConfigPath(getConfigFolder(), "find_seller_landing.json")
+    local uid = tostring((Players.LocalPlayer and Players.LocalPlayer.UserId) or "unknown")
+    return joinConfigPath(getConfigFolder(), "find_seller_landing_" .. uid .. ".json")
 end
 
 State.MarkFindSellerLanding = function(itemType, itemName)
@@ -768,7 +815,7 @@ State.MarkFindSellerLanding = function(itemType, itemName)
             ItemName = tostring(itemName or ""),
             JobId = tostring(game.JobId or ""),
             Version = VERSION,
-        })
+        }, false)
     end)
 end
 
@@ -779,7 +826,7 @@ end
 
 State.ConsumeFindSellerLanding = function()
     local path = State.GetFindSellerLandingPath()
-    local data = readJson(path)
+    local data = readJson(path, false)
     if type(data) ~= "table" or type(data.At) ~= "number" then
         return nil
     end
@@ -792,9 +839,16 @@ State.ConsumeFindSellerLanding = function()
 end
 
 State.LoadRuntimeSettings = function()
-    local data = readJson(State.GetSettingsPath())
+    local data, settingsReadSource = readJson(State.GetSettingsPath())
     local defaultsVersion = "v17_1_webhook_default_on"
-    local applyLiveAutomationDefaults = type(data.Meta) ~= "table" or data.Meta.DefaultsVersion ~= defaultsVersion
+    local settingsCorrupt = settingsReadSource == "corrupt"
+    local applyLiveAutomationDefaults = (not settingsCorrupt) and (type(data.Meta) ~= "table" or data.Meta.DefaultsVersion ~= defaultsVersion)
+    if settingsCorrupt then
+        State.RuntimeSettingsCorrupt = true
+        log("settings.json corrupt and no last-good available; keeping in-memory defaults without overwriting disk")
+    else
+        State.RuntimeSettingsCorrupt = false
+    end
     if type(data.Booth) == "table" then
         if data.Booth.AutoClaim ~= nil then CFG.Booth.AutoClaim = data.Booth.AutoClaim == true end
         if data.Booth.SmartReclaim ~= nil then CFG.Booth.SmartReclaim = data.Booth.SmartReclaim == true end
