@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V17.7 RELOAD SHARED CACHE GUARD"
+local VERSION = "V17.8 MAIN LOOP RESPONSIVENESS GUARD"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -283,8 +283,11 @@ local State = {
     LastBoothHistoryFetchAt = 0,
     SentSoldWebhooks = {},
     SentSnipeWebhooks = {},
+    PendingSoldConfirmations = {},
     WebhookQueue = {},
     WebhookBusy = false,
+    AutoSellerWorkerRunning = false,
+    RemoteConfigRefreshRunning = false,
     LastCreateWaitSignal = 0,
     CreateBlockedUntil = 0,
     NextCreateAllowedAt = 0,
@@ -311,6 +314,9 @@ function State.Stop(reason)
     State.Connections = {}
     State.WebhookQueue = {}
     State.WebhookBusy = false
+    State.PendingSoldConfirmations = {}
+    State.AutoSellerWorkerRunning = false
+    State.RemoteConfigRefreshRunning = false
     if State.Gui then
         pcall(function() State.Gui:Destroy() end)
         State.Gui = nil
@@ -318,6 +324,10 @@ function State.Stop(reason)
 end
 
 getgenv()[STATE_KEY] = State
+
+State.IsCurrent = function()
+    return State.Running == true and getgenv()[STATE_KEY] == State
+end
 
 --//====================================================--
 --// Services/modules/remotes
@@ -3434,6 +3444,10 @@ State.ConnectBoothHistory = function()
         local buyer = type(history.buyer) == "table" and history.buyer or {}
         local buyerName = tostring(buyer.username or "")
         local sent = State.SendSoldWebhook(listing, {User = buyerName, Source = "history"})
+        local historyId = tostring(listing.ListingUUID or listing.ItemId or "")
+        if historyId ~= "" then State.PendingSoldConfirmations[historyId] = nil end
+        local historyItemId = tostring(listing.ItemId or "")
+        if historyItemId ~= "" then State.PendingSoldConfirmations[historyItemId] = nil end
         table.insert(State.BoothHistoryCache, 1, listing)
         State.InvalidateListingCache()
         if sent then
@@ -3443,6 +3457,63 @@ State.ConnectBoothHistory = function()
     log("Booth history sale listener connected")
 end
 State.ConnectBoothHistory()
+
+-- V17.8: sale-history confirmation must never block the 1s automation loop.
+-- FetchHistory is a RemoteFunction and can yield unpredictably. Confirm suspected
+-- sales in a worker; a bounded delayed fallback infers the sale if history never
+-- returns. SendSoldWebhook's existing ListingUUID/ItemId dedupe prevents doubles.
+State.QueueSoldConfirmation = function(oldListing)
+    if type(oldListing) ~= "table" then return false end
+    local id = tostring(oldListing.ListingUUID or oldListing.ItemId or "")
+    if id == "" then return false end
+    if State.PendingSoldConfirmations[id] then return false end
+
+    local token = tostring(os.clock()) .. ":" .. id
+    State.PendingSoldConfirmations[id] = token
+
+    task.spawn(function()
+        local ok, historySale = pcall(State.FindHistorySaleForListing, oldListing)
+        if not State.Running then return end
+        if State.PendingSoldConfirmations[id] ~= token then return end
+        if ok and type(historySale) == "table" then
+            State.SendSoldWebhook(historySale, {User = historySale.BuyerName, Source = "history"})
+            State.PendingSoldConfirmations[id] = nil
+            log("Webhook sold confirmed by history", tostring(historySale.PetType), tostring(historySale.Price), id)
+        end
+    end)
+
+    task.delay(5, function()
+        if not State.Running then return end
+        if State.PendingSoldConfirmations[id] ~= token then return end
+
+        -- One fresh booth read happens only in this background fallback. If the
+        -- listing reappeared, it was a transient cache miss rather than a sale.
+        local stillMissing = true
+        local okCurrent, currentListings = pcall(function()
+            return getMyListings(true, true)
+        end)
+        if okCurrent and type(currentListings) == "table" then
+            for _, currentListing in ipairs(currentListings) do
+                local currentId = tostring(currentListing.ListingUUID or currentListing.ItemId or "")
+                if currentId == id then
+                    stillMissing = false
+                    break
+                end
+            end
+        end
+
+        if stillMissing then
+            local sent = State.SendSoldWebhook(oldListing, {Source = "inferred"})
+            if sent then
+                log("Webhook sold inferred", tostring(oldListing.PetType), tostring(oldListing.Price), id)
+            end
+        else
+            log("Sold fallback cancelled", tostring(oldListing.PetType), id, "listing reappeared")
+        end
+        State.PendingSoldConfirmations[id] = nil
+    end)
+    return true
+end
 
 State.TrackSoldListings = function(myListings)
     local now = os.clock()
@@ -3464,14 +3535,7 @@ State.TrackSoldListings = function(myListings)
                 local missing = State.MissingMyListings[id]
                 if missing and now - (tonumber(missing.At) or now) >= 8 then
                     local listing = missing.Listing or oldListing
-                    local historySale = State.FindHistorySaleForListing(listing)
-                    if historySale then
-                        State.SendSoldWebhook(historySale, {User = historySale.BuyerName, Source = "history"})
-                        log("Webhook sold confirmed by history", tostring(historySale.PetType), tostring(historySale.Price), id)
-                    else
-                        State.SendSoldWebhook(listing, {Source = "inferred"})
-                        log("Webhook sold inferred", tostring(oldListing.PetType), tostring(oldListing.Price), id)
-                    end
+                    State.QueueSoldConfirmation(listing)
                     State.MissingMyListings[id] = nil
                 else
                     State.MissingMyListings[id] = {At = now, Listing = oldListing}
@@ -3789,7 +3853,7 @@ local function autoList(scan)
     end
 
     local i = 1
-    while i <= #scan.Candidates do
+    while i <= #scan.Candidates and (not State.IsCurrent or State.IsCurrent()) do
         local c = scan.Candidates[i]
         local serverWait = createWaitRemaining()
         if serverWait > 0 then
@@ -4163,7 +4227,12 @@ State.ReloadSniperConfig = function()
 end
 
 State.ReloadRemoteConfig = function(forceFresh, ignoreBackoff)
+    if State.IsCurrent and not State.IsCurrent() then return false, false end
     local sharedData, sharedSource, changed = getSharedConfig(forceFresh == true, ignoreBackoff == true)
+    if State.IsCurrent and not State.IsCurrent() then
+        log("Shared config refresh discarded", "script reloaded while request was in flight")
+        return false, false
+    end
     if type(sharedData) ~= "table" then
         log("Shared config refresh", tostring(sharedSource or "no data"))
         return false, false
@@ -9128,7 +9197,7 @@ local function autoListFruits(scan)
     if not boothReady then log("Fruit AutoList blocked", "no booth") return end
 
     local i = 1
-    while i <= #scan.Candidates do
+    while i <= #scan.Candidates and (not State.IsCurrent or State.IsCurrent()) do
         local c = scan.Candidates[i]
         local serverWait = createWaitRemaining()
         if serverWait > 0 then task.wait(math.min(serverWait, 1)); continue end
@@ -9340,24 +9409,36 @@ State.MaybeAutoRemoteRefresh = function(now)
     if now - (tonumber(State.LastScheduledRemoteAttemptAt) or -math.huge) < retrySeconds then return false end
     State.LastScheduledRemoteAttemptAt = now
 
-    local ok, changed = false, false
-    if State.ReloadRemoteConfig then
-        -- Fresh scheduled request, but unlike manual reload it MUST obey Cloudflare backoff.
-        ok, changed = State.ReloadRemoteConfig(true, false)
-    else
-        ok = reloadFilters(false) == true
-        changed = ok
-    end
-
-    if ok then
-        State.LastAutoRemoteRefreshAt = now
-        if changed then
-            State.MaybeHourlySmartRebuild(now, "remote config changed")
-        else
-            log("Remote scheduled refresh", "unchanged", "no rebuild")
+    -- V17.8: never run game:HttpGet synchronously inside the 1-second
+    -- Seller/Sniper loop. One worker owns the scheduled refresh; the loop stays
+    -- responsive while a slow Worker/network call is in flight.
+    if State.RemoteConfigRefreshRunning then return false end
+    State.RemoteConfigRefreshRunning = true
+    task.spawn(function()
+        local okCall, ok, changed = pcall(function()
+            if State.ReloadRemoteConfig then
+                -- Fresh scheduled request, but unlike manual reload it MUST obey Cloudflare backoff.
+                return State.ReloadRemoteConfig(true, false)
+            end
+            local localOk = reloadFilters(false) == true
+            return localOk, localOk
+        end)
+        State.RemoteConfigRefreshRunning = false
+        if not State.Running then return end
+        if not okCall then
+            log("Remote scheduled refresh error", tostring(ok))
+            return
         end
-    end
-    return ok
+        if ok then
+            State.LastAutoRemoteRefreshAt = os.clock()
+            if changed then
+                State.MaybeHourlySmartRebuild(os.clock(), "remote config changed")
+            else
+                log("Remote scheduled refresh", "unchanged", "no rebuild")
+            end
+        end
+    end)
+    return true
 end
 
 --// Main background loops
@@ -9387,18 +9468,28 @@ task.spawn(function()
             end
         end
 
-        if CFG.Seller.Enabled and CFG.Seller.AutoList and now - State.LastSellerScanAt >= (tonumber(CFG.Seller.ScanInterval) or 15) then
+        if CFG.Seller.Enabled and CFG.Seller.AutoList
+            and not State.AutoSellerWorkerRunning
+            and now - State.LastSellerScanAt >= (tonumber(CFG.Seller.ScanInterval) or 15)
+        then
             State.LastSellerScanAt = now
-            local ok, scan = pcall(buildCandidates)
-            if ok then
-                autoList(scan)
-                if State.AutoListFruits then
-                    local okFruit, fruitErr = pcall(State.AutoListFruits)
-                    if not okFruit then log("Fruit scan error", tostring(fruitErr)) end
-                end
-            else
-                log("Seller scan error", tostring(scan))
-            end
+            State.AutoSellerWorkerRunning = true
+            -- V17.8: list/verify operations yield (RemoteFunction + verification
+            -- waits). Run them outside the main loop so Sniper, UI, low-player
+            -- checks, and sold tracking keep their cadence while Seller works.
+            task.spawn(function()
+                local okWorker, workerErr = pcall(function()
+                    if State.IsCurrent and not State.IsCurrent() then return end
+                    local scan = buildCandidates()
+                    autoList(scan)
+                    if State.AutoListFruits then
+                        local okFruit, fruitErr = pcall(State.AutoListFruits)
+                        if not okFruit then log("Fruit scan error", tostring(fruitErr)) end
+                    end
+                end)
+                State.AutoSellerWorkerRunning = false
+                if not okWorker then log("Seller scan error", tostring(workerErr)) end
+            end)
         end
 
         if CFG.Sniper.Enabled and now - State.LastSniperScanAt >= (tonumber(CFG.Sniper.ScanInterval) or 10) then
