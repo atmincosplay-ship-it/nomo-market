@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V17.11 UNATTENDED ACTION GUARD"
+local VERSION = "V17.12 TELEPORT TRUTH GUARD"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -527,6 +527,8 @@ end
 State.Rejoin = function(reason)
     if State.RejoinRequested then return false end
     State.RejoinRequested = true
+    State.RejoinRequestedAt = os.clock()
+    State.RejoinRequestJobId = tostring(game.JobId or "")
     log("Rejoin requested", tostring(reason or "manual"), tostring(game.PlaceId) .. ":" .. tostring(game.JobId))
     task.spawn(function()
         task.wait(1)
@@ -535,21 +537,34 @@ State.Rejoin = function(reason)
             return
         end
 
+        local requestAt = tonumber(State.RejoinRequestedAt) or os.clock()
+        local requestJob = tostring(State.RejoinRequestJobId or game.JobId or "")
         local okSame, errSame = pcall(function()
             State.TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
         end)
-        if okSame then return end
+        if not okSame then
+            log("Same-server rejoin failed", tostring(errSame), "trying place")
+            local okPlace, errPlace = pcall(function()
+                State.TeleportService:Teleport(game.PlaceId, LocalPlayer)
+            end)
+            if not okPlace then
+                State.RejoinRequested = false
+                log("Rejoin failed; Market remains running", tostring(errPlace))
+                return
+            end
+        end
 
-        log("Same-server rejoin failed", tostring(errSame), "trying place")
-        local okPlace, errPlace = pcall(function()
-            State.TeleportService:Teleport(game.PlaceId, LocalPlayer)
+        -- V17.12: pcall success only means Roblox accepted the request. If no
+        -- teleport starts and this exact execution/job is still alive later,
+        -- release the button instead of leaving RejoinRequested stuck forever.
+        task.delay(20, function()
+            if not State.IsCurrent or not State.IsCurrent() then return end
+            if not State.RejoinRequested then return end
+            if (tonumber(State.LastTeleportStartedAt) or 0) >= requestAt then return end
+            if tostring(game.JobId or "") ~= requestJob then return end
+            State.RejoinRequested = false
+            log("Rejoin request timed out; Market remains running")
         end)
-        if okPlace then return end
-
-        -- V17.11: a failed teleport request must not permanently stop Market.
-        -- The current script stays alive and the button can be used again.
-        State.RejoinRequested = false
-        log("Rejoin failed; Market remains running", tostring(errPlace))
     end)
     return true
 end
@@ -7558,15 +7573,30 @@ State.FindSellerLog = function(...)
     end
 end
 
-if not State.FindSellerTeleportFailHooked and State.TeleportService and State.TeleportService.TeleportInitFailed then
-    State.FindSellerTeleportFailHooked = true
+if not State.TeleportTruthHooksInstalled then
+    State.TeleportTruthHooksInstalled = true
     pcall(function()
-        State.Connect(State.TeleportService.TeleportInitFailed, function(player, result, message)
-            if player ~= LocalPlayer then return end
-            State.LastFindSellerTeleportFailAt = os.clock()
-            State.LastFindSellerTeleportFailReason = tostring(result) .. " " .. tostring(message)
-            State.FindSellerLog("Find Seller teleport failed", State.LastFindSellerTeleportFailReason)
-        end)
+        if LocalPlayer and LocalPlayer.OnTeleport then
+            State.Connect(LocalPlayer.OnTeleport, function(teleportState)
+                State.LastTeleportStartedAt = os.clock()
+                State.LastTeleportState = tostring(teleportState)
+                -- Any real teleport start satisfies a pending manual rejoin.
+                State.RejoinRequested = false
+            end)
+        end
+    end)
+    pcall(function()
+        if State.TeleportService and State.TeleportService.TeleportInitFailed then
+            State.Connect(State.TeleportService.TeleportInitFailed, function(player, result, message)
+                if player ~= LocalPlayer then return end
+                State.LastFindSellerTeleportFailAt = os.clock()
+                State.LastFindSellerTeleportFailReason = tostring(result) .. " " .. tostring(message)
+                -- V17.12: asynchronous failure must release the manual Rejoin
+                -- latch too; a successful pcall is not proof of teleport success.
+                State.RejoinRequested = false
+                State.FindSellerLog("Teleport failed", State.LastFindSellerTeleportFailReason)
+            end)
+        end
     end)
 end
 
@@ -7628,6 +7658,7 @@ State.FindIndexSellerForItem = function(itemType, itemName, bypassCooldown)
     if hasSeller and listingId then
         State.FindSellerLog("Find Seller teleporting", tostring(itemName))
         local startedAt = os.clock()
+        local startingJobId = tostring(game.JobId or "")
         State.LastFindSellerTeleportFailAt = 0
         State.LastFindSellerTeleportFailReason = nil
         if State.MarkFindSellerLanding then
@@ -7641,7 +7672,10 @@ State.FindIndexSellerForItem = function(itemType, itemName, bypassCooldown)
             return false
         end
 
-        local waitUntil = os.clock() + 8
+        -- V17.12: wait for positive teleport-start evidence, not merely the
+        -- absence of TeleportInitFailed. This prevents multiple FindSeller
+        -- teleports from being fired while Roblox is already transitioning.
+        local waitUntil = os.clock() + 12
         while State.Running and os.clock() < waitUntil do
             if (tonumber(State.LastFindSellerTeleportFailAt) or 0) >= startedAt then
                 State.FindSellerLog("Find Seller server full", tostring(itemName), "waiting 2s")
@@ -7650,11 +7684,17 @@ State.FindIndexSellerForItem = function(itemType, itemName, bypassCooldown)
                 State.FindSellerLog("Find Seller retry next", tostring(itemName))
                 return false
             end
+            if (tonumber(State.LastTeleportStartedAt) or 0) >= startedAt
+                or tostring(game.JobId or "") ~= startingJobId
+            then
+                State.FindSellerLog("Find Seller teleport accepted", tostring(itemName))
+                return true
+            end
             task.wait(0.25)
         end
 
         if State.ClearFindSellerLanding then State.ClearFindSellerLanding() end
-        State.FindSellerLog("Find Seller no teleport", tostring(itemName), "retry next")
+        State.FindSellerLog("Find Seller no teleport start", tostring(itemName), "retry next")
         return false
     end
 
@@ -7803,10 +7843,16 @@ State.MaybeLowPlayerIndexHop = function(now)
         return
     end
 
-    State.LowPlayerSince = nil
-    State.LastLowPlayerHopAt = now
     log("Low player server", tostring(count) .. "/" .. tostring(Players.MaxPlayers or "?"), "index hop")
-    State.FindSellerHopWatchlist()
+    local started = State.FindSellerHopWatchlist()
+    if started then
+        State.LowPlayerSince = nil
+        State.LastLowPlayerHopAt = now
+    else
+        -- V17.12: do not burn the full low-player cooldown when the Find Seller
+        -- loop was never started (for example its own short cooldown was active).
+        dlog("Low player hop deferred", "Find Seller loop did not start")
+    end
 end
 
 State.OpenSniperWatchEditPopup = function(name, managerOverlay)
