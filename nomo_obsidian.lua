@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V17.8 MAIN LOOP RESPONSIVENESS GUARD"
+local VERSION = "V17.9 BOOTH MUTATION HOP GUARD"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -288,6 +288,9 @@ local State = {
     WebhookBusy = false,
     AutoSellerWorkerRunning = false,
     RemoteConfigRefreshRunning = false,
+    BoothMutationOwner = "",
+    BoothMutationStartedAt = 0,
+    LastBoothMutationBusyLogAt = 0,
     LastCreateWaitSignal = 0,
     CreateBlockedUntil = 0,
     NextCreateAllowedAt = 0,
@@ -317,6 +320,8 @@ function State.Stop(reason)
     State.PendingSoldConfirmations = {}
     State.AutoSellerWorkerRunning = false
     State.RemoteConfigRefreshRunning = false
+    State.BoothMutationOwner = ""
+    State.BoothMutationStartedAt = 0
     if State.Gui then
         pcall(function() State.Gui:Destroy() end)
         State.Gui = nil
@@ -327,6 +332,31 @@ getgenv()[STATE_KEY] = State
 
 State.IsCurrent = function()
     return State.Running == true and getgenv()[STATE_KEY] == State
+end
+
+-- V17.9: serialize booth-mutating background work. AutoSeller and Smart Rebuild
+-- must never list/remove at the same time on the same client.
+State.BeginBoothMutation = function(owner)
+    if State.IsCurrent and not State.IsCurrent() then return false, "stale execution" end
+    owner = tostring(owner or "booth")
+    local current = tostring(State.BoothMutationOwner or "")
+    if current ~= "" then return false, current end
+    State.BoothMutationOwner = owner
+    State.BoothMutationStartedAt = os.clock()
+    return true, owner
+end
+
+State.EndBoothMutation = function(owner)
+    if tostring(State.BoothMutationOwner or "") == tostring(owner or "") then
+        State.BoothMutationOwner = ""
+        State.BoothMutationStartedAt = 0
+        return true
+    end
+    return false
+end
+
+State.BoothMutationBusy = function()
+    return tostring(State.BoothMutationOwner or "") ~= ""
 end
 
 --//====================================================--
@@ -3805,10 +3835,14 @@ local function listPet(pet, price, boothReady, f)
         return false, "no booth"
     end
 
+    if State.IsCurrent and not State.IsCurrent() then return false, "stale execution" end
     markPendingList(petUUID)
     local ok, result = pcall(function()
         return CreateListing:InvokeServer("Pet", petUUID, clampPrice(price))
     end)
+    if State.IsCurrent and not State.IsCurrent() then
+        return false, "stale execution"
+    end
     if ok and result ~= false then
         State.InvalidateListingCache()
         State.LastListAt = os.clock()
@@ -3897,7 +3931,7 @@ local function listOnce(maxCount)
     log("List until booth full started", "max=" .. tostring(maxCount), "candidates=" .. tostring(#scan.Candidates))
 
     local i = 1
-    while i <= #scan.Candidates do
+    while i <= #scan.Candidates and (not State.IsCurrent or State.IsCurrent()) do
         local c = scan.Candidates[i]
         if done >= maxCount then break end
 
@@ -3956,7 +3990,7 @@ local function rebuildBooth()
     return done
 end
 
-local function smartRebuildBooth()
+local function smartRebuildBoothUnlocked()
     local restoreAutoList = CFG.Seller.AutoList == true
     if restoreAutoList then
         CFG.Seller.AutoList = false
@@ -4001,6 +4035,7 @@ local function smartRebuildBooth()
 
     local removed = 0
     for _, r in ipairs(removeList) do
+        if State.IsCurrent and not State.IsCurrent() then break end
         local l = r.Listing
         log("Smart remove", tostring(l.PetType), "price", tostring(l.Price), "|", tostring(r.Reason))
         if removeListingUUID(l.ListingUUID) then
@@ -4014,6 +4049,10 @@ local function smartRebuildBooth()
     end
 
     local boothCap = tonumber(CFG.Seller.BoothCap) or 50
+    if State.IsCurrent and not State.IsCurrent() then
+        log("Smart Rebuild stopped", "script reloaded")
+        return {Kept = kept, Removed = removed, Listed = 0, Booth = 0, Stale = true}
+    end
     local current = #getMyListings()
     local missing = math.max(0, boothCap - current)
     local listed = 0
@@ -4037,6 +4076,21 @@ local function smartRebuildBooth()
         Listed = listed,
         Booth = #getMyListings(),
     }
+end
+
+-- V17.9: every Smart Rebuild path (manual/startup/hourly/config refresh) shares
+-- the same booth-mutation owner as AutoSeller. This prevents remove/relist races.
+local function smartRebuildBooth()
+    local owner = "smart-rebuild:" .. tostring(os.clock())
+    local locked, heldBy = State.BeginBoothMutation(owner)
+    if not locked then
+        log("Smart Rebuild skipped", "booth mutation busy", tostring(heldBy or "unknown"))
+        return {Skipped = true, Reason = "booth mutation busy"}
+    end
+    local ok, result = pcall(smartRebuildBoothUnlocked)
+    State.EndBoothMutation(owner)
+    if not ok then error(result) end
+    return result
 end
 
 --//====================================================--
@@ -7687,6 +7741,18 @@ State.MaybeLowPlayerIndexHop = function(now)
     if not CFG.Server or CFG.Server.LowPlayerHop ~= true then return end
     if State.FindSellerLoopRunning then return end
 
+    -- V17.9: never teleport in the middle of a booth mutation. CreateListing /
+    -- RemoveListing can yield, and hopping during those calls can leave listing
+    -- state ambiguous or make the post-hop script race an old worker.
+    local pendingList = type(State.PendingListUUIDs) == "table" and next(State.PendingListUUIDs) ~= nil
+    if State.AutoSellerWorkerRunning or State.AutoSmartRebuildRunning or State.BoothMutationBusy() or pendingList then
+        if now - (tonumber(State.LastBoothMutationBusyLogAt) or 0) >= 30 then
+            State.LastBoothMutationBusyLogAt = now
+            dlog("Low player hop deferred", "booth mutation active", tostring(State.BoothMutationOwner or "seller"))
+        end
+        return
+    end
+
     local minPlayers = tonumber(CFG.Server.MinPlayers) or 10
     local grace = tonumber(CFG.Server.GraceSeconds) or 180
     local cooldown = tonumber(CFG.Server.CooldownSeconds) or 600
@@ -9159,10 +9225,14 @@ local function listFruit(fruit, price, boothReady, f)
     if not canSession then return false, sessionWhy end
     if CFG.Seller.RequireBoothBeforeList and not boothReady and not ensureBoothForListing() then return false, "no booth" end
 
+    if State.IsCurrent and not State.IsCurrent() then return false, "stale execution" end
     markPendingList(fruitId)
     local ok, result = pcall(function()
         return CreateListing:InvokeServer(tostring(CFG.Fruit.ItemType or "Holdable"), fruitId, clampPrice(price))
     end)
+    if State.IsCurrent and not State.IsCurrent() then
+        return false, "stale execution"
+    end
     if ok and result ~= false then
         State.InvalidateListingCache()
         State.LastListAt = os.clock()
@@ -9327,13 +9397,17 @@ task.spawn(function()
             log("Auto Smart Rebuild waiting", "no filters", "try", tostring(attempt) .. "/" .. tostring(retries))
         else
             local ok, result = pcall(smartRebuildBooth)
-            if ok then
+            local skippedBusy = ok and type(result) == "table" and result.Skipped == true
+            if ok and not skippedBusy then
                 getgenv()[autoKey] = true
                 getgenv()[runningKey] = nil
                 log("Auto Smart Rebuild complete", "try", tostring(attempt), "listed", tostring(type(result) == "table" and result.Listed or "?"))
                 return
+            elseif skippedBusy then
+                log("Auto Smart Rebuild waiting", tostring(result.Reason or "booth mutation busy"), "try", tostring(attempt) .. "/" .. tostring(retries))
+            else
+                log("Auto Smart Rebuild error", tostring(result), "try", tostring(attempt) .. "/" .. tostring(retries))
             end
-            log("Auto Smart Rebuild error", tostring(result), "try", tostring(attempt) .. "/" .. tostring(retries))
         end
 
         task.wait(retryDelay)
@@ -9354,7 +9428,11 @@ State.MaybeHourlySmartRebuild = function(now, reason)
     task.spawn(function()
         local ok, err = pcall(function()
             if ensureBoothForListing() and #(getFilters() or {}) > 0 then
-                smartRebuildBooth()
+                local result = smartRebuildBooth()
+                if type(result) == "table" and result.Skipped == true then
+                    State.LastAutoConfigRebuildAt = 0
+                    log("Hourly Smart Rebuild deferred", tostring(result.Reason or "booth mutation busy"))
+                end
             else
                 log("Hourly Smart Rebuild skipped", "no booth/filters")
             end
@@ -9478,15 +9556,24 @@ task.spawn(function()
             -- waits). Run them outside the main loop so Sniper, UI, low-player
             -- checks, and sold tracking keep their cadence while Seller works.
             task.spawn(function()
+                local owner = "autoseller:" .. tostring(os.clock())
+                local locked, heldBy = State.BeginBoothMutation(owner)
+                if not locked then
+                    State.AutoSellerWorkerRunning = false
+                    dlog("Seller scan deferred", "booth mutation busy", tostring(heldBy or "unknown"))
+                    return
+                end
                 local okWorker, workerErr = pcall(function()
                     if State.IsCurrent and not State.IsCurrent() then return end
                     local scan = buildCandidates()
                     autoList(scan)
+                    if State.IsCurrent and not State.IsCurrent() then return end
                     if State.AutoListFruits then
                         local okFruit, fruitErr = pcall(State.AutoListFruits)
                         if not okFruit then log("Fruit scan error", tostring(fruitErr)) end
                     end
                 end)
+                State.EndBoothMutation(owner)
                 State.AutoSellerWorkerRunning = false
                 if not okWorker then log("Seller scan error", tostring(workerErr)) end
             end)
