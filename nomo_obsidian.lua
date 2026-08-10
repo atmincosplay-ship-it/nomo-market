@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V17.6 JSON DURABILITY GUARD"
+local VERSION = "V17.7 RELOAD SHARED CACHE GUARD"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -291,11 +291,26 @@ local State = {
     AdaptiveCreateWait = tonumber(CFG.Seller.CreateWaitBackoff) or 5,
     CreateSuccessStreak = 0,
     SelectedPetFromDropdown = false,
+    Connections = {},
 }
+
+State.Connect = function(signal, callback)
+    if signal == nil or type(callback) ~= "function" then return nil end
+    local ok, conn = pcall(function() return signal:Connect(callback) end)
+    if not ok or not conn then return nil end
+    table.insert(State.Connections, conn)
+    return conn
+end
 
 function State.Stop(reason)
     State.Running = false
     print("[NOMO V3] Stop:", reason or "manual")
+    for _, conn in ipairs(State.Connections or {}) do
+        pcall(function() conn:Disconnect() end)
+    end
+    State.Connections = {}
+    State.WebhookQueue = {}
+    State.WebhookBusy = false
     if State.Gui then
         pcall(function() State.Gui:Destroy() end)
         State.Gui = nil
@@ -328,7 +343,7 @@ State.InstallAntiAfk = function()
         return
     end
 
-    LocalPlayer.Idled:Connect(function()
+    State.Connect(LocalPlayer.Idled, function()
         pcall(function()
             virtualUser:CaptureController()
             virtualUser:ClickButton2(Vector2.new())
@@ -632,7 +647,7 @@ if NotificationRemote and NotificationRemote.OnClientEvent then
             "listing lain",
             "daftar lain",
         }
-        NotificationRemote.OnClientEvent:Connect(function(message)
+        State.Connect(NotificationRemote.OnClientEvent, function(message)
             if type(message) ~= "string" then return end
             local text = string.lower(message)
             for _, needle in ipairs(createWaitNeedles) do
@@ -738,12 +753,18 @@ local function saveJson(path, data, saveBackup)
         return false
     end
 
-    -- Verify the primary before promoting it to last-good. This matters on the
-    -- global Arceus Workspace where several Roblox processes can touch shared
-    -- config/cache files at nearly the same time. A partial/corrupt write must
-    -- never replace the previous known-good copy.
-    local verified = decodeJsonFile(path)
-    if type(verified) ~= "table" then
+    -- Verify the exact bytes we wrote before promoting to last-good. On the
+    -- global Arceus Workspace another clone can legitimately write the same
+    -- shared file between our write and verification. Merely seeing valid JSON
+    -- is not enough: that could be another clone's newer content. In that race
+    -- we leave the winner in place and do NOT replace last-good with our bytes.
+    local verifyOk, verifiedRaw = pcall(readfile, path)
+    if not verifyOk or type(verifiedRaw) ~= "string" or verifiedRaw ~= encoded then
+        log("JSON concurrent write detected; last-good not promoted", tostring(path))
+        return false
+    end
+    local decodeOk, verified = pcall(function() return HttpService:JSONDecode(verifiedRaw) end)
+    if not decodeOk or type(verified) ~= "table" then
         log("JSON write verify failed", tostring(path))
         return false
     end
@@ -3407,7 +3428,7 @@ State.ConnectBoothHistory = function()
     local AddToHistory = BoothRemotes:FindFirstChild("AddToHistory")
     if not AddToHistory or not AddToHistory.OnClientEvent then return end
     State.BoothHistoryConnected = true
-    AddToHistory.OnClientEvent:Connect(function(history)
+    State.Connect(AddToHistory.OnClientEvent, function(history)
         local listing = listingFromBoothHistory(history)
         if not listing then return end
         local buyer = type(history.buyer) == "table" and history.buyer or {}
@@ -4995,14 +5016,14 @@ function Library:CreateWindow(cfg)
 				draggingMini, dragStartMini, miniStartPos = true, i.Position, mini.Position
 			end
 		end)
-		UserInputService.InputChanged:Connect(function(i)
+		State.Connect(UserInputService.InputChanged, function(i)
 			if draggingMini and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
 				local d = i.Position - dragStartMini
 				local newPos = UDim2.new(miniStartPos.X.Scale, miniStartPos.X.Offset + d.X, miniStartPos.Y.Scale, miniStartPos.Y.Offset + d.Y)
 				mini.Position = clampGuiPosition(mini, newPos)
 			end
 		end)
-		UserInputService.InputEnded:Connect(function(i)
+		State.Connect(UserInputService.InputEnded, function(i)
 			if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then draggingMini = false end
 		end)
 	end
@@ -5015,14 +5036,14 @@ function Library:CreateWindow(cfg)
 				dragging, dragStart, startPos = true, i.Position, main.Position
 			end
 		end)
-		UserInputService.InputChanged:Connect(function(i)
+		State.Connect(UserInputService.InputChanged, function(i)
 			if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
 				local d = i.Position - dragStart
 				local newPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
 				main.Position = clampGuiPosition(main, newPos)
 			end
 		end)
-		UserInputService.InputEnded:Connect(function(i)
+		State.Connect(UserInputService.InputEnded, function(i)
 			if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = false end
 		end)
 	end
@@ -7391,7 +7412,7 @@ end
 if not State.FindSellerTeleportFailHooked and State.TeleportService and State.TeleportService.TeleportInitFailed then
     State.FindSellerTeleportFailHooked = true
     pcall(function()
-        State.TeleportService.TeleportInitFailed:Connect(function(player, result, message)
+        State.Connect(State.TeleportService.TeleportInitFailed, function(player, result, message)
             if player ~= LocalPlayer then return end
             State.LastFindSellerTeleportFailAt = os.clock()
             State.LastFindSellerTeleportFailReason = tostring(result) .. " " .. tostring(message)
@@ -9284,9 +9305,36 @@ State.MaybeAutoRemoteRefresh = function(now)
     -- Persistent hard backoff (429/1027/network failure) wins over scheduled refresh.
     if nowUnix < (tonumber(State.RemoteConfigBackoffUntil) or 0) then return false end
 
-    -- Wall-clock cadence survives Roblox rejoin/teleport/script restart.
-    if lastUnix > 0 and (nowUnix - lastUnix) < interval then return false end
-    if lastUnix <= 0 and now < interval then return false end
+    -- V17.7 global-Arceus coordination: before deciding this clone must fetch,
+    -- re-read the shared disk cache. Another clone on the same device may have
+    -- refreshed it seconds ago. If so, adopt/apply that cache and skip Cloudflare.
+    if State.GetRemoteConfigCachePath then
+        local diskCache = readJson(State.GetRemoteConfigCachePath())
+        local diskFetchedAt = tonumber(diskCache and diskCache.FetchedAt) or 0
+        local diskBackoffUntil = tonumber(diskCache and diskCache.BackoffUntil) or 0
+        if diskBackoffUntil > (tonumber(State.RemoteConfigBackoffUntil) or 0) then
+            State.RemoteConfigBackoffUntil = diskBackoffUntil
+            if nowUnix < diskBackoffUntil then return false end
+        end
+        if diskFetchedAt > lastUnix and (nowUnix - diskFetchedAt) < interval then
+            local diskSig = tostring(diskCache and diskCache.Signature or "")
+            local currentSig = tostring(State.RemoteConfigSignature or "")
+            State.LastRemoteConfigUnix = diskFetchedAt
+            if diskSig ~= "" and diskSig ~= currentSig and State.ReloadRemoteConfig then
+                State.ReloadRemoteConfig(false, false)
+            end
+            return false
+        end
+    end
+
+    -- Wall-clock cadence survives Roblox rejoin/teleport/script restart. Add a
+    -- deterministic per-UID 0..179s spread so four clones sharing one Workspace
+    -- do not all wake up on the exact same second. The first successful refresher
+    -- updates the shared cache; the others then adopt it via the check above.
+    local userIdNum = tonumber(LocalPlayer and LocalPlayer.UserId) or 0
+    local refreshJitter = userIdNum % 180
+    if lastUnix > 0 and (nowUnix - lastUnix) < (interval + refreshJitter) then return false end
+    if lastUnix <= 0 and now < (interval + refreshJitter) then return false end
 
     local retrySeconds = tonumber(CFG.Seller.RemoteConfigRetrySeconds) or 1800
     if now - (tonumber(State.LastScheduledRemoteAttemptAt) or -math.huge) < retrySeconds then return false end
