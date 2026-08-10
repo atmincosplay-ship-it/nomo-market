@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V17.4 REMOTE CONFIG CHANGE GUARD"
+local VERSION = "V17.5 PERFORMANCE CACHE GUARD"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -153,8 +153,9 @@ if CFG.Sniper.ScanInterval < 0.5 then CFG.Sniper.ScanInterval = 0.5 end
 CFG.Performance = CFG.Performance or {}
 CFG.Performance.ListingCacheSeconds = tonumber(CFG.Performance.ListingCacheSeconds) or 0.75
 if CFG.Performance.ListingCacheSeconds < 0.25 then CFG.Performance.ListingCacheSeconds = 0.25 end
-CFG.Performance.InventoryCacheSeconds = tonumber(CFG.Performance.InventoryCacheSeconds) or 0.75
-if CFG.Performance.InventoryCacheSeconds < 0.25 then CFG.Performance.InventoryCacheSeconds = 0.25 end
+CFG.Performance.InventoryCacheSeconds = tonumber(CFG.Performance.InventoryCacheSeconds) or 2
+-- V17.5: seller inventory does not need sub-second rebuilding. Sniper uses market listing data, not this cache.
+if CFG.Performance.InventoryCacheSeconds < 2 then CFG.Performance.InventoryCacheSeconds = 2 end
 CFG.Performance.BoothChoiceCacheSeconds = tonumber(CFG.Performance.BoothChoiceCacheSeconds) or 1
 if CFG.Performance.BoothChoiceCacheSeconds < 0.25 then CFG.Performance.BoothChoiceCacheSeconds = 0.25 end
 CFG.Performance.NoUI = false
@@ -1695,11 +1696,21 @@ local function ensureBoothForListing()
         return true
     end
 
-    local owned = hasOwnBooth(true)
+    -- V17.5: do not force a full booth snapshot every seller tick.
+    -- A recently verified MINE booth is already guarded by AssumedBoothUntil.
+    local now = os.clock()
+    if State.LastBooth and State.LastBooth.Status == "MINE"
+        and now < (tonumber(State.AssumedBoothUntil) or 0)
+    then
+        return true
+    end
+
+    local owned = hasOwnBooth(false)
     if owned then
         return true
     end
 
+    -- Only the recovery/claim path needs a forced fresh booth snapshot.
     return claimBestFreeBooth()
 end
 
@@ -1737,12 +1748,13 @@ local function getAllListings(force, includePendingRemoves)
         local ownerId = boothData.Owner
         local pd = ownerId and data.Players[ownerId]
         if type(pd) == "table" and type(pd.Listings) == "table" and type(pd.Items) == "table" then
+            -- V17.5: resolve the owner once per booth/player, not once per listing.
+            local ownerPlayer = getPlayerById(ownerId)
             for listingUUID, listing in pairs(pd.Listings) do
                 listingUUID = tostring(listingUUID)
 
                 local item = pd.Items[listing.ItemId]
                 if item then
-                    local ownerPlayer = getPlayerById(ownerId)
                     table.insert(out, {
                         BoothId = tostring(boothId),
                         OwnerId = ownerId,
@@ -3688,14 +3700,19 @@ end
 
 local function autoList(scan)
     if CFG.Seller.PreviewOnly or not CFG.Seller.AutoList then return end
+
+    scan = scan or buildCandidates()
+    reportNoListingCandidates(scan)
+    -- V17.5: no candidate means there is nothing to list, so do not perform
+    -- any booth ownership/network check on this tick.
+    if #scan.Candidates == 0 then return end
+
     local boothReady = ensureBoothForListing()
     if not boothReady then
         log("AutoList blocked", "no booth")
         return
     end
 
-    scan = scan or buildCandidates()
-    reportNoListingCandidates(scan)
     local i = 1
     while i <= #scan.Candidates do
         local c = scan.Candidates[i]
@@ -9310,7 +9327,10 @@ task.spawn(function()
         if CFG.Webhook.Enabled and CFG.Webhook.PetSold and now - (State.LastSoldCheckAt or 0) >= 5 then
             State.LastSoldCheckAt = now
             local ok, err = pcall(function()
-                State.TrackSoldListings(getMyListings(true))
+                -- V17.5: AddToHistory is the primary sale signal. The fallback
+                -- detector can safely share the normal listing cache instead of
+                -- forcing a second full booth fetch every 5 seconds.
+                State.TrackSoldListings(getMyListings(false))
             end)
             if not ok then log("Sold webhook check error", tostring(err)) end
         end
