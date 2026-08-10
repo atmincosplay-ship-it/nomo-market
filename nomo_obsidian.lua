@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V17.10 LUAU REGISTER PRESSURE GUARD"
+local VERSION = "V17.11 UNATTENDED ACTION GUARD"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -287,6 +287,8 @@ local State = {
     WebhookQueue = {},
     WebhookBusy = false,
     AutoSellerWorkerRunning = false,
+    AutoClaimWorkerRunning = false,
+    SniperBuyBusy = false,
     RemoteConfigRefreshRunning = false,
     BoothMutationOwner = "",
     BoothMutationStartedAt = 0,
@@ -319,6 +321,8 @@ function State.Stop(reason)
     State.WebhookBusy = false
     State.PendingSoldConfirmations = {}
     State.AutoSellerWorkerRunning = false
+    State.AutoClaimWorkerRunning = false
+    State.SniperBuyBusy = false
     State.RemoteConfigRefreshRunning = false
     State.BoothMutationOwner = ""
     State.BoothMutationStartedAt = 0
@@ -523,19 +527,29 @@ end
 State.Rejoin = function(reason)
     if State.RejoinRequested then return false end
     State.RejoinRequested = true
-    State.Running = false
     log("Rejoin requested", tostring(reason or "manual"), tostring(game.PlaceId) .. ":" .. tostring(game.JobId))
     task.spawn(function()
         task.wait(1)
-        local ok, err = pcall(function()
+        if State.IsCurrent and not State.IsCurrent() then
+            State.RejoinRequested = false
+            return
+        end
+
+        local okSame, errSame = pcall(function()
             State.TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
         end)
-        if not ok then
-            log("Same-server rejoin failed", tostring(err), "trying place")
-            pcall(function()
-                State.TeleportService:Teleport(game.PlaceId, LocalPlayer)
-            end)
-        end
+        if okSame then return end
+
+        log("Same-server rejoin failed", tostring(errSame), "trying place")
+        local okPlace, errPlace = pcall(function()
+            State.TeleportService:Teleport(game.PlaceId, LocalPlayer)
+        end)
+        if okPlace then return end
+
+        -- V17.11: a failed teleport request must not permanently stop Market.
+        -- The current script stays alive and the button can be used again.
+        State.RejoinRequested = false
+        log("Rejoin failed; Market remains running", tostring(errPlace))
     end)
     return true
 end
@@ -4650,10 +4664,17 @@ local function findFreshSniperMatch(wanted)
 end
 
 local function buyFirstMatch()
-    if CFG.Sniper.DryRun ~= false then
-        log("Buy blocked: Sniper DryRun true")
+    if State.SniperBuyBusy then
+        dlog("Buy deferred", "another sniper purchase is already in flight")
         return false
     end
+    State.SniperBuyBusy = true
+
+    local okRun, resultA, resultB = pcall(function()
+        if CFG.Sniper.DryRun ~= false then
+            log("Buy blocked: Sniper DryRun true")
+            return false
+        end
     local m = State.LastSniperMatches[1] or snipeDryRun()[1]
     if not m then log("No match to buy") return false end
     local firstListing = m.Listing or {}
@@ -4701,8 +4722,16 @@ local function buyFirstMatch()
         end
         return a, b
     end
-    log("Buy failed", tostring(a))
-    return false
+        log("Buy failed", tostring(a))
+        return false
+    end)
+
+    State.SniperBuyBusy = false
+    if not okRun then
+        log("Buy worker error", tostring(resultA))
+        return false
+    end
+    return resultA, resultB
 end
 
 
@@ -7742,7 +7771,7 @@ State.MaybeLowPlayerIndexHop = function(now)
     -- RemoveListing can yield, and hopping during those calls can leave listing
     -- state ambiguous or make the post-hop script race an old worker.
     local pendingList = type(State.PendingListUUIDs) == "table" and next(State.PendingListUUIDs) ~= nil
-    if State.AutoSellerWorkerRunning or State.AutoSmartRebuildRunning or State.BoothMutationBusy() or pendingList then
+    if State.AutoSellerWorkerRunning or State.AutoSmartRebuildRunning or State.SniperBuyBusy or State.BoothMutationBusy() or pendingList then
         if now - (tonumber(State.LastBoothMutationBusyLogAt) or 0) >= 30 then
             State.LastBoothMutationBusyLogAt = now
             dlog("Low player hop deferred", "booth mutation active", tostring(State.BoothMutationOwner or "seller"))
@@ -9526,21 +9555,36 @@ task.spawn(function()
     while State.Running do
         local now = os.clock()
 
-        if CFG.Booth.AutoClaim and now >= (tonumber(State.AutoClaimOwnedSleepUntil) or 0) and now - (State.LastAutoClaimAt or 0) >= (tonumber(CFG.Booth.ClaimInterval) or 10) then
+        if CFG.Booth.AutoClaim
+            and not State.AutoClaimWorkerRunning
+            and now >= (tonumber(State.AutoClaimOwnedSleepUntil) or 0)
+            and now - (State.LastAutoClaimAt or 0) >= (tonumber(CFG.Booth.ClaimInterval) or 10)
+        then
             State.LastAutoClaimAt = now
-            local ok, err = pcall(function()
-                if now - (tonumber(State.LastAutoClaimCheckLogAt) or 0) > 60 then
-                    State.LastAutoClaimCheckLogAt = now
-                    log("AutoClaim checking booth position")
+            State.AutoClaimWorkerRunning = true
+            task.spawn(function()
+                local owner = "autoclaim:" .. tostring(os.clock())
+                local locked, heldBy = State.BeginBoothMutation(owner)
+                if not locked then
+                    State.AutoClaimWorkerRunning = false
+                    dlog("AutoClaim deferred", "booth mutation busy", tostring(heldBy or "unknown"))
+                    return
                 end
-                claimBestFreeBooth()
-                if State.BoothStatusLabel then
-                    pcall(refreshBoothLog)
-                end
+                local ok, err = pcall(function()
+                    if State.IsCurrent and not State.IsCurrent() then return end
+                    if os.clock() - (tonumber(State.LastAutoClaimCheckLogAt) or 0) > 60 then
+                        State.LastAutoClaimCheckLogAt = os.clock()
+                        log("AutoClaim checking booth position")
+                    end
+                    claimBestFreeBooth()
+                    if State.BoothStatusLabel then
+                        pcall(refreshBoothLog)
+                    end
+                end)
+                State.EndBoothMutation(owner)
+                State.AutoClaimWorkerRunning = false
+                if not ok then log("AutoClaim error", tostring(err)) end
             end)
-            if not ok then
-                log("AutoClaim error", tostring(err))
-            end
         end
 
         if CFG.Seller.Enabled and CFG.Seller.AutoList
