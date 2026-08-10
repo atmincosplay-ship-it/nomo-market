@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V17.9 BOOTH MUTATION HOP GUARD"
+local VERSION = "V17.10 LUAU REGISTER PRESSURE GUARD"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -6418,13 +6418,13 @@ end)
 
 --// SELLER PAGE
 State.SetBootStatus("seller ui")
-local sellerPage = win:CreatePage("Seller")
-local sellerCtrl = sellerPage:AddSection("Seller Control")
-sellerCtrl.Frame.LayoutOrder = 30
-local filterRow = sellerPage:AddRow()
-filterRow.LayoutOrder = 10
-State.SellerFilterSec = sellerPage:AddSectionInRow(filterRow, "Filter Builder", 0.5)
-State.SellerFilterRangeSec = sellerPage:AddSectionInRow(filterRow, "Filter Limits", 0.5)
+State.SellerPage = win:CreatePage("Seller")
+State.SellerCtrl = State.SellerPage:AddSection("Seller Control")
+State.SellerCtrl.Frame.LayoutOrder = 30
+State.SellerFilterRow = State.SellerPage:AddRow()
+State.SellerFilterRow.LayoutOrder = 10
+State.SellerFilterSec = State.SellerPage:AddSectionInRow(State.SellerFilterRow, "Filter Builder", 0.5)
+State.SellerFilterRangeSec = State.SellerPage:AddSectionInRow(State.SellerFilterRow, "Filter Limits", 0.5)
 
 State.SellerCompactRow = function(section, height)
     local row = make("Frame", {
@@ -6500,7 +6500,7 @@ State.SellerCompactButton = function(row, text, cb, style)
     return btn
 end
 
-State.SellerToggleRow = State.SellerCompactRow(sellerCtrl, 30)
+State.SellerToggleRow = State.SellerCompactRow(State.SellerCtrl, 30)
 State.SellerCompactToggle(State.SellerToggleRow, "Auto List", CFG.Seller.AutoList, function(v)
     CFG.Seller.AutoList = v
     CFG.Seller.PreviewOnly = not v
@@ -6515,7 +6515,7 @@ State.SellerCompactToggle(State.SellerToggleRow, "Preview Only", CFG.Seller.Prev
     log("PreviewOnly", tostring(v))
 end)
 
-State.SellerActionRow = State.SellerCompactRow(sellerCtrl, 32)
+State.SellerActionRow = State.SellerCompactRow(State.SellerCtrl, 32)
 State.SellerCompactButton(State.SellerActionRow, "LIST UNTIL BOOTH FULL", function()
     CFG.Seller.BoothCap = 50
     CFG.Seller.ListOnceMax = 50
@@ -6544,23 +6544,20 @@ State.SellerCompactButton(State.SellerActionRow, "RELOAD CONFIG", function()
     end)
 end, "outline")
 
-local sellerLog
 
 State.SellerFilterSec:AddDropdown("Listing Weight Mode", {"Base", "Visual"}, CFG.Seller.WeightMode or "Base", function(v)
     CFG.Seller.WeightMode = tostring(v or "Base")
     log("ListingWeightMode", CFG.Seller.WeightMode)
 end)
 
-local petInput = State.SellerFilterSec:AddSearchDropdown("Pet", State.PetList or {}, "Ankylosaurus")
-State.PetNameInput = petInput
-local priceInput = State.SellerFilterSec:AddInput("Price", "111")
-local mutationInput = State.SellerFilterSec:AddSearchDropdown("Mutation", State.MutationList or {"Any", "Normal", "Mutated Only"}, "Any")
-State.MutationInput = mutationInput
-local minKgInput = State.SellerFilterRangeSec:AddInput("Min Base KG", "0")
-local maxKgInput = State.SellerFilterRangeSec:AddInput("Max Base KG", "3")
-local minAgeInput = State.SellerFilterRangeSec:AddInput("Min Age", "1")
-local maxAgeInput = State.SellerFilterRangeSec:AddInput("Max Age", "100")
-local variantInput = { Get = function() return "Any" end } -- hatch type is part of Pet name, e.g. GIANT Barn Owl
+State.PetNameInput = State.SellerFilterSec:AddSearchDropdown("Pet", State.PetList or {}, "Ankylosaurus")
+State.SellerPriceInput = State.SellerFilterSec:AddInput("Price", "111")
+State.MutationInput = State.SellerFilterSec:AddSearchDropdown("Mutation", State.MutationList or {"Any", "Normal", "Mutated Only"}, "Any")
+State.SellerMinKgInput = State.SellerFilterRangeSec:AddInput("Min Base KG", "0")
+State.SellerMaxKgInput = State.SellerFilterRangeSec:AddInput("Max Base KG", "3")
+State.SellerMinAgeInput = State.SellerFilterRangeSec:AddInput("Min Age", "1")
+State.SellerMaxAgeInput = State.SellerFilterRangeSec:AddInput("Max Age", "100")
+State.SellerVariantInput = { Get = function() return "Any" end } -- hatch type is part of Pet name, e.g. GIANT Barn Owl
 State.SellerMaxListedInput = State.SellerFilterRangeSec:AddInput("Per Filter Cap", "5")
 State.SellerFilterRangeSec:AddButton("Manage Filters", function()
     if State.OpenFilterManager then
@@ -6866,9 +6863,9 @@ State.OpenFilterManager = function()
     end
 end
 
-State.SellerFilterLogSec = sellerPage:AddSection("Active Filters / Candidates")
+State.SellerFilterLogSec = State.SellerPage:AddSection("Active Filters / Candidates")
 State.SellerFilterLogSec.Frame.LayoutOrder = 20
-sellerLog = State.SellerFilterLogSec:AddLog(125)
+State.SellerLog = State.SellerFilterLogSec:AddLog(125)
 
 State.DiagnosePetFilter = function(petName)
     petName = tostring(petName or "")
@@ -7026,20 +7023,20 @@ refreshSellerLog = function(showCandidates)
         end
     end
 
-    addLines(sellerLog, lines)
+    addLines(State.SellerLog, lines)
 end
 
 State.SellerFilterSec:AddButton("+ Add Filter", function()
     addFilter(
-        petInput:Get(),
-        priceInput:Get(),
-        minKgInput:Get(),
-        maxKgInput:Get(),
-        minAgeInput:Get(),
-        maxAgeInput:Get(),
-        mutationInput:Get(),
+        State.PetNameInput:Get(),
+        State.SellerPriceInput:Get(),
+        State.SellerMinKgInput:Get(),
+        State.SellerMaxKgInput:Get(),
+        State.SellerMinAgeInput:Get(),
+        State.SellerMaxAgeInput:Get(),
+        State.MutationInput:Get(),
         State.SellerMaxListedInput:Get(),
-        variantInput:Get()
+        State.SellerVariantInput:Get()
     )
     refreshSellerLog(true)
 end)
@@ -7067,7 +7064,7 @@ State.ListingRow = State.ListingsPage:AddRow()
 State.MyListingSec = State.ListingsPage:AddSectionInRow(State.ListingRow, "My Listings", 0.55)
 State.AllListingSec = State.ListingsPage:AddSectionInRow(State.ListingRow, "Price Compare", 0.45)
 
-local myListingList = make("ScrollingFrame", {
+State.MyListingList = make("ScrollingFrame", {
     Size = UDim2.new(1, 0, 0, 156),
     BackgroundColor3 = T.BG,
     BorderSizePixel = 0,
@@ -7076,12 +7073,12 @@ local myListingList = make("ScrollingFrame", {
     CanvasSize = UDim2.new(0, 0, 0, 0),
     AutomaticCanvasSize = Enum.AutomaticSize.Y,
 }, State.MyListingSec.Frame)
-corner(myListingList, 8); stroke(myListingList); pad(myListingList, 6, 6, 6, 6); vlist(myListingList, 4)
+corner(State.MyListingList, 8); stroke(State.MyListingList); pad(State.MyListingList, 6, 6, 6, 6); vlist(State.MyListingList, 4)
 
 State.MarketLog = State.AllListingSec:AddLog(156)
 
 function State.ClearListingRows()
-    for _, child in ipairs(myListingList:GetChildren()) do
+    for _, child in ipairs(State.MyListingList:GetChildren()) do
         if child:IsA("Frame") or child:IsA("TextLabel") then
             child:Destroy()
         end
@@ -7093,7 +7090,7 @@ function State.MakeListingRow(i, l)
         Size = UDim2.new(1, -4, 0, 34),
         BackgroundColor3 = T.Card2,
         BorderSizePixel = 0,
-    }, myListingList)
+    }, State.MyListingList)
     corner(row, 7)
 
     local xBtn = make("TextButton", {
@@ -7152,7 +7149,7 @@ function refreshMyListingsLog()
         Font = Enum.Font.GothamBold,
         TextSize = 12,
         TextXAlignment = Enum.TextXAlignment.Left,
-    }, myListingList)
+    }, State.MyListingList)
 
     for i, l in ipairs(my) do
         if i > 50 then
@@ -7164,7 +7161,7 @@ function refreshMyListingsLog()
                 Font = Enum.Font.Gotham,
                 TextSize = 11,
                 TextXAlignment = Enum.TextXAlignment.Left,
-            }, myListingList)
+            }, State.MyListingList)
             break
         end
         State.MakeListingRow(i, l)
