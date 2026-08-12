@@ -4,7 +4,7 @@
 --// Seller focused. Live market automation by default.
 --//====================================================--
 
-local VERSION = "V17.12 TELEPORT TRUTH GUARD"
+local VERSION = "V17.13 MARKET SAFETY HOLES"
 print("[NOMO] Booting " .. VERSION)
 
 --//====================================================--
@@ -363,6 +363,7 @@ State.BoothMutationBusy = function()
     return tostring(State.BoothMutationOwner or "") ~= ""
 end
 
+
 --//====================================================--
 --// Services/modules/remotes
 --//====================================================--
@@ -571,6 +572,27 @@ end
 
 local function dlog(...)
     if CFG.Debug then log("[DEBUG]", ...) end
+end
+
+-- V17.13: every UI/manual booth mutation goes through the same owner lock as
+-- AutoSeller/Smart Rebuild. Defined after log() so diagnostics stay in the UI log.
+State.RunBoothMutation = function(owner, callback)
+    if type(callback) ~= "function" then return false, "missing callback" end
+    owner = tostring(owner or ("manual:" .. tostring(os.clock())))
+    local locked, heldBy = State.BeginBoothMutation(owner)
+    if not locked then
+        log("Booth mutation deferred", tostring(owner), "busy", tostring(heldBy or "unknown"))
+        return false, "booth mutation busy"
+    end
+    local results = table.pack(pcall(callback))
+    State.EndBoothMutation(owner)
+    local ok = table.remove(results, 1)
+    if not ok then
+        local err = results[1]
+        log("Booth mutation error", tostring(owner), tostring(err))
+        return false, err
+    end
+    return true, table.unpack(results, 1, results.n - 1)
 end
 
 local function trim(s)
@@ -890,6 +912,10 @@ end
 
 State.GetRemoteConfigCachePath = function()
     return joinConfigPath(getConfigFolder(), "remote_config_cache.json")
+end
+
+State.GetRemoteConfigFetchLeasePath = function()
+    return joinConfigPath(getConfigFolder(), "remote_config_fetch_lease.json")
 end
 
 State.GetFindSellerLandingPath = function()
@@ -2268,6 +2294,111 @@ local function getInlineSharedConfig()
     return nil
 end
 
+-- V17.13: best-effort cross-clone fetch lease for the shared Workspace.
+-- saveJson verifies exact bytes after writing, so simultaneous claim attempts
+-- naturally leave one verified owner. The lease expires by itself; peers first
+-- re-read the fresh shared cache, so no explicit release race is needed.
+local function remoteFetchLeaseOwner()
+    return tostring((LocalPlayer and LocalPlayer.UserId) or "0") .. ":" .. tostring(game.JobId or "")
+end
+
+local function readRemoteFetchLease()
+    if not State.GetRemoteConfigFetchLeasePath then return nil end
+    local data = decodeJsonFile(State.GetRemoteConfigFetchLeasePath())
+    return type(data) == "table" and data or nil
+end
+
+local function tryAcquireRemoteFetchLease(url)
+    if type(writefile) ~= "function" or type(readfile) ~= "function" or not State.GetRemoteConfigFetchLeasePath then
+        return true, "no-file-lock", 0
+    end
+
+    local path = State.GetRemoteConfigFetchLeasePath()
+    local owner = remoteFetchLeaseOwner()
+    local nowUnix = os.time()
+    local current = readRemoteFetchLease()
+    local currentOwner = tostring(current and current.Owner or "")
+    local expiresAt = tonumber(current and current.ExpiresAt) or 0
+    if currentOwner ~= "" and currentOwner ~= owner and expiresAt > nowUnix then
+        return false, currentOwner, math.max(1, expiresAt - nowUnix)
+    end
+
+    local leaseSeconds = 20
+    local claimed = saveJson(path, {
+        Owner = owner,
+        URL = tostring(url or ""),
+        ClaimedAt = nowUnix,
+        ExpiresAt = nowUnix + leaseSeconds,
+        JobId = tostring(game.JobId or ""),
+        UserId = tonumber(LocalPlayer and LocalPlayer.UserId) or 0,
+    }, false)
+    if not claimed then
+        return false, "claim-race", 2
+    end
+
+    task.wait(0.15 + ((tonumber(LocalPlayer and LocalPlayer.UserId) or 0) % 4) * 0.03)
+    local verify = readRemoteFetchLease()
+    if type(verify) == "table"
+        and tostring(verify.Owner or "") == owner
+        and tonumber(verify.ExpiresAt or 0) > os.time()
+    then
+        return true, owner, leaseSeconds
+    end
+    return false, tostring(verify and verify.Owner or "claim-lost"), 2
+end
+
+local function adoptFreshRemoteDiskCache(url, refreshSeconds)
+    if not State.GetRemoteConfigCachePath then return nil end
+    local disk = readJson(State.GetRemoteConfigCachePath())
+    local fetchedAt = tonumber(disk and disk.FetchedAt)
+    local cacheData = disk and disk.Data
+    local cacheURL = tostring(disk and disk.URL or "")
+    if fetchedAt and type(cacheData) == "table" and cacheURL == tostring(url or "")
+        and (os.time() - fetchedAt) < (tonumber(refreshSeconds) or 21600)
+    then
+        State.RemoteConfigCache = cacheData
+        State.RemoteConfigCacheURL = cacheURL
+        State.RemoteConfigCacheAt = os.clock()
+        State.RemoteConfigCacheUnix = fetchedAt
+        State.LastRemoteConfigUnix = fetchedAt
+        State.RemoteConfigSignature = tostring(disk.Signature or State.RemoteConfigSignature or "")
+        State.RemoteConfigUpdatedAt = tostring(disk.UpdatedAt or State.RemoteConfigUpdatedAt or "")
+        State.RemoteConfigBackoffUntil = math.max(tonumber(State.RemoteConfigBackoffUntil) or 0, tonumber(disk.BackoffUntil) or 0)
+        return cacheData
+    end
+    return nil
+end
+
+local function waitForPeerRemoteRefresh(url, refreshSeconds, maxWait)
+    local deadline = os.clock() + math.max(1, tonumber(maxWait) or 12)
+    while State.Running and os.clock() < deadline do
+        task.wait(0.5)
+        local cached = adoptFreshRemoteDiskCache(url, refreshSeconds)
+        if type(cached) == "table" then
+            State.SharedConfigSource = "peer-disk-cache"
+            State.RemoteConfigChanged = false
+            return cached, "peer-disk-cache"
+        end
+        if State.GetRemoteConfigCachePath then
+            local disk = readJson(State.GetRemoteConfigCachePath())
+            local backoffUntil = tonumber(disk and disk.BackoffUntil) or 0
+            if backoffUntil > os.time() then
+                State.RemoteConfigBackoffUntil = math.max(tonumber(State.RemoteConfigBackoffUntil) or 0, backoffUntil)
+                local stale = disk and disk.Data
+                if type(stale) == "table" and tostring(disk.URL or "") == tostring(url or "") then
+                    State.RemoteConfigCache = stale
+                    State.RemoteConfigCacheURL = tostring(url or "")
+                    State.SharedConfigSource = "peer-backoff-cache"
+                    State.RemoteConfigChanged = false
+                    return stale, "peer-backoff-cache"
+                end
+                return nil, "peer remote backoff"
+            end
+        end
+    end
+    return nil, "peer refresh timeout"
+end
+
 local function getSharedConfig(forceFresh, ignoreBackoff)
     local inline = getInlineSharedConfig()
     if type(inline) == "table" then
@@ -2343,6 +2474,24 @@ local function getSharedConfig(forceFresh, ignoreBackoff)
             return State.RemoteConfigCache, "retry-cache", false
         end
         return nil, "remote retry cooldown", false
+    end
+
+    -- V17.13: scheduled/startup callers coordinate through a short shared lease.
+    -- Manual reload (forceFresh + ignoreBackoff) intentionally bypasses the lease.
+    if forceFresh ~= true and ignoreBackoff ~= true then
+        local leaseOk, leaseOwner, leaseWait = tryAcquireRemoteFetchLease(url)
+        if not leaseOk then
+            local peerData, peerSource = waitForPeerRemoteRefresh(url, refreshSeconds, math.min(math.max(tonumber(leaseWait) or 2, 2), 20))
+            if type(peerData) == "table" then
+                return peerData, peerSource, false
+            end
+            -- One retry after the observed lease expires. If we still lose, fail
+            -- closed to cached/local config instead of creating a fetch burst.
+            leaseOk, leaseOwner, leaseWait = tryAcquireRemoteFetchLease(url)
+            if not leaseOk then
+                return nil, "remote fetch lease busy: " .. tostring(leaseOwner or "peer"), false
+            end
+        end
     end
 
     State.LastRemoteConfigAttemptAt = now
@@ -2511,6 +2660,30 @@ local function applyRemoteConfig(data)
         RemoteConfigRetrySeconds = CFG.Seller.RemoteConfigRetrySeconds,
         RemoteConfigRateLimitBackoffSeconds = CFG.Seller.RemoteConfigRateLimitBackoffSeconds,
     }
+    -- V17.13: remote config may control filters/automation choices, but it cannot
+    -- weaken local listing integrity, request pacing, or booth-cap safety.
+    local protectedSellerSafety = {
+        BoothCap = CFG.Seller.BoothCap,
+        ScanInterval = CFG.Seller.ScanInterval,
+        ListCooldown = CFG.Seller.ListCooldown,
+        VerifyAfterList = CFG.Seller.VerifyAfterList,
+        VerifyAfterListDelay = CFG.Seller.VerifyAfterListDelay,
+        VerifyAfterListAttempts = CFG.Seller.VerifyAfterListAttempts,
+        PendingListCooldown = CFG.Seller.PendingListCooldown,
+        RequireExactPetName = CFG.Seller.RequireExactPetName,
+        StrictListGuard = CFG.Seller.StrictListGuard,
+        RequireBoothBeforeList = CFG.Seller.RequireBoothBeforeList,
+        AdaptiveCreateWait = CFG.Seller.AdaptiveCreateWait,
+        CreateWaitMin = CFG.Seller.CreateWaitMin,
+        CreateWaitMax = CFG.Seller.CreateWaitMax,
+        CreateWaitBackoff = CFG.Seller.CreateWaitBackoff,
+    }
+    local protectedListingSafety = {
+        RemoveCooldown = CFG.Listings.RemoveCooldown,
+        RemoveAllMax = CFG.Listings.RemoveAllMax,
+        VerifyRemoveDelay = CFG.Listings.VerifyRemoveDelay,
+        VerifyRemoveAttempts = CFG.Listings.VerifyRemoveAttempts,
+    }
 
     if type(data.Seller) == "table" then
         shallowMerge(CFG.Seller, data.Seller)
@@ -2537,6 +2710,18 @@ local function applyRemoteConfig(data)
     CFG.Seller.RemoteConfigRetrySeconds = protectedRemote.RemoteConfigRetrySeconds
     CFG.Seller.RemoteConfigRateLimitBackoffSeconds = protectedRemote.RemoteConfigRateLimitBackoffSeconds
     CFG.Seller.RemoteConfigRefreshSeconds = 21600
+    for key, value in pairs(protectedSellerSafety) do
+        CFG.Seller[key] = value
+    end
+    for key, value in pairs(protectedListingSafety) do
+        CFG.Listings[key] = value
+    end
+    CFG.Seller.BoothCap = tonumber(CFG.Seller.BoothCap) or 50
+    CFG.Seller.MaxAutoListSession = CFG.Seller.BoothCap
+    CFG.Seller.ScanInterval = math.max(0.75, tonumber(CFG.Seller.ScanInterval) or 1)
+    CFG.Seller.CreateWaitMin = math.max(5, tonumber(CFG.Seller.CreateWaitMin) or 5)
+    CFG.Seller.CreateWaitMax = math.max(CFG.Seller.CreateWaitMin, tonumber(CFG.Seller.CreateWaitMax) or 10)
+    CFG.Seller.CreateWaitBackoff = math.clamp(tonumber(CFG.Seller.CreateWaitBackoff) or 5, CFG.Seller.CreateWaitMin, CFG.Seller.CreateWaitMax)
 
     local filters = data.Filters or data.listing or data.Listing or data.listings
     if type(filters) == "table" then
@@ -3874,18 +4059,20 @@ local function listPet(pet, price, boothReady, f)
     end
     if ok and result ~= false then
         State.InvalidateListingCache()
+        -- Count the server request for pacing immediately, but only count a
+        -- completed listing/session slot after booth data verifies it.
         State.LastListAt = os.clock()
-        State.ListedThisSession = (State.ListedThisSession or 0) + 1
-        table.insert(State.ListTimes, os.clock())
+        table.insert(State.ListTimes, State.LastListAt)
 
         local verified, verifyInfo = verifyListingAfterList(pet, price, f)
         if verified then
+            State.ListedThisSession = (State.ListedThisSession or 0) + 1
             registerCreateSuccess()
             log("Listed OK + verified", pet.Name, "price", tostring(price), "session", tostring(State.ListedThisSession))
-            return true
+            return true, "verified"
         else
             log("Listed sent but NOT verified", pet.Name, "price", tostring(price), tostring(verifyInfo))
-            return true
+            return false, "not verified: " .. tostring(verifyInfo or "unknown")
         end
     end
 
@@ -4179,30 +4366,32 @@ end
 
 local function extractSniperWatchSource(data)
     if type(data) ~= "table" then
-        return nil, nil
+        return nil, nil, false
     end
 
-    if type(data.sniper) == "table" and next(data.sniper) ~= nil then
-        return data.sniper, "sniper"
+    -- V17.13: presence is authoritative even when the table is empty. This lets
+    -- remote/local `sniper = {}` mean CLEAR, rather than falling back to stale watches.
+    if type(data.sniper) == "table" then
+        return data.sniper, "sniper", true
     end
-    if type(data.Sniper) == "table" and next(data.Sniper) ~= nil and type(data.Sniper.Watchlist) ~= "table" then
-        return data.Sniper, "sniper"
-    end
-
-    if type(data.Watchlist) == "table" and next(data.Watchlist) ~= nil then
-        return data.Watchlist, "legacy-watchlist"
-    end
-    if type(data.watchlist) == "table" and next(data.watchlist) ~= nil then
-        return data.watchlist, "legacy-watchlist"
+    if type(data.Sniper) == "table" and type(data.Sniper.Watchlist) ~= "table" then
+        return data.Sniper, "sniper", true
     end
 
-    return nil, nil
+    if type(data.Watchlist) == "table" then
+        return data.Watchlist, "legacy-watchlist", true
+    end
+    if type(data.watchlist) == "table" then
+        return data.watchlist, "legacy-watchlist", true
+    end
+
+    return nil, nil, false
 end
 
 local function importSniperWatchlist(path, dataOverride, quiet)
     path = tostring(path or getSniperFilterPath())
     local data = type(dataOverride) == "table" and dataOverride or readJson(path)
-    local source, usedId = extractSniperWatchSource(data)
+    local source, usedId, authoritative = extractSniperWatchSource(data)
     if type(source) ~= "table" then
         if not quiet then
             log("Sniper config import failed", "no sniper entries", path)
@@ -4269,39 +4458,44 @@ local function importSniperWatchlist(path, dataOverride, quiet)
         end
     end
 
-    if imported <= 0 then
-        log("Sniper config import empty", "id", tostring(usedId), "skipped", tostring(skipped), path)
-        return false, 0
+    -- An explicit source replaces the old watchlist even when zero valid entries
+    -- remain. Fail-closed is safer than silently retaining an old buy target.
+    if authoritative then
+        CFG.Sniper.Watchlist = nextWatch
+        if imported <= 0 then
+            log("Sniper config cleared", "id", tostring(usedId), "skipped", tostring(skipped), path)
+        else
+            log("Sniper config imported", tostring(imported), "watch(es)", "skipped", tostring(skipped), "id", tostring(usedId), path)
+        end
+        return true, imported, true
     end
 
-    CFG.Sniper.Watchlist = nextWatch
-    log("Sniper config imported", tostring(imported), "watch(es)", "skipped", tostring(skipped), "id", tostring(usedId), path)
-    return true, imported
+    return false, 0, false
 end
 
 State.ReloadSniperConfig = function()
     local sharedData, sharedSource = getSharedConfig(false, false)
     if type(sharedData) == "table" then
-        local ok, count = importSniperWatchlist("shared:" .. tostring(sharedSource or "config"), sharedData, true)
-        if ok and (tonumber(count) or 0) > 0 then
-            log("Shared sniper config loaded", tostring(count) .. " watch(es)", tostring(sharedSource or "config"))
+        local ok, count, authoritative = importSniperWatchlist("shared:" .. tostring(sharedSource or "config"), sharedData, true)
+        if ok and authoritative then
+            log("Shared sniper config loaded", tostring(count or 0) .. " watch(es)", tostring(sharedSource or "config"))
             return true
         end
     end
 
     local path = getSniperFilterPath()
-    local ok, count = importSniperWatchlist(path)
-    if ok and (tonumber(count) or 0) > 0 then
+    local ok, count, authoritative = importSniperWatchlist(path)
+    if ok and authoritative then
         return true
     end
 
     local fallback = "Nomo/sniper_filters.json"
     if path ~= fallback then
-        local fbOk, fbCount = importSniperWatchlist(fallback)
-        if fbOk and (tonumber(fbCount) or 0) > 0 then
+        local fbOk, fbCount, fbAuthoritative = importSniperWatchlist(fallback)
+        if fbOk and fbAuthoritative then
             CFG.Seller.ListingFilterPath = "Nomo"
             State.PendingRuntimeDefaultsSave = true
-            log("Sniper config fallback", fallback, tostring(fbCount) .. " watch(es)")
+            log("Sniper config fallback", fallback, tostring(fbCount or 0) .. " watch(es)")
             return true
         end
     end
@@ -4334,9 +4528,9 @@ State.ReloadRemoteConfig = function(forceFresh, ignoreBackoff)
         State.LastFilterPath = getFilterPath()
         State.LastFilterLoadAt = os.clock()
     end
-    local sniperOk, sniperCount = importSniperWatchlist("shared:" .. tostring(State.SharedConfigSource or "config"), sharedData, true)
-    if sniperOk and (tonumber(sniperCount) or 0) > 0 then
-        log("Shared sniper config loaded", tostring(sniperCount) .. " watch(es)", tostring(State.SharedConfigSource or "config"))
+    local sniperOk, sniperCount, sniperAuthoritative = importSniperWatchlist("shared:" .. tostring(State.SharedConfigSource or "config"), sharedData, true)
+    if sniperOk and sniperAuthoritative then
+        log("Shared sniper config loaded", tostring(sniperCount or 0) .. " watch(es)", tostring(State.SharedConfigSource or "config"))
     end
 
     State.LastSellerScanAt = 0
@@ -6565,15 +6759,19 @@ State.SellerCompactButton(State.SellerActionRow, "LIST UNTIL BOOTH FULL", functi
     CFG.Seller.ListOnceMax = 50
     CFG.Seller.MaxAutoListSession = 50
     task.spawn(function()
-        listOnce(50)
+        State.RunBoothMutation("manual-list-full:" .. tostring(os.clock()), function()
+            listOnce(50)
+        end)
     end)
 end)
 
 State.SellerCompactButton(State.SellerActionRow, "REMOVE ALL LISTINGS", function()
     task.spawn(function()
-        removeAllMyListings(CFG.Listings.RemoveAllMax or 50)
-        task.wait(0.6)
-        refreshSellerLog(true)
+        State.RunBoothMutation("manual-remove-all:" .. tostring(os.clock()), function()
+            removeAllMyListings(CFG.Listings.RemoveAllMax or 50)
+            task.wait(0.6)
+            refreshSellerLog(true)
+        end)
     end)
 end, "outline")
 
@@ -7171,12 +7369,17 @@ function State.MakeListingRow(i, l)
 
     xBtn.Activated:Connect(function()
         xBtn.Text = "..."
-        local ok = removeListingUUID(l.ListingUUID)
-        task.wait(0.35)
-        refreshMyListingsLog()
-        if not ok then
-            log("X remove failed", tostring(l.ListingUUID))
-        end
+        task.spawn(function()
+            local ran = State.RunBoothMutation("manual-remove-one:" .. tostring(l.ListingUUID), function()
+                local ok = removeListingUUID(l.ListingUUID)
+                task.wait(0.35)
+                refreshMyListingsLog()
+                if not ok then
+                    log("X remove failed", tostring(l.ListingUUID))
+                end
+            end)
+            if not ran and xBtn and xBtn.Parent then xBtn.Text = "X" end
+        end)
     end)
 end
 
@@ -7355,14 +7558,19 @@ State.OpenMyListingsManager = function()
         corner(delBtn, 6)
         delBtn.Activated:Connect(function()
             delBtn.Text = "..."
-            local ok = removeListingUUID(l.ListingUUID)
-            task.wait(0.35)
-            refreshMyListingsLog()
-            if not ok then
-                log("Popup remove failed", tostring(l.ListingUUID))
-            end
-            overlay:Destroy()
-            State.OpenMyListingsManager()
+            task.spawn(function()
+                local ran = State.RunBoothMutation("manual-popup-remove:" .. tostring(l.ListingUUID), function()
+                    local ok = removeListingUUID(l.ListingUUID)
+                    task.wait(0.35)
+                    refreshMyListingsLog()
+                    if not ok then
+                        log("Popup remove failed", tostring(l.ListingUUID))
+                    end
+                    overlay:Destroy()
+                    State.OpenMyListingsManager()
+                end)
+                if not ran and delBtn and delBtn.Parent then delBtn.Text = "X" end
+            end)
         end)
     end
 end
@@ -7499,9 +7707,11 @@ end)
 State.ListingRefreshSec:AddButton("Refresh", refreshMyListingsLog, "outline")
 State.ListingRemoveSec:AddButton("Remove All", function()
     task.spawn(function()
-        removeAllMyListings(CFG.Listings.RemoveAllMax or 50)
-        task.wait(0.6)
-        refreshMyListingsLog()
+        State.RunBoothMutation("listing-page-remove-all:" .. tostring(os.clock()), function()
+            removeAllMyListings(CFG.Listings.RemoveAllMax or 50)
+            task.wait(0.6)
+            refreshMyListingsLog()
+        end)
     end)
 end, "outline")
 State.ListingMarketSec:AddButton("Price Check", State.RefreshMarketSample, "outline")
@@ -9308,16 +9518,17 @@ local function listFruit(fruit, price, boothReady, f)
     if ok and result ~= false then
         State.InvalidateListingCache()
         State.LastListAt = os.clock()
-        State.ListedThisSession = (State.ListedThisSession or 0) + 1
-        table.insert(State.ListTimes, os.clock())
+        table.insert(State.ListTimes, State.LastListAt)
         local verified, verifyInfo = verifyFruitListingAfterList(fruit, price, f)
         if verified then
+            State.ListedThisSession = (State.ListedThisSession or 0) + 1
             registerCreateSuccess()
             log("Fruit listed OK + verified", fruit.Name, "price", tostring(price), "session", tostring(State.ListedThisSession))
+            return true, "verified"
         else
             log("Fruit list sent but NOT verified", fruit.Name, "price", tostring(price), tostring(verifyInfo))
+            return false, "not verified: " .. tostring(verifyInfo or "unknown")
         end
-        return true
     end
 
     if ok and result == false and (os.clock() - (tonumber(State.LastCreateWaitSignal) or 0)) < 1.5 then
